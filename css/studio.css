@@ -1,0 +1,2697 @@
+/**
+ * studio.css
+ * Flight Deck Widget Studio v1.2 - Professional Modern Graphical Design UI
+ */
+
+:root {
+  --studio-bg: #07090e;
+  --studio-panel-bg: #0d121c;
+  --studio-panel-border: #182232;
+  --studio-surface: #121926;
+  --studio-surface-hover: #1b263b;
+  --studio-input-bg: #0a0e17;
+  --studio-input-border: #233047;
+  
+  --accent-cyan: #00d8f6;
+  --accent-cyan-glow: rgba(0, 216, 246, 0.25);
+  --accent-blue: #3b82f6;
+  --accent-green: #22c55e;
+  --accent-amber: #f59e0b;
+  --accent-red: #ef4444;
+
+  --text-white: #f8fafc;
+  --text-label: #94a3b8;
+  --text-dim: #64748b;
+  --font-mono: 'Chakra Petch', 'JetBrains Mono', monospace;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Widget-content color contract — mirrors flight-deck-pwa/css/main.css's
+ * [data-theme] tokens exactly (same names, same values), scoped to just the
+ * widget preview surfaces (StudioCanvas's canvas-widget-grid, StudioDeviceView's
+ * device-screen) via .fd-widget-preview-scope. A widget author can reference
+ * these directly, e.g. style.typography.color: "var(--text-white, #ffffff)" —
+ * that pattern already resolves correctly in the real PWA (main.css redefines
+ * these per theme there) but previously had nothing to resolve against inside
+ * Studio, since studio.css's own --text-white/--accent-green/etc above are a
+ * SEPARATE token set for Studio's own chrome (deliberately dark-only, never
+ * themed) that only coincidentally shares some names. Without this block, a
+ * var()-authored widget color silently never reacted to the live theme-preview
+ * toggle — it just inherited whichever literal fallback the author wrote.
+ * The live theme-preview toggle (StudioCanvas's sun/moon button) sets
+ * data-theme on the scoped container to match StudioState.previewTheme.
+ */
+.fd-widget-preview-scope {
+  --bg-main: #0a0c10;
+  --card-bg: #141721;
+  --card-border: #222736;
+  --well-bg: #0b0d13;
+  --well-border: #1f2533;
+  --accent-green: #00ff3c;
+  --accent-cyan: #00d8f6;
+  --accent-amber: #ffaa00;
+  --accent-error: #ff3344;
+  --text-white: #ffffff;
+  --text-dim: #737c94;
+  --text-label: #8c96ac;
+  --btn-bg: #1a1e2b;
+  --btn-border: #2c3345;
+  --btn-active: #2b3347;
+}
+.fd-widget-preview-scope[data-theme="light"] {
+  --bg-main: #e7ebf2;
+  --card-bg: #f8fafc;
+  --card-border: #cdd5e2;
+  --well-bg: #edf2f7;
+  --well-border: #cbd5e1;
+  --accent-green: #008726;
+  --accent-cyan: #007a99;
+  --accent-amber: #b45309;
+  --accent-error: #dc2626;
+  --text-white: #111827;
+  --text-dim: #64748b;
+  --text-label: #475569;
+  --btn-bg: #e2e8f0;
+  --btn-border: #94a3b8;
+  --btn-active: #cbd5e1;
+}
+
+/* Reset & Base */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body, html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--studio-bg);
+  color: var(--text-white);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Studio Root Layout */
+.flightdeck-studio-root {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--studio-bg);
+}
+
+/* Top Navigation Bar */
+.studio-top-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 16px;
+  background-color: var(--studio-panel-bg);
+  border-bottom: 1px solid var(--studio-panel-border);
+  z-index: 40;
+}
+
+.studio-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-glyph {
+  color: var(--accent-cyan);
+  display: flex;
+  align-items: center;
+  filter: drop-shadow(0 0 8px var(--accent-cyan-glow));
+}
+
+.brand-title-wrap {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.brand-heading {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--text-white);
+}
+
+.brand-subheading {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--accent-cyan);
+}
+
+.spec-version-badge {
+  padding: 2px 6px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent-cyan);
+  background-color: rgba(0, 216, 246, 0.1);
+  border: 1px solid rgba(0, 216, 246, 0.3);
+  border-radius: 4px;
+}
+
+.studio-nav-center {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.nav-viewport-toggle-group {
+  display: flex;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+  padding: 2px;
+  gap: 2px;
+}
+
+.nav-vp-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-label);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.nav-vp-btn:hover {
+  color: var(--text-white);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.nav-vp-btn.active {
+  background-color: var(--accent-cyan);
+  color: #000;
+  box-shadow: 0 0 10px rgba(0, 216, 246, 0.3);
+}
+
+.widget-quick-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 20px;
+}
+
+.active-widget-icon {
+  font-size: 12px;
+  color: var(--accent-amber);
+}
+
+.active-widget-name {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-white);
+}
+
+.active-widget-rev {
+  font-size: 11px;
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+}
+
+.studio-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nav-help-item {
+  font-size: 11px;
+  color: var(--text-label);
+}
+
+.nav-help-item strong {
+  color: var(--text-white);
+}
+
+/* Main Action Menu Bar (spans full width, under header) */
+.studio-menubar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 16px;
+  background-color: var(--studio-panel-bg);
+  border-bottom: 1px solid var(--studio-panel-border);
+  z-index: 39;
+  gap: 8px;
+}
+
+.topbar-actions-left, .topbar-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Main 3-Column Studio Workspace Layout */
+.studio-main-layout {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Left Sidebar */
+.studio-sidebar-left {
+  width: 290px;
+  min-width: 290px;
+  max-width: 290px;
+  height: 100%;
+  min-height: 0;
+  background-color: var(--studio-panel-bg);
+  border-right: 1px solid var(--studio-panel-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 20;
+}
+
+.sidebar-tab-header {
+  display: flex;
+  background-color: var(--studio-surface);
+  border-bottom: 1px solid var(--studio-panel-border);
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-label);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 10px;
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+}
+
+.tab-btn:hover {
+  color: var(--text-white);
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.tab-btn.active {
+  color: var(--accent-cyan);
+  background-color: rgba(0, 216, 246, 0.05);
+  border-bottom-color: var(--accent-cyan);
+}
+
+.sidebar-tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidebar-tab-content::-webkit-scrollbar {
+  width: 5px;
+}
+.sidebar-tab-content::-webkit-scrollbar-thumb {
+  background: var(--studio-panel-border);
+  border-radius: 4px;
+}
+
+/* Section Header in Panels */
+.panel-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--studio-panel-border);
+}
+
+.panel-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-label);
+}
+
+.panel-mini-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  background-color: var(--studio-surface);
+  color: var(--accent-cyan);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.panel-mini-btn:hover {
+  background-color: var(--studio-surface-hover);
+  border-color: var(--accent-cyan);
+}
+
+.panel-full-btn {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background-color: var(--studio-surface);
+  color: var(--accent-cyan);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.panel-full-btn:hover {
+  background-color: var(--studio-surface-hover);
+  border-color: var(--accent-cyan);
+}
+
+/* Search Bar */
+.tree-search-wrap {
+  width: 100%;
+}
+
+.tree-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  background-color: var(--studio-input-bg);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  color: var(--text-white);
+  font-size: 12px;
+  outline: none;
+}
+
+.tree-search-input:focus {
+  border-color: var(--accent-cyan);
+}
+
+/* Layers & Tree */
+.layers-tree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layer-group-card {
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.layer-group-card.selected-group {
+  border-color: var(--accent-cyan);
+}
+
+.layer-group-card.dragging-group {
+  opacity: 0.4;
+}
+
+.layer-group-card.drop-target-above {
+  box-shadow: inset 0 2px 0 0 var(--accent-cyan);
+}
+
+.layer-group-card.drop-target-below {
+  box-shadow: inset 0 -2px 0 0 var(--accent-cyan);
+}
+
+/* Hidden-in-editor (Layers panel eye toggle) — Design canvas only; Device
+   View and export always show everything regardless. Dimmed, not hidden
+   outright, so the row stays a legible, clickable way to un-hide it. */
+.layer-group-card.editor-hidden,
+.tree-component-row.editor-hidden {
+  opacity: 0.45;
+}
+
+.layer-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--studio-panel-border);
+  cursor: pointer;
+}
+
+.group-drag-handle {
+  cursor: grab;
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.group-title-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-white);
+}
+
+.group-z-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  background-color: rgba(0, 216, 246, 0.1);
+  color: var(--accent-cyan);
+  border-radius: 3px;
+}
+
+.group-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-group-edit, .btn-group-del {
+  background: transparent;
+  border: none;
+  color: var(--text-label);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.btn-group-hide, .btn-group-edit, .btn-group-del {
+  background: transparent;
+  border: none;
+  color: var(--text-label);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.btn-group-hide:hover { color: var(--accent-cyan); }
+.btn-group-hide.active { color: var(--accent-amber); }
+.btn-group-edit:hover { color: var(--accent-cyan); }
+.btn-group-del:hover { color: var(--accent-red); }
+
+.group-children-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  gap: 3px;
+}
+
+.empty-group-note, .empty-tree-notice {
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  font-style: italic;
+}
+
+/* FDWS v1.18: shown atop a component's/widget-root's Appearance panel while
+   the canvas's Live Theme Preview is on the widget's non-base theme AND the
+   widget is in Manual theme mode — signals that Text/Border/Background Color
+   fields below are writing to style.themeOverride, not the base style. */
+.theme-override-banner {
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: color-mix(in srgb, var(--accent-cyan, #38bdf8) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan, #38bdf8) 40%, transparent);
+  color: var(--text-white, #f8fafc);
+}
+
+.tree-component-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background-color: var(--studio-panel-bg);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.tree-component-row:hover {
+  background-color: var(--studio-surface-hover);
+  border-color: #2b3952;
+}
+
+.tree-component-row.selected {
+  background-color: rgba(0, 216, 246, 0.08);
+  border-color: var(--accent-cyan);
+}
+
+.tree-comp-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.comp-type-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 4px;
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-radius: 3px;
+}
+
+.comp-name {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+
+.tree-validation-badge {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  color: #000;
+  cursor: help;
+}
+
+.tree-validation-badge.error { background-color: #ef4444; }
+.tree-validation-badge.warning { background-color: #f59e0b; }
+
+.tree-comp-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.z-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+  padding: 1px 4px;
+  background: rgba(0, 216, 246, 0.1);
+  border-radius: 3px;
+}
+
+.tree-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px;
+}
+
+.tree-action-btn:hover { color: var(--text-white); }
+.tree-action-btn.btn-del:hover { color: var(--accent-red); }
+.tree-action-btn.btn-hide:hover { color: var(--accent-cyan); }
+.tree-action-btn.btn-hide.active { color: var(--accent-amber); }
+
+/* Component Palette Tab */
+.palette-category-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent-cyan);
+  opacity: 0.85;
+  margin: 12px 0 6px;
+  text-transform: uppercase;
+}
+
+.palette-category-label:first-of-type { margin-top: 4px; }
+
+.palette-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.palette-item-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.palette-item-card:hover {
+  background-color: var(--studio-surface-hover);
+  border-color: var(--accent-cyan);
+  transform: translateX(2px);
+}
+
+.palette-icon-box {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background-color: rgba(0, 216, 246, 0.08);
+  color: var(--accent-cyan);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.palette-item-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.palette-item-title {
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--text-white);
+}
+
+.palette-item-desc {
+  font-size: 10px;
+  color: var(--text-label);
+  line-height: 1.2;
+}
+
+/* State Tab */
+.state-vars-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.state-var-card {
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  position: relative;
+}
+
+.state-var-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.state-var-name {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--accent-cyan);
+}
+
+.state-var-type {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.state-var-body {
+  font-size: 11px;
+  color: var(--text-label);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.state-var-current strong {
+  color: var(--accent-green);
+  font-family: var(--font-mono);
+}
+
+.state-var-tag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  width: fit-content;
+}
+
+.state-var-tag.persist { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.state-var-tag.sync { background: rgba(0, 216, 246, 0.15); color: var(--accent-cyan); }
+
+.state-var-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+.btn-st-del {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.btn-st-del:hover { color: var(--accent-red); }
+
+/* Assets Tab */
+.assets-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.asset-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.asset-thumb-wrap {
+  width: 44px;
+  height: 44px;
+  background: #090d14;
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.asset-thumb-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.asset-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.asset-id {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asset-size {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.asset-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-copy-asset-id, .btn-del-asset {
+  background: transparent;
+  border: 1px solid var(--studio-input-border);
+  border-radius: 3px;
+  color: var(--text-label);
+  cursor: pointer;
+  padding: 4px;
+  font-size: 10px;
+}
+
+.btn-copy-asset-id:hover { color: var(--accent-cyan); border-color: var(--accent-cyan); }
+.btn-del-asset:hover { color: var(--accent-red); border-color: var(--accent-red); }
+
+/* Templates Tab */
+.templates-collapsible {
+  margin-bottom: 12px;
+}
+
+.templates-summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.templates-summary::-webkit-details-marker,
+.templates-summary::marker {
+  display: none;
+  content: '';
+}
+
+.summary-chevron {
+  color: var(--accent-cyan);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.templates-collapsible[open] .summary-chevron {
+  transform: rotate(90deg);
+}
+
+.templates-collapsible .templates-list {
+  margin-top: 10px;
+}
+
+.templates-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-card {
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.template-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-white);
+}
+
+.template-desc {
+  font-size: 11px;
+  color: var(--text-label);
+  line-height: 1.3;
+}
+
+.template-meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tmpl-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 3px;
+  color: var(--accent-cyan);
+}
+
+.btn-load-template {
+  margin-top: 6px;
+  padding: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  background-color: rgba(0, 216, 246, 0.1);
+  border: 1px solid rgba(0, 216, 246, 0.3);
+  color: var(--accent-cyan);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-load-template:hover {
+  background-color: var(--accent-cyan);
+  color: #000;
+}
+
+.saved-card-btns {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.btn-del-saved {
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.btn-del-saved:hover { color: var(--accent-red); border-color: var(--accent-red); }
+
+/* Center Viewport Area */
+.studio-viewport-area {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background-color: var(--studio-bg);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewport-pane {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.viewport-pane.hidden {
+  display: none !important;
+}
+
+/* Canvas Root & Controls */
+.studio-canvas-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.canvas-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 16px;
+  background-color: rgba(13, 18, 28, 0.9);
+  border-bottom: 1px solid var(--studio-panel-border);
+  z-index: 10;
+}
+
+.canvas-header-left, .canvas-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.canvas-header-divider {
+  width: 1px;
+  height: 18px;
+  background-color: var(--studio-panel-border);
+}
+
+.canvas-meta-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.meta-tag-label { margin-right: 3px; }
+.meta-tag-val { color: var(--accent-cyan); font-weight: 700; }
+
+.canvas-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  color: var(--text-label);
+  cursor: pointer;
+}
+
+.canvas-tool-btn.active {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.zoom-btn {
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-white);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.zoom-btn:hover { background-color: var(--studio-surface-hover); }
+.zoom-text {
+  padding: 0 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+}
+
+/* Canvas Stage & Grid */
+.canvas-stage-wrapper {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: auto;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.08) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+
+.canvas-ruler-top {
+  position: absolute;
+  top: 0;
+  height: 18px;
+  display: flex;
+  pointer-events: none;
+}
+
+.ruler-tick {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  text-align: center;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.canvas-ruler-left {
+  position: absolute;
+  left: 0;
+  width: 18px;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.ruler-tick-left {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Deliberately NOT display:flex/align-items:center — gridElement scales via
+   transform (render()'s transformOrigin:'top left'), which never changes its
+   own layout box, so a flex-centered child's overflow past 100% zoom split
+   evenly on every side and a plain overflow:auto ancestor can't scroll to a
+   centered child's "negative" overflow — content beyond a certain size was
+   genuinely unreachable no matter how far you scrolled. positionCanvasContent()
+   computes this padding in JS instead: centered when the scaled grid fits,
+   collapsing toward a minimum once it doesn't, so a block child's normal
+   top-left-anchored overflow stays fully scrollable at any zoom or grid size. */
+.canvas-viewport-content {
+  display: block;
+}
+
+.canvas-widget-grid {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  position: relative;
+  background-color: var(--studio-panel-bg);
+  border: 1px solid var(--studio-panel-border);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  user-select: none;
+  transition: transform 0.15s ease-out;
+}
+
+.canvas-widget-grid:not(.no-grid-lines) {
+  background-image:
+    linear-gradient(to right, rgba(0, 216, 246, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 216, 246, 0.04) 1px, transparent 1px);
+  background-size: 48px 44px;
+}
+
+/* "Toggle Component Outlines" button — this rule never existed, so the
+   button flipped its own active state/class with nothing to actually show
+   or hide. A faint always-on outline per component, distinct from the
+   stronger .hovered/.selected states below, which still win visually. */
+/* --outline-color is set per-render on .canvas-widget-grid itself
+   (applyWidgetStyles() in StudioCanvas.js) from the widget's OWN effective
+   background lightness — light text-gray on a dark widget, dark slate on a
+   light one — so it stays visible regardless of what's being authored. The
+   flat rgba(148,163,184,0.28) this replaces read as "very thin and hard to
+   see" per report: too low-contrast against a dark widget (the common case)
+   and still weak against a light one. Fallback only matters before the
+   first render ever sets the property. */
+.canvas-widget-grid:not(.no-outlines) .studio-component-node {
+  outline: 1.5px dashed var(--outline-color, rgba(255, 255, 255, 0.55));
+  outline-offset: -1.5px;
+}
+
+/* Component Nodes on Canvas */
+.studio-component-node {
+  position: relative;
+  border-radius: 4px;
+  cursor: grab;
+  user-select: none;
+}
+
+.studio-component-node:active {
+  cursor: grabbing;
+}
+
+.studio-component-node.hovered {
+  outline: 1px dashed var(--accent-cyan);
+}
+
+.studio-component-node.selected {
+  outline: 2px solid var(--accent-cyan);
+  box-shadow: 0 0 12px var(--accent-cyan-glow);
+}
+
+.comp-info-tag {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: #000;
+  background-color: var(--accent-cyan);
+  padding: 1px 4px;
+  border-radius: 2px 2px 0 0;
+  pointer-events: none;
+  display: none;
+  white-space: nowrap;
+}
+
+.studio-component-node.selected .comp-info-tag {
+  display: block;
+}
+
+.studio-component-node.has-validation-error { outline: 1px solid #ef4444; }
+.studio-component-node.has-validation-warning { outline: 1px solid #f59e0b; }
+
+.comp-validation-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  color: #000;
+  cursor: help;
+  z-index: 5;
+}
+
+.comp-validation-badge.error { background-color: #ef4444; }
+.comp-validation-badge.warning { background-color: #f59e0b; }
+
+/* 8-Point Resize Handles */
+.resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background-color: #fff;
+  border: 1px solid var(--accent-cyan);
+  border-radius: 1px;
+  z-index: 1000;
+}
+
+.handle-nw { top: -4px; left: -4px; cursor: nwse-resize; }
+.handle-n  { top: -4px; left: calc(50% - 4px); cursor: ns-resize; }
+.handle-ne { top: -4px; right: -4px; cursor: nesw-resize; }
+.handle-e  { top: calc(50% - 4px); right: -4px; cursor: ew-resize; }
+.handle-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+.handle-s  { bottom: -4px; left: calc(50% - 4px); cursor: ns-resize; }
+.handle-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
+.handle-w  { top: calc(50% - 4px); left: -4px; cursor: ew-resize; }
+
+/* Floating Coordinates Badge */
+.canvas-coord-badge {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(13, 18, 28, 0.95);
+  border: 1px solid var(--accent-cyan);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  pointer-events: none;
+  z-index: 30;
+}
+
+/* Floating Align/Distribute Toolbar (multi-select, shift-click) */
+.canvas-align-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(13, 18, 28, 0.97);
+  border: 1px solid var(--accent-cyan);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  padding: 6px 10px;
+  border-radius: 8px;
+  z-index: 40;
+}
+
+.align-toolbar-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.align-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  color: var(--text-white);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.align-btn:hover {
+  background-color: var(--studio-surface-hover);
+  border-color: var(--accent-cyan);
+}
+
+/* Widget Studio 2.0, Phase 3: alignment guide lines — appear only while
+   dragging, wherever the dragged component/group's edges or center line up
+   exactly with another component's. Amber, not the cyan used everywhere
+   else in this canvas (selection outline, grid tint, badges, toolbar), so a
+   guide reads as its own distinct signal against all of that. */
+.canvas-coord-badge.hidden {
+  display: none;
+}
+
+/* ==========================================
+   --- DEVICE VIEWPORT SIMULATOR STYLES ---
+   ========================================== */
+.studio-device-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.device-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 16px;
+  background-color: rgba(13, 18, 28, 0.9);
+  border-bottom: 1px solid var(--studio-panel-border);
+  z-index: 10;
+}
+
+.device-header-left, .device-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.device-select-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.device-select {
+  padding: 4px 8px;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  color: var(--text-white);
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+}
+
+.device-select:focus { border-color: var(--accent-cyan); }
+
+.orientation-btn-group {
+  display: flex;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.orient-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-label);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.orient-btn.active {
+  background-color: var(--accent-cyan);
+  color: #000;
+}
+
+.device-info-badge {
+  padding: 4px 10px;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-cyan);
+}
+
+.device-pos-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.device-pos-label {
+  font-weight: 700;
+  color: var(--text-label);
+}
+
+.device-pos-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+}
+
+.dev-pos-num {
+  width: 42px;
+  padding: 2px 4px;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 3px;
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 11px;
+  text-align: center;
+  outline: none;
+}
+
+.dev-pos-num:focus {
+  border-color: var(--accent-cyan);
+}
+
+/* No flex-centering here — same reasoning as .canvas-viewport-content: the
+   device frame scales via transform (applyDeviceScale()'s transformOrigin:
+   'top left'), which never changes its own layout box, so a flex-centered
+   frame's overflow past 100% zoom split evenly on every side and couldn't be
+   scrolled to on a compact-portrait frame taller than the stage — the
+   reported "top gets clipped" bug. positionDeviceContent() computes padding
+   on .device-viewport-stage-content in JS instead; see StudioCanvas's
+   identical positionCanvasContent() for the full explanation. */
+.device-viewport-stage {
+  flex: 1;
+  overflow: auto;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+.device-viewport-stage-content {
+  display: block;
+}
+
+/* Realistic Hardware Frames */
+.device-frame {
+  position: relative;
+  background-color: #05070a;
+  border: 12px solid #1a2230;
+  border-radius: 36px;
+  box-shadow:
+    0 0 0 2px #2d3b52,
+    0 24px 60px rgba(0, 0, 0, 0.8),
+    inset 0 0 8px rgba(0, 0, 0, 0.9);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease-out, border 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.device-frame.frame-tablet_desktop {
+  border-width: 16px;
+  border-radius: 28px;
+}
+
+/* var(--bg-main, ...), not a bare literal: this represents the simulated
+   app's own page background (behind the mock topbar/widgets), so it needs
+   to resolve against .fd-widget-preview-scope like everything else drawn
+   inside the screen — previously hardcoded, so it silently stayed dark
+   regardless of the theme-preview toggle (the reported "device's background
+   remains dark in light mode" bug). The physical bezel above (.device-frame)
+   is deliberately NOT themed — it represents hardware chrome, not app UI,
+   the same way a real phone's plastic case doesn't recolor with its OS theme. */
+.device-screen {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-main, #090c12);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Flight Deck Mock System UI inside device */
+.fd-mock-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  padding: 0 12px;
+  background-color: #0d121c;
+}
+
+.mock-top-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-label);
+  letter-spacing: 0.06em;
+}
+
+.mock-garmin-btn {
+  color: var(--text-label);
+  display: flex;
+  align-items: center;
+}
+
+.mock-aircraft-badge {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 11px;
+  color: var(--accent-cyan);
+  padding: 2px 6px;
+  background: rgba(0, 216, 246, 0.1);
+  border-radius: 4px;
+}
+
+.fd-mock-separator {
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, #00d8f6, #3b82f6);
+}
+
+.fd-mock-page-area {
+  flex: 1;
+  padding: 6px;
+  overflow: auto;
+}
+
+.fd-device-page-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.fd-device-page-grid.show-grid-cells {
+  background-image: 
+    linear-gradient(to right, rgba(0, 216, 246, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 216, 246, 0.08) 1px, transparent 1px);
+  background-size: 28px 24px;
+}
+
+.fd-device-widget-slot {
+  position: relative;
+  border-radius: 8px;
+}
+
+.fd-device-widget-slot.active-edited-widget {
+  position: relative;
+  box-shadow: 0 0 16px rgba(0, 216, 246, 0.25);
+  border: 1px solid rgba(0, 216, 246, 0.35);
+}
+
+.fd-device-widget-slot.active-edited-widget.dragging {
+  box-shadow: 0 0 20px rgba(0, 216, 246, 0.45);
+  outline: 2px dashed var(--accent-cyan);
+}
+
+/* The one always-safe place to grab-and-drag the widget slot in Device View —
+   the slot's only other content is the widget's own LIVE-interactive render
+   (real taps/inputs work here, unlike Design mode's static mock), so this is
+   deliberately a small corner overlay rather than the whole slot. */
+.fd-device-widget-drag-handle {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 216, 246, 0.85);
+  color: #05070a;
+  font-size: 12px;
+  border-radius: 4px 0 6px 0;
+  cursor: grab;
+  z-index: 20;
+  user-select: none;
+}
+
+.fd-device-widget-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Right Sidebar: Grouped Property Inspector */
+.studio-sidebar-right {
+  width: 320px;
+  min-width: 320px;
+  max-width: 320px;
+  height: 100%;
+  min-height: 0;
+  background-color: var(--studio-panel-bg);
+  border-left: 1px solid var(--studio-panel-border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.studio-sidebar-right::-webkit-scrollbar {
+  width: 5px;
+}
+.studio-sidebar-right::-webkit-scrollbar-thumb {
+  background: var(--studio-panel-border);
+  border-radius: 4px;
+}
+
+.inspector-header {
+  padding: 12px 16px;
+  background-color: var(--studio-surface);
+  border-bottom: 1px solid var(--studio-panel-border);
+}
+
+/* Widget Studio 2.0, Phase 1: Simple/Advanced mode toggle — always visible
+   above the header, independent of what's selected (widget root or a
+   component), so switching modes never requires reselecting anything. */
+.inspector-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background-color: var(--studio-panel-bg);
+  border-bottom: 1px solid var(--studio-panel-border);
+}
+
+.mode-toggle-btn {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 5px 0;
+  border-radius: 4px;
+  border: 1px solid var(--studio-panel-border);
+  background: transparent;
+  color: var(--text-label);
+  cursor: pointer;
+  transition: color 0.12s, background-color 0.12s, border-color 0.12s;
+}
+
+.mode-toggle-btn:hover {
+  color: var(--text-white);
+}
+
+.mode-toggle-btn.active {
+  background-color: var(--accent-cyan-glow);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.inspector-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inspector-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 2px 5px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-white);
+  border-radius: 3px;
+}
+
+.inspector-badge.comp-type {
+  background-color: rgba(0, 216, 246, 0.15);
+  color: var(--accent-cyan);
+}
+
+.inspector-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-white);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inspector-sub {
+  font-size: 10px;
+  color: var(--text-label);
+  font-family: var(--font-mono);
+  margin-top: 3px;
+}
+
+/* Accordion Groups */
+.inspector-group {
+  border-bottom: 1px solid var(--studio-panel-border);
+}
+
+/* Previously a near-invisible rgba(255,255,255,0.02) tint with no border —
+   groups (SIMVARS & BINDINGS, VISIBILITY & GUARD, typography/border/
+   background, ...) read as just another row and were hard to spot against
+   the individual .prop-field rows inside .inspector-group-body. A left
+   accent bar + a real background tint gives every group (all of them go
+   through this one buildAccordionGroup() template) a consistent, scannable
+   header regardless of which section it is. */
+.inspector-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background-color: rgba(0, 216, 246, 0.07);
+  border-left: 3px solid var(--accent-cyan);
+  cursor: pointer;
+  user-select: none;
+}
+
+.inspector-group-header:hover {
+  background-color: rgba(0, 216, 246, 0.12);
+}
+
+.group-title-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.group-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent-cyan);
+  white-space: nowrap;
+}
+
+/* Widget Studio 2.0, Phase 6: collapsed-group summary badge — lets a power
+   user scan a component's whole Inspector without expanding every section. */
+.group-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.group-chevron {
+  color: var(--text-dim);
+  transition: transform 0.2s ease;
+}
+
+.group-chevron.open {
+  transform: rotate(180deg);
+  color: var(--accent-cyan);
+}
+
+.inspector-group-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inspector-group-body.collapsed {
+  display: none;
+}
+
+/* Form Controls */
+.prop-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prop-custom-block {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--studio-panel-border);
+}
+
+.prop-field label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.prop-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.prop-input, .prop-select, .prop-textarea {
+  width: 100%;
+  padding: 6px 8px;
+  background-color: var(--studio-input-bg);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  color: var(--text-white);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.prop-input:focus, .prop-select:focus, .prop-textarea:focus {
+  border-color: var(--accent-cyan);
+}
+
+.prop-section-subtitle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.color-picker-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Widget Studio 2.0, Phase 8: one-click Style Presets strip at the top of the
+   Appearance panel. Each swatch shows a live mini render of what the preset
+   actually looks like (bg/fg/border), not just a color dot, since a new
+   author judging "which one do I want" needs to see the real contrast/feel. */
+.style-preset-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.style-preset-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 64px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.style-preset-swatch-inner {
+  width: 56px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background-color: var(--preset-bg);
+  color: var(--preset-fg);
+  border: 1.5px solid var(--preset-border);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.style-preset-swatch:hover .style-preset-swatch-inner {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+
+.style-preset-name {
+  font-size: 9px;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* Widget Studio 2.0, Phase 8: Simple mode's guided "Connect to Simulator"
+   category-then-variable picker — stacked (not side-by-side) since the
+   sidebar is narrow and select text (plain-English labels) can run long. */
+.connect-sim-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.color-picker-wrap input[type="color"] {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Capabilities Matrix */
+.caps-summary-box {
+  background-color: #090d14;
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.caps-sub-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-label);
+}
+
+.caps-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.caps-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.caps-tag.read { background: rgba(0, 216, 246, 0.15); color: var(--accent-cyan); }
+.caps-tag.write { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); }
+.caps-empty { font-size: 10px; color: var(--text-dim); font-style: italic; }
+
+.hidden { display: none !important; }
+
+.prop-hint {
+  cursor: help;
+  opacity: 0.7;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+
+.prop-json-error {
+  font-size: 10px;
+  color: var(--accent-red, #ef4444);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-top: 2px;
+}
+
+.btn-mini-inline {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  background: none;
+  border: none;
+  color: var(--accent-cyan);
+  cursor: pointer;
+  padding: 0 0 0 6px;
+}
+.btn-mini-inline:hover { text-decoration: underline; }
+
+.row-list-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+/* display:flex, not grid — reproduced 2026-08-29 across two failed attempts
+   before landing here: (1) a plain flex row breaks because .prop-select/
+   .prop-input both declare width:100%, which corrupts flex-basis:auto's
+   "use the item's own width" resolution — an unconstrained-flex select/input
+   reports a flex-basis near the WHOLE ROW's width, starving any sibling down
+   to ~0px. (2) switching to `repeat(auto-fit, minmax(60px,1fr)) auto` (CSS
+   Grid, matching what looked like a working precedent) traded that for a
+   WORSE failure: any trailing track after `repeat(auto-fit, ...)` that isn't
+   a definite <length> makes the browser unable to solve the repeat count at
+   all, so it silently falls back to exactly 1 column — every field stacks
+   full-width instead of sitting side by side. Even fixing the trailing
+   column to a definite px didn't fully work: auto-fit still generates far
+   more tracks than there are items (to fill the container), and plain
+   left-to-right item placement fills those extra tracks first rather than
+   reserving the last one for a trailing button.
+   The actual fix: stay with flexbox, but give every direct child (except
+   buttons) an explicit `flex: 1 1 0` — the explicit `0` basis is what
+   sidesteps case (1)'s width:100%-derived-basis trap, since flex-basis:auto
+   is never consulted once a shorthand's own basis is set. Buttons keep their
+   natural small size (no `.prop-select`/`.prop-input` class, so no width:100%
+   to corrupt anything, and no flex applied so they don't compete for growth). */
+.row-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #090d14;
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 4px;
+  padding: 6px;
+}
+.row-list-item > * { flex: 1 1 0; min-width: 0; }
+.row-list-item > button { flex: 0 0 auto; }
+
+/* Chrome-free variant of .row-list-item's flex layout (no card background/
+   border/padding) for a state/operator/value sub-row nested INSIDE another
+   row (Conditional Formatting's rule cards, an interaction's condition row) —
+   same reasoning as .row-list-item above. */
+.row-field-grid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.row-field-grid > * { flex: 1 1 0; min-width: 0; }
+.row-field-grid > button { flex: 0 0 auto; }
+
+.row-add {
+  font-size: 11px;
+  align-self: flex-start;
+}
+
+/* Interactions */
+.interaction-card {
+  background-color: #090d14;
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inter-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inter-hdr-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.inter-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  background: rgba(0, 216, 246, 0.1);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.inter-action-type {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-white);
+}
+
+.btn-edit-inter,
+.btn-del-inter {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px;
+  line-height: 1;
+}
+.btn-edit-inter:hover { color: var(--accent-cyan); }
+.btn-del-inter:hover { color: var(--accent-red); }
+
+.inter-desc {
+  font-size: 10px;
+  color: var(--text-label);
+}
+
+/* ==========================================
+   --- BOTTOM MENU BAR STYLES ---
+   ========================================== */
+.studio-menubar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 16px;
+  background-color: var(--studio-panel-bg);
+  border-top: 1px solid var(--studio-panel-border);
+  z-index: 40;
+}
+
+.bottom-bar-left, .bottom-bar-center, .bottom-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.studio-brand-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.brand-ver {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.bar-divider {
+  width: 1px;
+  height: 20px;
+  background-color: var(--studio-panel-border);
+}
+
+/* Undo/Redo's wrapper had no rule at all — .bar-btn is itself display:flex,
+   which blockifies its own outer box, so with no flex row on the parent the
+   two buttons stacked vertically instead of sitting inline like every other
+   .bar-btn in .topbar-actions-left (those are direct children of that row's
+   own flex context, which is what actually kept them inline). */
+.action-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.viewport-toggle-group {
+  display: flex;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.vp-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-label);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.vp-btn.active {
+  background-color: var(--accent-cyan);
+  color: #000;
+}
+
+.dirty-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.dirty-pill.clean { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
+.dirty-pill.clean .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
+
+.dirty-pill.dirty { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.dirty-pill.dirty .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: #f59e0b; }
+
+.bar-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background-color: var(--studio-surface);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 6px;
+  color: var(--text-white);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.bar-btn:hover:not(:disabled) {
+  background-color: var(--studio-surface-hover);
+  border-color: #3b82f6;
+}
+
+.bar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bar-btn.highlight {
+  border-color: rgba(0, 216, 246, 0.4);
+  color: var(--accent-cyan);
+}
+
+.validate-live-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  color: #000;
+}
+
+.validate-live-badge.error { background-color: #ef4444; }
+.validate-live-badge.warning { background-color: #f59e0b; }
+
+.bar-btn.primary {
+  background: linear-gradient(135deg, #00d8f6, #0284c7);
+  color: #000;
+  border: none;
+  font-weight: 700;
+}
+
+.bar-btn.primary:hover {
+  filter: brightness(1.1);
+}
+
+/* Export Dropdown */
+.export-dropdown-wrap {
+  position: relative;
+}
+
+.export-menu-dropdown {
+  position: absolute;
+  bottom: 40px;
+  right: 0;
+  width: 200px;
+  background-color: var(--studio-panel-bg);
+  border: 1px solid var(--studio-panel-border);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.6);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+}
+
+.export-menu-dropdown.hidden {
+  display: none;
+}
+
+.export-menu-dropdown-top {
+  top: 40px;
+  bottom: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+.export-item {
+  padding: 8px 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--text-white);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.export-item:hover {
+  background-color: var(--studio-surface-hover);
+  color: var(--accent-cyan);
+}
+
+/* ==========================================
+   --- TELEMETRY TEST BENCH DRAWER ---
+   ========================================== */
+.studio-sim-bench-drawer {
+  flex-shrink: 0;
+  width: 100%;
+  max-height: 0;
+  background-color: rgba(13, 18, 28, 0.98);
+  border-top: 0 solid var(--accent-cyan);
+  box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: max-height 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-top-width 0.25s;
+  z-index: 35;
+}
+
+.studio-sim-bench-drawer.closed {
+  max-height: 0;
+  pointer-events: none;
+}
+
+.studio-sim-bench-drawer.open {
+  max-height: 240px;
+  border-top-width: 2px;
+}
+
+.sim-bench-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background-color: var(--studio-surface);
+  border-bottom: 1px solid var(--studio-panel-border);
+}
+
+.sim-bench-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sim-bench-title {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--accent-cyan);
+}
+
+.sim-bench-subtitle {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.btn-mini-close {
+  background: transparent;
+  border: none;
+  color: var(--text-label);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.btn-mini-close:hover { color: var(--accent-red); }
+
+.sim-bench-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  gap: 20px;
+}
+
+.sim-bench-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sim-section-hdr {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-label);
+  letter-spacing: 0.05em;
+}
+
+.sim-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.sim-scenario-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sim-scenario-btn {
+  font-size: 11px;
+}
+
+.sim-category-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.sim-category-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent-cyan);
+  opacity: 0.8;
+}
+
+.sim-ctrl-card {
+  background-color: #090d14;
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sim-ctrl-card.toggle-card {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sim-ctrl-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.sim-ctrl-label { color: var(--text-label); }
+.sim-ctrl-val { color: var(--accent-cyan); font-weight: 700; }
+
+.sim-text-input {
+  width: 100%;
+  padding: 3px 6px;
+  background-color: var(--studio-input-bg);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 3px;
+  color: #22c55e;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  outline: none;
+}
+
+/* Switch Toggle */
+.sim-toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+}
+
+.sim-toggle-switch input { opacity: 0; width: 0; height: 0; }
+
+.sim-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #1e293b;
+  transition: .2s;
+  border-radius: 18px;
+}
+
+.sim-slider:before {
+  position: absolute;
+  content: "";
+  height: 12px;
+  width: 12px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .2s;
+  border-radius: 50%;
+}
+
+.sim-toggle-switch input:checked + .sim-slider {
+  background-color: var(--accent-cyan);
+}
+
+.sim-toggle-switch input:checked + .sim-slider:before {
+  transform: translateX(14px);
+  background-color: #000;
+}
+
+/* Modal Overlay & Toasts */
+.studio-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.studio-modal-overlay.hidden { display: none; }
+
+.studio-modal-box {
+  width: 540px;
+  max-width: 90vw;
+  max-height: 85vh;
+  background-color: var(--studio-panel-bg);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: var(--studio-surface);
+  border-bottom: 1px solid var(--studio-panel-border);
+}
+
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-title {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: var(--text-white);
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.val-status-banner {
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.banner-valid { background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid #22c55e; }
+.banner-invalid { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid #ef4444; }
+
+.val-section-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.text-red { color: #ef4444; }
+.text-amber { color: #f59e0b; }
+
+.val-list {
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.val-list.errors li { color: #f87171; }
+.val-list.warnings li { color: #fbbf24; }
+
+.val-list-item {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.val-list-item:hover { color: var(--accent-cyan) !important; }
+
+.val-caps-summary {
+  background-color: #090d14;
+  border: 1px solid var(--studio-panel-border);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  background-color: var(--studio-surface);
+  border-top: 1px solid var(--studio-panel-border);
+}
+
+.studio-modal-box.wide { width: 720px; }
+
+.modal-error {
+  margin: 0 16px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 4px;
+}
+
+.modal-confirm-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-white);
+}
+
+.modal-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-form-row label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.studio-toast {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background-color: rgba(13, 18, 28, 0.95);
+  border: 1px solid var(--accent-cyan);
+  box-shadow: 0 4px 20px rgba(0, 216, 246, 0.3);
+  padding: 8px 18px;
+  border-radius: 20px;
+  color: var(--text-white);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  transition: all 0.2s ease;
+  z-index: 1000;
+}
+
+.studio-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ==========================================================================
+   AVIONICS RUNTIME COMPONENT SYSTEM (STUDIO & DEVICE VIEWPORT)
+   ========================================================================== */
+
+.fd-device-composite-root {
+  font-family: var(--font-mono);
+  user-select: none;
+}

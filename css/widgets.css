@@ -1,0 +1,1214 @@
+/* css/widgets.css - Hardware-Accelerated Avionics Component Styling */
+
+/* =========================================================================
+   1. BUTTON WIDGET
+   ========================================================================= */
+.fd-btn-control {
+  width: 100%;
+  height: 100%;
+  min-height: 44px;
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  color: var(--text-label);
+  font-family: 'Chakra Petch', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: all 0.15s ease;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 2px 4px rgba(0, 0, 0, 0.3);
+  padding: 8px 12px;
+}
+
+.fd-btn-control:active, .fd-btn-control.pressed {
+  transform: translateY(1px);
+  background: var(--btn-active);
+}
+
+.fd-btn-control.active {
+  background: #142838;
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 12px rgba(0, 216, 246, 0.25);
+}
+
+.fd-btn-primary {
+  background: rgba(0, 216, 246, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.fd-btn-danger {
+  background: rgba(255, 51, 68, 0.15);
+  border-color: var(--accent-error);
+  color: var(--accent-error);
+}
+
+.fd-btn-led {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #252d3d;
+  border: 1px solid #3c4860;
+  transition: all 0.2s ease;
+}
+
+.fd-btn-led.on {
+  background: var(--accent-green);
+  border-color: #66ff88;
+  box-shadow: 0 0 8px var(--accent-green);
+}
+
+/* =========================================================================
+   2. DISPLAY WIDGET
+   ========================================================================= */
+.fd-display-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  height: 100%;
+  min-height: 48px;
+}
+
+.fd-display-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fd-display-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.fd-display-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-amber);
+  background: var(--well-bg);
+  border: 1px solid var(--well-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.fd-display-val-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.fd-display-val-box {
+  flex: 1;
+  background: var(--well-bg);
+  border: 1px solid var(--well-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.fd-display-num {
+  font-family: 'Chakra Petch', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent-green);
+  letter-spacing: 1px;
+}
+
+.fd-display-unit {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-label);
+  margin-left: 4px;
+}
+
+.fd-step-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  color: var(--accent-cyan);
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.fd-step-btn:active { background: var(--btn-active); }
+
+/* =========================================================================
+   3. ROTARY WIDGET
+   ========================================================================= */
+.fd-rotary-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 10px;
+  height: 100%;
+}
+
+.fd-rotary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.fd-rotary-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.fd-rotary-val {
+  font-family: 'Chakra Petch', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-green);
+}
+
+.fd-rotary-stage {
+  position: relative;
+  width: 110px;
+  height: 110px;
+  margin: 0 auto 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fd-rotary-outer {
+  position: absolute;
+  width: 106px;
+  height: 106px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #1a202c 40%, #0d1117 100%);
+  border: 2px solid #2d3748;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  transition: transform 0.1s ease-out;
+}
+
+.fd-rotary-tick-outer {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 10px;
+  background: var(--accent-cyan);
+  border-radius: 2px;
+}
+
+.fd-rotary-inner {
+  position: absolute;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #2d3748 30%, #1a202c 100%);
+  border: 2px solid #4a5568;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.1s ease-out;
+}
+
+.fd-rotary-tick-inner {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 3px;
+  height: 8px;
+  background: var(--accent-green);
+  border-radius: 2px;
+}
+
+.fd-rotary-center-btn {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #0f141e;
+  border: 1px solid var(--btn-border);
+  color: var(--text-white);
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  z-index: 5;
+}
+
+.fd-rotary-controls {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.fd-rot-btn {
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  color: var(--text-label);
+  font-family: 'Chakra Petch', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* =========================================================================
+   4. ANNUNCIATOR WIDGET
+   ========================================================================= */
+.fd-annunciator-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--well-bg);
+  border: 2px solid #222736;
+  border-radius: 6px;
+  padding: 8px;
+  text-align: center;
+  height: 100%;
+  min-height: 44px;
+  color: var(--text-dim);
+  transition: all 0.2s ease;
+}
+
+.fd-annunciator-tile.active.fd-annun-warning {
+  background: rgba(255, 51, 68, 0.2);
+  border-color: var(--accent-error);
+  color: var(--accent-error);
+  box-shadow: 0 0 12px rgba(255, 51, 68, 0.4);
+}
+
+.fd-annunciator-tile.active.fd-annun-caution {
+  background: rgba(255, 170, 0, 0.2);
+  border-color: var(--accent-amber);
+  color: var(--accent-amber);
+  box-shadow: 0 0 12px rgba(255, 170, 0, 0.4);
+}
+
+.fd-annun-label {
+  font-family: 'Chakra Petch', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+
+.fd-annun-sub {
+  font-size: 9px;
+  opacity: 0.8;
+}
+
+/* =========================================================================
+   5. RADIO WIDGET
+   ========================================================================= */
+.fd-radio-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.fd-radio-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fd-radio-title {
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-label);
+  letter-spacing: 0.5px;
+}
+
+.fd-radio-tuning-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fd-radio-box {
+  flex: 1;
+  background: var(--well-bg);
+  border: 1px solid var(--well-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 48px;
+  justify-content: center;
+}
+
+.fd-radio-box-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.fd-radio-val {
+  font-family: 'Chakra Petch', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.fd-radio-act-val {
+  color: var(--accent-green);
+}
+
+.fd-radio-stby-box {
+  border-color: rgba(0, 216, 246, 0.4);
+}
+
+.fd-radio-stby-input {
+  background: transparent;
+  border: none;
+  font-family: 'Chakra Petch', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 1px;
+  outline: none;
+  width: 100%;
+}
+
+.fd-radio-swap-btn {
+  width: 44px;
+  height: 48px;
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 6px;
+  color: var(--accent-cyan);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+.fd-radio-swap-btn:active { background: var(--btn-active); transform: scale(0.96); }
+
+.fd-radio-presets-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.fd-radio-preset-btn {
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+.fd-radio-preset-btn:active { background: var(--btn-active); }
+.fd-radio-preset-btn.holding {
+  background: rgba(34, 211, 238, 0.25) !important;
+  border-color: #22d3ee !important;
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.5) !important;
+  transform: scale(0.95);
+}
+
+.preset-name {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-label);
+}
+
+.preset-val {
+  font-family: 'Chakra Petch', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+/* Transponder Row */
+.fd-xpndr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fd-xpndr-code-box {
+  flex: 1;
+  background: var(--well-bg);
+  border: 1px solid var(--well-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.fd-xpndr-input {
+  background: transparent;
+  border: none;
+  font-family: 'Chakra Petch', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent-green);
+  letter-spacing: 4px;
+  outline: none;
+  width: 100%;
+}
+
+.fd-xpndr-btn {
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  color: var(--text-white);
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-family: 'Chakra Petch', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fd-xpndr-btn.vfr-active {
+  background: rgba(0, 255, 60, 0.15);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.fd-ident-btn.ident-active {
+  background: var(--accent-green);
+  color: #05101a;
+  box-shadow: 0 0 14px var(--accent-green);
+}
+
+/* =========================================================================
+   6. WIDGET ORIENTATION VARIANTS (Horizontal vs Vertical)
+   ========================================================================= */
+.fd-orient-vertical .fd-btn-control,
+.fd-btn-control.orient-vertical {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fd-orient-vertical .fd-display-card,
+.fd-display-card.orient-vertical {
+  flex-direction: column;
+}
+
+.fd-orient-vertical .fd-display-val-row,
+.fd-display-card.orient-vertical .fd-display-val-row {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fd-orient-vertical .fd-rotary-card,
+.fd-rotary-card.orient-vertical {
+  flex-direction: column;
+}
+
+.fd-orient-vertical .fd-radio-card,
+.fd-radio-card.orient-vertical {
+  flex-direction: column;
+}
+
+.fd-orient-vertical .fd-radio-freq-row,
+.fd-radio-card.orient-vertical .fd-radio-freq-row {
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* =========================================================================
+   7. FLIGHT DECK WIDGET STANDARD (FDWS v1.2) COMPONENT SUITE
+   ========================================================================= */
+
+/* Root Composite Container */
+.fd-composite-widget-root {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  user-select: none;
+  touch-action: manipulation;
+  position: relative;
+  isolation: isolate;
+}
+
+/* Base Component Envelope */
+.fd-comp {
+  position: relative;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 7.1 Label Component (core.label) */
+.fd-comp-label {
+  overflow: hidden;
+  font-family: 'Chakra Petch', sans-serif;
+  letter-spacing: 0.5px;
+}
+
+.fd-comp-label-text {
+  display: block;
+}
+
+/* 7.2 Display Component (core.display) */
+.fd-comp-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.fd-comp-display-box {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+}
+
+.fd-comp-display-prefix {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim, #64748b);
+}
+
+.fd-comp-display-value {
+  font-family: 'Chakra Petch', monospace, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.fd-comp-display-suffix {
+  font-size: 10px;
+  color: var(--text-dim, #64748b);
+}
+
+/* 7.3 Input Component (core.input) */
+.fd-comp-input-wrapper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.fd-comp-input-field {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: 'Chakra Petch', monospace, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: inherit;
+  text-align: center;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.fd-comp-input-wrapper.focused {
+  outline: 2px solid var(--accent-cyan, #00e5ff);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+}
+
+/* 7.4 Button Component (core.button) */
+.fd-comp-button {
+  width: 100%;
+  height: 100%;
+}
+
+.fd-comp-btn-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--btn-border, #334155);
+  background: var(--btn-bg, #1e293b);
+  color: var(--text-main, #f8fafc);
+  font-family: 'Chakra Petch', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  transition: all 0.12s ease;
+}
+
+.fd-comp-btn-inner:active {
+  transform: translateY(1px);
+  background: var(--btn-active, #0f172a);
+}
+
+.fd-btn-swap .fd-comp-btn-inner,
+.fd-comp-button.fd-btn-var-swap .fd-comp-btn-inner {
+  background: #111827;
+  border-color: #1f293d;
+  color: #94a3b8;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.fd-btn-swap .fd-comp-btn-inner:hover,
+.fd-comp-button.fd-btn-var-swap .fd-comp-btn-inner:hover {
+  background: #1e293b;
+  border-color: #38bdf8;
+  color: #f8fafc;
+}
+
+.fd-btn-preset .fd-comp-btn-inner,
+.fd-comp-button.fd-btn-var-preset .fd-comp-btn-inner {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 4px 6px;
+  background: #090d14;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  color: #f8fafc;
+  font-family: 'Chakra Petch', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  transition: all 0.15s ease;
+}
+
+.fd-btn-preset .fd-comp-btn-inner:hover,
+.fd-comp-button.fd-btn-var-preset .fd-comp-btn-inner:hover {
+  border-color: #38bdf8;
+  background: #131a26;
+}
+
+.fd-comp-btn-sublabel {
+  font-size: 10px;
+  color: var(--accent-cyan, #38bdf8);
+  font-weight: 600;
+}
+
+.fd-comp-button.active .fd-comp-btn-inner {
+  background: #142838;
+  border-color: var(--accent-cyan, #00e5ff);
+  color: var(--accent-cyan, #00e5ff);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+}
+
+/* 7.5 Indicator Component (core.indicator) */
+.fd-comp-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.fd-ind-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  padding: 2px 6px;
+  box-sizing: border-box;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.fd-ind-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #334155;
+  border: 1px solid #475569;
+}
+
+.fd-ind-sev-status.active .fd-ind-dot {
+  background: #22c55e;
+  border-color: #86efac;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+.fd-ind-sev-caution.active .fd-ind-box,
+.fd-ind-sev-caution.active .fd-ind-dot {
+  background: #eab308;
+  color: #0f172a;
+  border-color: #fef08a;
+  box-shadow: 0 0 10px #eab308;
+}
+
+.fd-ind-sev-warning.active .fd-ind-box,
+.fd-ind-sev-warning.active .fd-ind-dot {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #fca5a5;
+  box-shadow: 0 0 12px #ef4444;
+  animation: fd-pulse-warning 1s infinite alternate;
+}
+
+@keyframes fd-pulse-warning {
+  0% { opacity: 0.8; }
+  100% { opacity: 1; }
+}
+
+/* 7.6 Stepper Component (core.stepper) */
+.fd-comp-stepper {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+}
+
+.fd-step-btn {
+  flex: 1;
+  height: 100%;
+  background: var(--btn-bg, #1e293b);
+  border: 1px solid var(--btn-border, #334155);
+  color: var(--text-main, #f8fafc);
+  font-size: 16px;
+  font-weight: bold;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fd-step-btn:active {
+  background: var(--btn-active, #0f172a);
+}
+
+/* 7.7 Rotary Component (core.rotary) */
+.fd-comp-rotary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.fd-rotary-wrap {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #2d3748 0%, #1a202c 100%);
+  border: 2px solid #4a5568;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.fd-rotary-outer-ring {
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 1px dashed #718096;
+  pointer-events: none;
+}
+
+.fd-rotary-center-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #1a202c;
+  border: 1px solid var(--accent-cyan, #00e5ff);
+  color: var(--accent-cyan, #00e5ff);
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+/* Drawer Extensions & FDWS Badges */
+.fd-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fd-btn-install-fdws {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 229, 255, 0.12);
+  border: 1px solid var(--accent-cyan, #00e5ff);
+  color: var(--accent-cyan, #00e5ff);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.fd-btn-install-fdws:hover {
+  background: rgba(0, 229, 255, 0.22);
+}
+
+.fd-drawer-categories {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--card-border, #1f2937);
+  overflow-x: auto;
+}
+
+.fd-cat-tab {
+  background: transparent;
+  border: 1px solid var(--btn-border, #334155);
+  color: var(--text-dim, #94a3b8);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fd-cat-tab.active {
+  background: var(--accent-cyan, #00e5ff);
+  border-color: var(--accent-cyan, #00e5ff);
+  color: #090d14;
+  font-weight: 700;
+}
+
+.fd-badge-fdws {
+  font-size: 9px;
+  font-weight: 700;
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid #a855f7;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.fd-badge-native {
+  font-size: 9px;
+  font-weight: 600;
+  background: rgba(100, 116, 139, 0.2);
+  color: #94a3b8;
+  border: 1px solid #475569;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.fd-drawer-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fd-btn-icon-export,
+.fd-btn-icon-delete {
+  background: transparent;
+  border: 1px solid var(--btn-border, #334155);
+  color: var(--text-dim, #94a3b8);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.fd-btn-icon-export:hover {
+  color: var(--accent-cyan, #00e5ff);
+  border-color: var(--accent-cyan, #00e5ff);
+}
+
+.fd-btn-icon-delete:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+/* =========================================================================
+   8. FDWS v1.2 NEW COMPONENT TYPES
+   ========================================================================= */
+
+/* 8.0 core.rotary — linear "wheel" visual (circular: false) */
+.fd-rotary-wheel-track {
+  position: relative;
+  width: 40px;
+  height: 100%;
+  min-height: 56px;
+  border-radius: 6px;
+  background: repeating-linear-gradient(
+    to bottom,
+    #1a202c 0px, #1a202c 9px,
+    #2d3748 9px, #2d3748 10px
+  );
+  border: 2px solid #4a5568;
+  cursor: ns-resize;
+  touch-action: none;
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.5);
+}
+
+.fd-rotary-wheel-indicator {
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  top: 50%;
+  height: 2px;
+  background: var(--accent-cyan, #00e5ff);
+  transform: translateY(-1px);
+  box-shadow: 0 0 6px var(--accent-cyan, #00e5ff);
+}
+
+/* 8.1 core.gauge (display-only needle/bar/arc) */
+.fd-comp-gauge {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.fd-gauge-transform-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.fd-gauge-arc-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent-cyan, #00e5ff), #0891b2);
+  transform-origin: left center;
+}
+
+/* 8.2 core.slider (absolute-position lever) */
+.fd-comp-slider {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.fd-slider-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #1a202c;
+  border: 1px solid #4a5568;
+  border-radius: 6px;
+  touch-action: none;
+  box-sizing: border-box;
+}
+
+.fd-slider-handle {
+  position: absolute;
+  background: #2d3748;
+  border: 2px solid var(--accent-cyan, #00e5ff);
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+}
+
+.fd-slider-detent-mark {
+  position: absolute;
+  background: #718096;
+  font-size: 8px;
+  color: var(--text-dim, #94a3b8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* 8.3 core.selector (discrete multi-position switch) */
+.fd-comp-selector {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.fd-selector-position {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-dim, #94a3b8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.fd-selector-position.active {
+  color: var(--accent-cyan, #00e5ff);
+  text-shadow: 0 0 6px var(--accent-cyan, #00e5ff);
+}
+
+.fd-selector-pointer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 40%;
+  background: var(--accent-cyan, #00e5ff);
+  transform-origin: bottom center;
+  transform: translate(-50%, -100%);
+  box-shadow: 0 0 6px var(--accent-cyan, #00e5ff);
+}
+
+/* 8.4 core.rocker (spring-loaded momentary rocker) */
+.fd-comp-rocker {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--btn-border, #334155);
+}
+
+.fd-rocker-zone {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--btn-bg, #1e293b);
+  color: var(--text-main, #f8fafc);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+
+.fd-rocker-zone.fd-rocker-zone-active {
+  background: var(--accent-cyan, #00e5ff);
+  color: #090d14;
+}
+
+/* 8.5 core.list (array-driven repeater) */
+.fd-comp-list {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.fd-list-item {
+  display: grid;
+  flex-shrink: 0;
+}
+
+/* 8.6 core.ref (packaged component-library reference) */
+.fd-comp-ref {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* 8.7 core.pad (2D touch surface) */
+.fd-comp-pad {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #10141c;
+  border: 1px solid var(--btn-border, #334155);
+  border-radius: 6px;
+  touch-action: none;
+  overflow: hidden;
+}
+
+.fd-pad-crosshair {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-cyan, #00e5ff);
+  box-shadow: 0 0 6px var(--accent-cyan, #00e5ff);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* 8.8 core.divider (FDWS v1.17 — grid-snapped separator line) */
+.fd-comp-divider-line {
+  flex-shrink: 0;
+}
+
+/* 8.9 Guard overlay (§2.2 — core.button/core.selector/core.rocker) */
+.fd-guard-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid #fbbf24;
+  border-radius: inherit;
+}
+
+.fd-guard-overlay.fd-guard-open {
+  background: rgba(15, 23, 42, 0.12);
+  border-style: dashed;
+}
+
+.fd-guard-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+

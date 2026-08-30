@@ -1,0 +1,949 @@
+/**
+ * StudioState.js
+ * Central Reactive State Manager for Flight Deck Widget Studio
+ */
+
+import { STUDIO_TEMPLATES } from './StudioTemplates.js';
+import { StudioValidator } from './StudioValidator.js';
+import { DECK_EVENTS } from '../core/deckEvents.js';
+import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
+import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
+
+const LATEST_FDWS_VERSION = FDWS_VERSIONS[FDWS_VERSIONS.length - 1];
+
+/**
+ * Seed a plausible default value for a canonical Deck Event so the Sim Bench
+ * has something sane to show before a user pokes it, inferred from the
+ * event's name/category rather than a hand-maintained per-key table (which
+ * is what silently went stale pre-v1.4 Deck Events unification).
+ */
+function inferDeckEventDefault(evt) {
+  const n = evt.name;
+  if (n === 'xpndrCode') return '1200';
+  if (/BugValue$/.test(n)) {
+    if (n === 'apHdgBugValue') return 360;
+    if (n === 'apAltBugValue') return 10000;
+    if (n === 'apIasBugValue') return 250;
+    return 0;
+  }
+  if (/Level$/.test(n)) return 50;
+  if (/Freq$/.test(n)) return n.startsWith('nav') ? '108.00' : '118.000';
+  if (/State$/.test(n) || /ModeState$/.test(n)) return n === 'apFdState' || n === 'apAltModeState' ? 1 : 0;
+  return 0;
+}
+
+function buildDefaultSimTelemetry() {
+  const telem = {};
+  DECK_EVENTS.filter((e) => e.kind === 'read').forEach((evt) => {
+    telem[evt.name] = inferDeckEventDefault(evt);
+  });
+  // Non-canonical example vars kept for widgets/templates that intentionally
+  // use host-defined custom logical names (FDWS v1.4 §1.2) rather than the
+  // Deck Events default list — e.g. the Master Caution & Warning template.
+  Object.assign(telem, {
+    master_warning: 1,
+    master_caution: 0,
+    pitot_heat: 0,
+    anti_ice: 0,
+    gear: 1,
+    flaps: 0
+  });
+  return telem;
+}
+
+// A device profile's portrait/landscape entries model one physical screen
+// rotated 90° -- columns/rows are an exact swap (e.g. 20x44 <-> 44x20) and
+// BOTH orientations share one constant cell pixel size (rowHeight == column
+// width, same value in portrait and landscape). This is what keeps a
+// widget's rendered proportions and physical size identical regardless of
+// device-view orientation: a widget declared W columns x H rows always
+// occupies the exact same W*cellSize x H*cellSize px, in either orientation.
+//
+// columns/rows for 'compact' and 'tablet_desktop' MUST still match
+// flight-deck-pwa/js/core/LayoutEngine.js's getGridSpec(orientation, tier)
+// exactly -- that's what makes "how many columns/rows will my widget
+// occupy" accurate to the real runtime. The real runtime's rowHeight is
+// NOT replicated pixel-for-pixel here (it legitimately differs 16px/18px
+// between orientations there, since it's a fluid responsive layout, not a
+// fixed physical device) -- this simulator instead picks one constant cell
+// size per tier so the preview never visually distorts a widget on rotate.
+//
+// width/height (the frame's outer mock chrome size) are derived FROM the
+// grid's pixel size plus the fixed chrome overhead in studio.css
+// (.device-frame border, 38px topbar, 2px separator, 6px page-area
+// padding) -- see StudioDeviceView.js's render(), which lays the grid out
+// at exactly columns*cellSize + (columns-1)*gap px, so the declared
+// width/height here must stay in sync with that formula and the tier's
+// border-width (12px default, 16px for .frame-tablet_desktop).
+// Widget Studio 2.0, Phase 4: the original 4-profile picker (compact +
+// mobile_std/tablet_std/tablet_pro) is gone — those three never corresponded
+// to anything the real PWA rendered (LayoutEngine.getGridSpec() was
+// compact-only, tier-blind). The PWA now has real multi-tier grid support
+// (app.js's LayoutEngine.getDeviceTier() + Page.js's per-tier grid specs),
+// and these two profiles were already narrowed down to match its actual two
+// tiers exactly — mobile (viewport short axis < 600px) and tablet/desktop
+// (>= 600px). What was still wrong, found while re-auditing this decision:
+// rowHeight had drifted out of sync with LayoutEngine.js's own TIER_GRIDS for
+// three of the four orientation/tier combinations (only mobile portrait's 16
+// still matched) — mobile landscape and both tablet orientations were all
+// using stale numbers. columns/rows/gap were already exactly right; only
+// rowHeight needed correcting, to LayoutEngine.js's actual values:
+// mobile 16/18 (portrait/landscape), tablet 16/18 (portrait/landscape).
+export const DEVICE_PROFILES = {
+  compact: {
+    id: 'compact',
+    name: 'Mobile',
+    description: 'Real runtime grid — mobile tier (viewport short axis < 600px)',
+    portrait: { columns: 20, rows: 44, rowHeight: 16, gap: 3, width: 413, height: 909 },
+    landscape: { columns: 44, rows: 20, rowHeight: 18, gap: 3, width: 869, height: 453 }
+  },
+  tablet_desktop: {
+    id: 'tablet_desktop',
+    name: 'Tablet / Desktop',
+    description: 'Real runtime grid — tablet/desktop tier (viewport short axis >= 600px)',
+    portrait: { columns: 60, rows: 88, rowHeight: 16, gap: 3, width: 1001, height: 1489 },
+    landscape: { columns: 88, rows: 60, rowHeight: 18, gap: 3, width: 1449, height: 1041 }
+  }
+};
+
+export class StudioState {
+  constructor() {
+    this.listeners = new Set();
+
+    // Default to NAV1 template
+    this.widgetDef = JSON.parse(JSON.stringify(STUDIO_TEMPLATES[0]));
+    StudioValidator.syncCapabilities(this.widgetDef);
+
+    this.selectedComponentId = null;
+    this.hoveredComponentId = null;
+    this.selectedLayerGroupId = null;
+    // Multi-select for canvas align/distribute tooling — selectedComponentId
+    // stays the "primary"/most-recently-clicked member (what the Inspector
+    // shows single-component detail for); this set additionally tracks every
+    // co-selected component when shift-clicking on the canvas.
+    this.multiSelectedIds = new Set();
+    // UI-only "hidden in editor" sets — Design-canvas visibility only, never
+    // serialized into widgetDef (saveCurrentWidgetToLibrary()/exportWidgetFile()
+    // both JSON-clone widgetDef itself, never sibling StudioState fields, so
+    // these can never leak into a save/export). Device View and export always
+    // show everything regardless of what's hidden here.
+    this.hiddenInEditorIds = new Set();
+    this.hiddenLayerGroupIds = new Set();
+
+    // Viewport & Modes
+    this.viewportMode = 'edit'; // 'edit' | 'device'
+    this.zoom = 1.0; // granular, clamped [0.1, 3.0] — see StudioCanvas's zoom buttons
+    this.showGrid = true;
+    this.showOutlines = true;
+    this.allowOverlap = true; // FDWS v1.1 free-stacking layering mode
+    // Live theme-preview toggle: shows what BaseComponent.applyStyles()'s
+    // role-tagged light-mode color derivation will do to THIS widget's authored
+    // colors, without touching the widget definition itself. One flag drives
+    // Design mode, Interactive Sim mode, and Device View, so toggling it
+    // anywhere stays in sync everywhere (see StudioCanvas's canvas-header-bar
+    // button, the only place it's currently exposed).
+    this.previewTheme = 'dark'; // 'dark' | 'light'
+
+    // Device View Settings
+    this.activeDeviceId = 'compact';
+    this.deviceOrientation = 'portrait'; // 'portrait' | 'landscape'
+    this.devicePlacement = { col: 2, row: 4 };
+
+    // Left Sidebar active tab
+    this.leftTab = 'layers'; // 'layers' | 'palette' | 'state' | 'assets' | 'templates'
+
+    // Live values of declared state[] vars while interacting with the widget in
+    // Device View (MockWidgetHost.js's onLocalStateChange callback feeds this) —
+    // purely a State-tab display aid, never persisted, reseeded to defaults on
+    // WIDGET_DEF_LOADED / whenever Device View (re)constructs its mock host.
+    this.liveStateValues = new Map();
+
+    // Telemetry Test Bench State — seeded from the canonical Deck Events list
+    // (see buildDefaultSimTelemetry above) plus a handful of non-canonical
+    // example vars for custom-logical-name testing.
+    this.simTelemetry = buildDefaultSimTelemetry();
+
+    // Widget Studio 2.0, Phase 3: one-slot style clipboard (session-only, not
+    // persisted) — copy one component's full `style` object, paste it onto
+    // another, or onto every multi-selected component at once.
+    this.copiedStyle = null;
+
+    // Undo / Redo Stacks
+    this.undoStack = [];
+    this.redoStack = [];
+    this.maxHistory = 40;
+    this.isDirty = false;
+
+    // LocalStorage library of saved widgets
+    this.savedWidgets = this.loadSavedWidgets();
+
+    // Check if previous session exists in localStorage
+    this.restoreSession();
+  }
+
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  notify(changeType = 'GENERAL', payload = {}) {
+    this.listeners.forEach((listener) => {
+      try {
+        listener(changeType, payload, this);
+      } catch (err) {
+        console.error('[StudioState] Listener error:', err);
+      }
+    });
+  }
+
+  saveHistory(label = 'Edit') {
+    const snapshot = JSON.stringify(this.widgetDef);
+    if (this.undoStack.length > 0 && this.undoStack[this.undoStack.length - 1].snapshot === snapshot) {
+      return;
+    }
+    this.undoStack.push({ snapshot, label, timestamp: Date.now() });
+    if (this.undoStack.length > this.maxHistory) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+    this.isDirty = true;
+    this.persistSession();
+  }
+
+  undo() {
+    if (this.undoStack.length === 0) return false;
+    const currentSnapshot = JSON.stringify(this.widgetDef);
+    this.redoStack.push({ snapshot: currentSnapshot, label: 'Undo step' });
+    const prev = this.undoStack.pop();
+    this.widgetDef = JSON.parse(prev.snapshot);
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.notify('HISTORY_CHANGE', { action: 'undo' });
+    this.persistSession();
+    return true;
+  }
+
+  redo() {
+    if (this.redoStack.length === 0) return false;
+    const currentSnapshot = JSON.stringify(this.widgetDef);
+    this.undoStack.push({ snapshot: currentSnapshot, label: 'Redo step' });
+    const next = this.redoStack.pop();
+    this.widgetDef = JSON.parse(next.snapshot);
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.notify('HISTORY_CHANGE', { action: 'redo' });
+    this.persistSession();
+    return true;
+  }
+
+  setWidgetDef(newDef, recordHistory = true, historyLabel = 'Load Widget') {
+    if (recordHistory) {
+      this.saveHistory(historyLabel);
+    }
+    this.widgetDef = JSON.parse(JSON.stringify(newDef));
+    if (!this.widgetDef.fdws) this.widgetDef.fdws = '1.2';
+    if (!this.widgetDef.schemaVersion) this.widgetDef.schemaVersion = '1.2.0';
+    if (!this.widgetDef.layerGroups) this.widgetDef.layerGroups = [];
+    if (!this.widgetDef.state) this.widgetDef.state = [];
+    if (!this.widgetDef.components) this.widgetDef.components = [];
+    if (!this.widgetDef.assets) this.widgetDef.assets = [];
+
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.selectedComponentId = null;
+    this.selectedLayerGroupId = null;
+    this.hiddenInEditorIds = new Set();
+    this.hiddenLayerGroupIds = new Set();
+    this.liveStateValues = new Map();
+    this.notify('WIDGET_DEF_LOADED', { widgetDef: this.widgetDef });
+    this.persistSession();
+  }
+
+  /**
+   * Editor-only visibility — Design canvas rendering skips these, nothing else
+   * does. See the constructor comment above `hiddenInEditorIds`.
+   */
+  toggleComponentHiddenInEditor(id) {
+    if (this.hiddenInEditorIds.has(id)) this.hiddenInEditorIds.delete(id);
+    else this.hiddenInEditorIds.add(id);
+    this.notify('EDITOR_VISIBILITY_CHANGED', { componentId: id });
+  }
+
+  toggleLayerGroupHiddenInEditor(groupId) {
+    if (this.hiddenLayerGroupIds.has(groupId)) this.hiddenLayerGroupIds.delete(groupId);
+    else this.hiddenLayerGroupIds.add(groupId);
+    this.notify('EDITOR_VISIBILITY_CHANGED', { groupId });
+  }
+
+  /**
+   * Device View's draggable widget-slot position. Was called by the Col/Row
+   * number inputs (StudioDeviceView.js) without ever being defined — every
+   * edit there has been throwing since that UI shipped.
+   */
+  setDevicePlacement(col, row) {
+    this.devicePlacement = { col, row };
+    this.notify('DEVICE_PLACEMENT_CHANGED', { devicePlacement: this.devicePlacement });
+  }
+
+  /**
+   * State-tab live-value display — see the constructor comment above
+   * `liveStateValues`. Not history/persistence — purely a UI read-out.
+   */
+  setLiveStateValue(name, value) {
+    // Device View reseeds every declared var's current value on every render
+    // (SIM_TELEMETRY_UPDATED alone can fire quite often) — skip the notify
+    // when nothing actually changed so that doesn't thrash the State tab's
+    // own re-render on every single frame.
+    if (this.liveStateValues.has(name) && this.liveStateValues.get(name) === value) return;
+    this.liveStateValues.set(name, value);
+    this.notify('LIVE_STATE_VALUE_CHANGED', { name, value });
+  }
+
+  updateWidgetMeta(metaUpdates) {
+    this.saveHistory('Update Widget Meta');
+    this.widgetDef.meta = { ...this.widgetDef.meta, ...metaUpdates };
+    if (metaUpdates.id) this.widgetDef.id = metaUpdates.id;
+    if (metaUpdates.revision !== undefined) this.widgetDef.revision = metaUpdates.revision;
+    this.notify('WIDGET_META_UPDATED', { meta: this.widgetDef.meta });
+  }
+
+  updateWidgetLayout(layoutUpdates) {
+    this.saveHistory('Update Widget Layout');
+    this.widgetDef.layout = { ...this.widgetDef.layout, ...layoutUpdates };
+    if (layoutUpdates.grid) {
+      this.widgetDef.layout.grid = { ...this.widgetDef.layout.grid, ...layoutUpdates.grid };
+    }
+    this.notify('WIDGET_LAYOUT_UPDATED', { layout: this.widgetDef.layout });
+  }
+
+  updateWidgetStyle(styleUpdates) {
+    this.saveHistory('Update Widget Style');
+    this.widgetDef.style = { ...(this.widgetDef.style || {}), ...styleUpdates };
+    this.notify('WIDGET_STYLE_UPDATED', { style: this.widgetDef.style });
+  }
+
+  /**
+   * FDWS v1.18: sets the widget's baseTheme ('dark'|'light') and/or themeMode
+   * ('auto'|'manual'). Flipping themeMode auto -> manual seeds every
+   * component's (and the widget root's) style.themeOverride with whatever
+   * would currently be auto-derived for the non-base theme — an editable
+   * starting point instead of a blank one, so "I like the auto light theme
+   * except this one input's text color" only requires changing that one
+   * field. Fields that already carry a manual override are left untouched
+   * (re-flipping auto -> manual -> auto -> manual shouldn't clobber edits).
+   * @param {{baseTheme?: 'dark'|'light', themeMode?: 'auto'|'manual'}} updates
+   */
+  updateWidgetThemeConfig(updates) {
+    this.saveHistory('Update Widget Theme Config');
+    const prevMode = this.widgetDef.themeMode === 'manual' ? 'manual' : 'auto';
+    if (updates.baseTheme !== undefined) this.widgetDef.baseTheme = updates.baseTheme;
+    if (updates.themeMode !== undefined) this.widgetDef.themeMode = updates.themeMode;
+
+    const nowManual = this.widgetDef.themeMode === 'manual';
+    if (nowManual && prevMode !== 'manual') {
+      this.seedThemeOverrides();
+    }
+    this.notify('WIDGET_META_UPDATED', {});
+  }
+
+  /**
+   * The auto-derivation-as-starting-point prefill described on
+   * updateWidgetThemeConfig() above. renderTheme is always "the OTHER theme"
+   * (baseTheme flipped) — that's the only theme an override can ever apply
+   * to (the base theme's style.* IS the authored value).
+   */
+  seedThemeOverrides() {
+    const baseTheme = this.widgetDef.baseTheme === 'light' ? 'light' : 'dark';
+    const otherTheme = baseTheme === 'light' ? 'dark' : 'light';
+
+    const seedOne = (style, ctx) => {
+      if (!style) return style;
+      const existing = style.themeOverride || {};
+      const next = { ...existing };
+      if (style.typography?.color && existing.typography?.color === undefined) {
+        const derived = themeAdjustColor(style.typography.color, { ...ctx, colorKind: 'typography' }, otherTheme, baseTheme);
+        next.typography = { ...(existing.typography || {}), color: derived };
+      }
+      if (style.border?.color && existing.border?.color === undefined) {
+        const derived = themeAdjustColor(style.border.color, { ...ctx, colorKind: 'border' }, otherTheme, baseTheme);
+        next.border = { ...(existing.border || {}), color: derived };
+      }
+      if (style.background && existing.background === undefined) {
+        if (style.background.type === 'color' && style.background.color) {
+          next.background = { type: 'color', color: themeAdjustColor(style.background.color, { ...ctx, colorKind: 'background' }, otherTheme, baseTheme) };
+        } else if (style.background.type === 'gradient' && style.background.gradient) {
+          next.background = { type: 'gradient', gradient: themeAdjustGradient(style.background.gradient, ctx, otherTheme, baseTheme) };
+        }
+      }
+      return { ...style, themeOverride: next };
+    };
+
+    this.widgetDef.style = seedOne(this.widgetDef.style || {}, { componentType: 'widget-root', layerGroup: 'background' });
+    this.widgetDef.components = (this.widgetDef.components || []).map((comp) => ({
+      ...comp,
+      style: seedOne(comp.style || {}, { componentType: comp.type, layerGroup: comp.layer?.group })
+    }));
+  }
+
+  /**
+   * @param {string} id
+   * @param {boolean} additive - true for a shift-click: toggles `id` in the
+   *   multi-selection instead of replacing it entirely.
+   */
+  selectComponent(id, additive = false) {
+    if (!additive) {
+      this.multiSelectedIds = new Set(id ? [id] : []);
+      if (this.selectedComponentId === id) return;
+      this.selectedComponentId = id;
+      this.selectedLayerGroupId = null;
+      this.notify('SELECTION_CHANGED', { selectedComponentId: id });
+      return;
+    }
+
+    if (this.multiSelectedIds.has(id)) {
+      this.multiSelectedIds.delete(id);
+    } else {
+      this.multiSelectedIds.add(id);
+    }
+    // Primary selection follows the last-touched member so the Inspector
+    // always shows something sensible; falls back to any remaining member.
+    this.selectedComponentId = this.multiSelectedIds.has(id) ? id : ([...this.multiSelectedIds][0] || null);
+    this.selectedLayerGroupId = null;
+    this.notify('SELECTION_CHANGED', { selectedComponentId: this.selectedComponentId });
+  }
+
+  selectLayerGroup(groupId) {
+    this.selectedLayerGroupId = groupId;
+    this.selectedComponentId = null;
+    this.multiSelectedIds = new Set();
+    this.notify('LAYER_GROUP_SELECTED', { groupId });
+  }
+
+  clearSelection() {
+    this.selectedComponentId = null;
+    this.selectedLayerGroupId = null;
+    this.multiSelectedIds = new Set();
+    this.notify('SELECTION_CHANGED', { selectedComponentId: null });
+  }
+
+  /**
+   * Aligns/distributes every currently multi-selected component's grid
+   * layout (col/row/w/h are already grid-quantized, so this stays exact —
+   * no pixel math). Requires 2+ selected; no-ops otherwise. One undo step
+   * for the whole batch, not per-component.
+   * @param {'left'|'right'|'top'|'bottom'|'centerX'|'centerY'|'distributeH'|'distributeV'|'stackPivot'} mode
+   */
+  applyAlignment(mode) {
+    const ids = [...this.multiSelectedIds];
+    if (ids.length < 2) return;
+    const comps = ids.map((id) => this.getComponent(id)).filter(Boolean);
+    if (comps.length < 2) return;
+
+    this.saveHistory(`Align (${mode})`);
+
+    if (mode === 'left') {
+      const minCol = Math.min(...comps.map((c) => c.layout.col));
+      comps.forEach((c) => { c.layout.col = minCol; });
+    } else if (mode === 'right') {
+      const maxRight = Math.max(...comps.map((c) => c.layout.col + c.layout.w));
+      comps.forEach((c) => { c.layout.col = maxRight - c.layout.w; });
+    } else if (mode === 'top') {
+      const minRow = Math.min(...comps.map((c) => c.layout.row));
+      comps.forEach((c) => { c.layout.row = minRow; });
+    } else if (mode === 'bottom') {
+      const maxBottom = Math.max(...comps.map((c) => c.layout.row + c.layout.h));
+      comps.forEach((c) => { c.layout.row = maxBottom - c.layout.h; });
+    } else if (mode === 'centerX') {
+      const midCol = comps.reduce((sum, c) => sum + (c.layout.col + c.layout.w / 2), 0) / comps.length;
+      comps.forEach((c) => { c.layout.col = Math.round(midCol - c.layout.w / 2); });
+    } else if (mode === 'centerY') {
+      const midRow = comps.reduce((sum, c) => sum + (c.layout.row + c.layout.h / 2), 0) / comps.length;
+      comps.forEach((c) => { c.layout.row = Math.round(midRow - c.layout.h / 2); });
+    } else if (mode === 'distributeH') {
+      const sorted = [...comps].sort((a, b) => a.layout.col - b.layout.col);
+      const first = sorted[0];
+      const last = sorted[sorted.length - 1];
+      const span = (last.layout.col + last.layout.w) - first.layout.col;
+      const totalW = sorted.reduce((sum, c) => sum + c.layout.w, 0);
+      const gap = sorted.length > 1 ? (span - totalW) / (sorted.length - 1) : 0;
+      let cursor = first.layout.col;
+      sorted.forEach((c) => { c.layout.col = Math.round(cursor); cursor += c.layout.w + gap; });
+    } else if (mode === 'distributeV') {
+      const sorted = [...comps].sort((a, b) => a.layout.row - b.layout.row);
+      const first = sorted[0];
+      const last = sorted[sorted.length - 1];
+      const span = (last.layout.row + last.layout.h) - first.layout.row;
+      const totalH = sorted.reduce((sum, c) => sum + c.layout.h, 0);
+      const gap = sorted.length > 1 ? (span - totalH) / (sorted.length - 1) : 0;
+      let cursor = first.layout.row;
+      sorted.forEach((c) => { c.layout.row = Math.round(cursor); cursor += c.layout.h + gap; });
+    } else if (mode === 'stackPivot') {
+      // FDWS v1.20: for a multi-layer instrument built from several
+      // independently-rotating core.gauge components that must share one
+      // exact visual center (e.g. an HSI's compass card + heading bug +
+      // course needle) — hand-aligning col/row/w/h to overlap pixel-for-
+      // pixel, then copying pivot to each one, was exactly the tedious
+      // per-layer authoring step this initiative set out to remove. Copies
+      // the first-selected component's layout box onto every other selected
+      // component (so they occupy the identical grid cell), and — for any
+      // selected core.gauge, when the anchor is also a core.gauge with a
+      // pivot set — copies that pivot too. Non-gauge components in the
+      // selection still get the layout match (useful for a static face
+      // image sharing the same box) but are left alone otherwise.
+      const anchor = comps[0];
+      comps.slice(1).forEach((c) => {
+        c.layout = { ...c.layout, col: anchor.layout.col, row: anchor.layout.row, w: anchor.layout.w, h: anchor.layout.h };
+        if (c.type === 'core.gauge' && anchor.type === 'core.gauge' && anchor.props?.pivot) {
+          c.props = { ...(c.props || {}), pivot: { ...anchor.props.pivot } };
+        }
+      });
+    }
+
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.notify('WIDGET_LAYOUT_UPDATED', {});
+  }
+
+  /**
+   * Widget Studio 2.0, Phase 3: applies the same style update to every
+   * currently multi-selected component in one undo step — e.g. setting
+   * Border Color once for 5 selected buttons instead of visiting each one's
+   * own Inspector panel individually. No-ops below 2 selected (nothing
+   * "bulk" about one).
+   *
+   * Each top-level key in `styleUpdates` (typography/border/background/...)
+   * is merged ONE LEVEL DEEP into each component's OWN existing style.<key> —
+   * not a wholesale replace. This matters because the bulk editor calls this
+   * once per field the author touches (Border Width, then separately Corner
+   * Radius, ...): a wholesale replace would make the second call's
+   * `{border: {radius}}` silently erase the width the first call had just
+   * set, since two different components could each already have their own,
+   * different border values before either bulk edit ran.
+   * @param {object} styleUpdates - e.g. { typography: { color: '#ff0000' } }
+   */
+  applyStyleToSelection(styleUpdates) {
+    const ids = [...this.multiSelectedIds];
+    if (ids.length < 2) return;
+    const comps = ids.map((id) => this.getComponent(id)).filter(Boolean);
+    if (comps.length < 2) return;
+
+    this.saveHistory(`Bulk Style Edit (${comps.length} components)`);
+    comps.forEach((c) => {
+      const nextStyle = { ...(c.style || {}) };
+      Object.entries(styleUpdates).forEach(([key, val]) => {
+        nextStyle[key] = (val && typeof val === 'object' && !Array.isArray(val))
+          ? { ...(nextStyle[key] || {}), ...val }
+          : val;
+      });
+      c.style = nextStyle;
+    });
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.notify('WIDGET_LAYOUT_UPDATED', {});
+  }
+
+  /**
+   * Widget Studio 2.0, Phase 3: copies one component's full style object
+   * (typography/border/background/align/offset/orientation — everything
+   * BaseComponent.applyStyles() cascades) onto the session-only clipboard.
+   * Deep-cloned so later edits to the source component can't retroactively
+   * change what a subsequent paste applies.
+   * @param {string} id
+   */
+  copyComponentStyle(id) {
+    const comp = this.getComponent(id);
+    if (!comp) return;
+    this.copiedStyle = JSON.parse(JSON.stringify(comp.style || {}));
+    this.notify('STYLE_CLIPBOARD_UPDATED', {});
+  }
+
+  /**
+   * Pastes the clipboard style onto one component, wholesale-replacing its
+   * existing style (unlike applyStyleToSelection's per-field merge — a
+   * paste means "make this look exactly like the copied one," not "layer
+   * one more field on top"). One undo step. No-ops if nothing's copied yet.
+   * @param {string} id
+   */
+  pasteStyleToComponent(id) {
+    if (!this.copiedStyle) return;
+    this.updateComponent(id, { style: JSON.parse(JSON.stringify(this.copiedStyle)) }, true, 'Paste Style');
+  }
+
+  /**
+   * Pastes the clipboard style onto every multi-selected component at once,
+   * wholesale-replacing each one's existing style. One combined undo step.
+   * No-ops below 2 selected or with nothing copied.
+   */
+  pasteStyleToSelection() {
+    if (!this.copiedStyle) return;
+    const ids = [...this.multiSelectedIds];
+    if (ids.length < 2) return;
+    const comps = ids.map((id) => this.getComponent(id)).filter(Boolean);
+    if (comps.length < 2) return;
+
+    this.saveHistory(`Paste Style (${comps.length} components)`);
+    comps.forEach((c) => {
+      c.style = JSON.parse(JSON.stringify(this.copiedStyle));
+    });
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.notify('WIDGET_LAYOUT_UPDATED', {});
+  }
+
+  getComponent(id) {
+    if (!id) return null;
+    return this.widgetDef.components?.find((c) => c.id === id) || null;
+  }
+
+  updateComponent(id, updates, recordHistory = true, label = 'Update Component') {
+    const comp = this.getComponent(id);
+    if (!comp) return;
+
+    if (recordHistory) {
+      this.saveHistory(label);
+    }
+
+    Object.assign(comp, updates);
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.notify('COMPONENT_UPDATED', { componentId: id, component: comp });
+  }
+
+  addComponent(newComp, recordHistory = true) {
+    if (recordHistory) {
+      this.saveHistory(`Add ${newComp.type || 'Component'}`);
+    }
+
+    // Ensure unique ID
+    let compId = newComp.id || `comp_${Date.now().toString(36).slice(-4)}`;
+    let counter = 1;
+    while (this.widgetDef.components.some((c) => c.id === compId)) {
+      compId = `${newComp.id || 'comp'}_${counter++}`;
+    }
+    newComp.id = compId;
+
+    if (!newComp.layout) {
+      newComp.layout = { col: 1, row: 1, w: 4, h: 2 };
+    }
+    if (!newComp.layer) {
+      newComp.layer = { z: 0, group: null, pointerEvents: 'auto', clipToBounds: false };
+    }
+
+    this.widgetDef.components.push(newComp);
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.selectedComponentId = newComp.id;
+    this.notify('COMPONENT_ADDED', { component: newComp });
+    return newComp;
+  }
+
+  deleteComponent(id) {
+    const idx = this.widgetDef.components?.findIndex((c) => c.id === id);
+    if (idx === -1 || idx === undefined) return;
+
+    this.saveHistory('Delete Component');
+    const removed = this.widgetDef.components.splice(idx, 1)[0];
+    if (this.selectedComponentId === id) {
+      this.selectedComponentId = null;
+    }
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.notify('COMPONENT_DELETED', { componentId: id, component: removed });
+  }
+
+  /**
+   * Widget Studio 2.0, Phase 3: deletes every currently multi-selected
+   * component in one step — Delete/Backspace previously only ever removed
+   * `selectedComponentId` (the primary/last-touched member), silently
+   * leaving the rest of a multi-selection behind. One combined undo step,
+   * same convention as applyAlignment(). No-ops below 1 selected (nothing to
+   * do) — falls back to the single-delete id list either way, so this is
+   * safe to call unconditionally from a Delete/Backspace handler regardless
+   * of whether 1 or several components are selected.
+   */
+  deleteMultiSelection() {
+    const ids = this.multiSelectedIds.size > 0
+      ? [...this.multiSelectedIds]
+      : (this.selectedComponentId ? [this.selectedComponentId] : []);
+    if (ids.length === 0) return;
+
+    this.saveHistory(ids.length > 1 ? `Delete ${ids.length} Components` : 'Delete Component');
+    const idSet = new Set(ids);
+    this.widgetDef.components = (this.widgetDef.components || []).filter((c) => !idSet.has(c.id));
+    if (idSet.has(this.selectedComponentId)) this.selectedComponentId = null;
+    this.multiSelectedIds = new Set();
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.notify('COMPONENT_DELETED', { componentIds: ids });
+  }
+
+  duplicateComponent(id) {
+    const comp = this.getComponent(id);
+    if (!comp) return null;
+
+    this.saveHistory('Duplicate Component');
+    const clone = JSON.parse(JSON.stringify(comp));
+    clone.id = `${comp.id}_copy`;
+    let counter = 2;
+    while (this.widgetDef.components.some((c) => c.id === clone.id)) {
+      clone.id = `${comp.id}_copy${counter++}`;
+    }
+
+    // Offset layout slightly if space allows
+    const maxCols = this.widgetDef.layout?.grid?.columns || 12;
+    const maxRows = this.widgetDef.layout?.grid?.rows || 6;
+    if (clone.layout.col + 1 <= maxCols) clone.layout.col += 1;
+    if (clone.layout.row + 1 <= maxRows) clone.layout.row += 1;
+
+    this.widgetDef.components.push(clone);
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.selectedComponentId = clone.id;
+    this.notify('COMPONENT_ADDED', { component: clone });
+    return clone;
+  }
+
+  addLayerGroup(group) {
+    this.saveHistory('Add Layer Group');
+    if (!this.widgetDef.layerGroups) this.widgetDef.layerGroups = [];
+    this.widgetDef.layerGroups.push(group);
+    this.notify('LAYER_GROUPS_UPDATED', { layerGroups: this.widgetDef.layerGroups });
+  }
+
+  updateLayerGroup(groupId, updates) {
+    const group = this.widgetDef.layerGroups?.find((g) => g.id === groupId);
+    if (!group) return;
+    this.saveHistory('Update Layer Group');
+    Object.assign(group, updates);
+    this.notify('LAYER_GROUPS_UPDATED', { layerGroups: this.widgetDef.layerGroups });
+  }
+
+  /**
+   * Reorders layerGroups to match `orderedIds` (drag-and-drop in the Layers
+   * tab) and reassigns each group's z to its new index × 100 — the same
+   * spacing convention every built-in template already uses, so a reorder
+   * always produces a sensible, predictable stacking order without the user
+   * having to hand-tune numeric Z-offsets.
+   * @param {string[]} orderedIds
+   */
+  reorderLayerGroups(orderedIds) {
+    const groups = this.widgetDef.layerGroups || [];
+    const byId = new Map(groups.map((g) => [g.id, g]));
+    const reordered = orderedIds.map((id) => byId.get(id)).filter(Boolean);
+    if (reordered.length !== groups.length) return;
+
+    this.saveHistory('Reorder Layer Groups');
+    reordered.forEach((g, idx) => { g.z = idx * 100; });
+    this.widgetDef.layerGroups = reordered;
+    this.notify('LAYER_GROUPS_UPDATED', { layerGroups: this.widgetDef.layerGroups });
+  }
+
+  deleteLayerGroup(groupId) {
+    if (!this.widgetDef.layerGroups) return;
+    this.saveHistory('Delete Layer Group');
+    this.widgetDef.layerGroups = this.widgetDef.layerGroups.filter((g) => g.id !== groupId);
+    // Reset components referencing this group to null
+    this.widgetDef.components.forEach((c) => {
+      if (c.layer?.group === groupId) {
+        c.layer.group = null;
+      }
+    });
+    this.notify('LAYER_GROUPS_UPDATED', { layerGroups: this.widgetDef.layerGroups });
+  }
+
+  addStateVar(stateVar) {
+    this.saveHistory('Add State Variable');
+    if (!this.widgetDef.state) this.widgetDef.state = [];
+    this.widgetDef.state.push(stateVar);
+    this.notify('STATE_VARS_UPDATED', { state: this.widgetDef.state });
+  }
+
+  updateStateVar(name, updates) {
+    const st = this.widgetDef.state?.find((s) => s.name === name);
+    if (!st) return;
+    this.saveHistory('Update State Variable');
+    Object.assign(st, updates);
+    this.notify('STATE_VARS_UPDATED', { state: this.widgetDef.state });
+  }
+
+  deleteStateVar(name) {
+    if (!this.widgetDef.state) return;
+    this.saveHistory('Delete State Variable');
+    this.widgetDef.state = this.widgetDef.state.filter((s) => s.name !== name);
+    this.notify('STATE_VARS_UPDATED', { state: this.widgetDef.state });
+  }
+
+  addAsset(asset) {
+    this.saveHistory('Upload Asset');
+    if (!this.widgetDef.assets) this.widgetDef.assets = [];
+    this.widgetDef.assets.push(asset);
+    this.notify('ASSETS_UPDATED', { assets: this.widgetDef.assets });
+  }
+
+  deleteAsset(assetId) {
+    if (!this.widgetDef.assets) return;
+    this.saveHistory('Delete Asset');
+    this.widgetDef.assets = this.widgetDef.assets.filter((a) => a.id !== assetId);
+    this.notify('ASSETS_UPDATED', { assets: this.widgetDef.assets });
+  }
+
+  setViewportMode(mode) {
+    if (this.viewportMode === mode) return;
+    this.viewportMode = mode;
+    this.notify('VIEWPORT_MODE_CHANGED', { viewportMode: mode });
+  }
+
+  setPreviewTheme(theme) {
+    if (this.previewTheme === theme) return;
+    this.previewTheme = theme;
+    this.notify('PREVIEW_THEME_CHANGED', { previewTheme: theme });
+  }
+
+  setZoom(zoomVal) {
+    this.zoom = zoomVal;
+    this.notify('ZOOM_CHANGED', { zoom: this.zoom });
+  }
+
+  setLeftTab(tab) {
+    this.leftTab = tab;
+    this.notify('LEFT_TAB_CHANGED', { leftTab: tab });
+  }
+
+  setDeviceProfile(deviceId) {
+    this.activeDeviceId = deviceId;
+    this.notify('DEVICE_CHANGED', { deviceId });
+  }
+
+  setDeviceOrientation(orientation) {
+    this.deviceOrientation = orientation;
+    this.notify('DEVICE_ORIENTATION_CHANGED', { orientation });
+  }
+
+  updateSimTelemetry(key, value) {
+    this.simTelemetry[key] = value;
+    this.notify('SIM_TELEMETRY_UPDATED', { key, value, telemetry: this.simTelemetry });
+  }
+
+  loadSavedWidgets() {
+    try {
+      const raw = localStorage.getItem('fdws_saved_widgets');
+      const parsed = raw ? JSON.parse(raw) : [];
+      // FDWS v1.3: normalize missing kind to 'widget' for entries saved before the
+      // popover-kind field existed.
+      return parsed.map((w) => (w.kind ? w : { ...w, kind: 'widget' }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * FDWS v1.3: saved widgets filtered by kind ('widget' | 'popover'), used by the
+   * saved-widgets gallery and the core.openWidgetPopover popoverWidgetId picker.
+   * @param {'widget'|'popover'} kind
+   * @returns {Array<object>}
+   */
+  getSavedWidgetsByKind(kind) {
+    return this.loadSavedWidgets().filter((w) => (w.kind || 'widget') === kind);
+  }
+
+  /**
+   * FDWS v1.3: resets the active editor to a blank kind:"popover" widget definition
+   * — same shape as a normal widget (components/state/interactions), just tagged so
+   * it's opened only via core.openWidgetPopover rather than placed on a page layout.
+   */
+  createNewPopoverWidget() {
+    // Same fix as the blank widget template (StudioTemplates.js, 2026-08-29):
+    // stamp whatever this build of Studio actually supports, not a fixed
+    // version — a popover built with any field newer than v1.3 previously
+    // still exported declaring "fdws": "1.3" forever.
+    const blank = {
+      fdws: LATEST_FDWS_VERSION,
+      schemaVersion: `${LATEST_FDWS_VERSION}.0`,
+      id: `com.flightdeck.custompopover${Date.now()}`,
+      kind: 'popover',
+      revision: 1,
+      meta: { name: 'New Popover', category: 'Popovers', description: 'Custom FDWS popover widget' },
+      layout: { defaultW: 8, defaultH: 4, grid: { columns: 12, rows: 6 } },
+      layerGroups: [],
+      state: [],
+      components: [],
+      capabilities: { readSimVars: [], writeEvents: [] }
+    };
+    this.setWidgetDef(blank, true, 'New Popover Widget');
+  }
+
+  /**
+   * FDWS v1.19 §1.5: registers popover definitions embedded in an imported
+   * widget's "popovers" array into the same local library createNewPopoverWidget/
+   * saveCurrentWidgetToLibrary use, so the popoverWidgetId picker can find them
+   * and a later export can re-bundle them — same treatment as if each had been
+   * imported into Studio on its own.
+   * @param {object[]} popovers
+   */
+  importEmbeddedPopovers(popovers) {
+    if (!Array.isArray(popovers) || popovers.length === 0) return;
+    const saved = this.loadSavedWidgets();
+    popovers.forEach((p) => {
+      const snapshot = { ...JSON.parse(JSON.stringify(p)), kind: 'popover' };
+      const existingIdx = saved.findIndex((w) => w.id === snapshot.id);
+      if (existingIdx >= 0) saved[existingIdx] = snapshot;
+      else saved.push(snapshot);
+    });
+    try {
+      localStorage.setItem('fdws_saved_widgets', JSON.stringify(saved));
+      this.savedWidgets = saved;
+      this.notify('SAVED_WIDGETS_UPDATED', { savedWidgets: saved });
+    } catch (e) {
+      console.error('[StudioState] Failed to save embedded popovers to localStorage:', e);
+    }
+  }
+
+  saveCurrentWidgetToLibrary() {
+    this.widgetDef.revision = (this.widgetDef.revision || 1) + 1;
+    StudioValidator.syncCapabilities(this.widgetDef);
+
+    const saved = this.loadSavedWidgets();
+    const existingIdx = saved.findIndex((w) => w.id === this.widgetDef.id);
+    const widgetSnapshot = JSON.parse(JSON.stringify(this.widgetDef));
+
+    if (existingIdx >= 0) {
+      saved[existingIdx] = widgetSnapshot;
+    } else {
+      saved.push(widgetSnapshot);
+    }
+
+    try {
+      localStorage.setItem('fdws_saved_widgets', JSON.stringify(saved));
+      this.savedWidgets = saved;
+      this.isDirty = false;
+      this.notify('WIDGET_SAVED', { id: this.widgetDef.id });
+      return true;
+    } catch (e) {
+      console.error('[StudioState] Failed to save widget to localStorage:', e);
+      return false;
+    }
+  }
+
+  deleteSavedWidget(id) {
+    const saved = this.loadSavedWidgets().filter((w) => w.id !== id);
+    try {
+      localStorage.setItem('fdws_saved_widgets', JSON.stringify(saved));
+      this.savedWidgets = saved;
+      this.notify('SAVED_WIDGETS_UPDATED', { savedWidgets: saved });
+    } catch (e) {
+      console.error('[StudioState] Failed to delete saved widget:', e);
+    }
+  }
+
+  persistSession() {
+    try {
+      localStorage.setItem('fdws_current_session', JSON.stringify(this.widgetDef));
+    } catch {
+      // Ignore quota error
+    }
+  }
+
+  restoreSession() {
+    try {
+      const raw = localStorage.getItem('fdws_current_session');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.id && parsed.components) {
+          this.widgetDef = parsed;
+          StudioValidator.syncCapabilities(this.widgetDef);
+        }
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  }
+}
