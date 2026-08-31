@@ -826,6 +826,7 @@ export class StudioInspector {
       const stroke = typo.stroke || {};
       const glow = typo.glow || {};
       const border = style.border || {};
+      const borderGlow = border.glow || {};
       const bg = style.background || {};
       const align = style.align || {};
       const offset = style.offset || {};
@@ -1020,6 +1021,23 @@ export class StudioInspector {
           </select>
         </div>
 
+        <div class="prop-row-2" data-tier="advanced">
+          <div class="prop-field">
+            <label>Border Glow Color <span class="prop-hint" title="FDWS v1.24. Soft glow around the border — annunciator bloom, a selected-state ring. Leave blank for none.">ⓘ</span></label>
+            <div class="color-picker-wrap">
+              <input type="color" id="c-border-glow-color-pick" value="${this.toHexColor(borderGlow.color) || '#38bdf8'}" />
+              <input type="text" id="c-border-glow-color" class="prop-input" value="${borderGlow.color || ''}" placeholder="none" />
+            </div>
+          </div>
+          <div class="prop-field">
+            <label>Glow Spread (px)</label>
+            <input type="number" id="c-border-glow-blur" class="prop-input" value="${borderGlow.blur ?? ''}" min="0" step="1" placeholder="6" />
+          </div>
+        </div>
+        <div class="prop-field" data-tier="advanced">
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="c-border-glow-inset" ${borderGlow.inset ? 'checked' : ''} /> Glow inward instead of outward</label>
+        </div>
+
         <div class="prop-section-subtitle" style="margin-top:10px;">Background Fill</div>
         <div class="prop-field">
           <label>Background Type</label>
@@ -1182,6 +1200,22 @@ export class StudioInspector {
         setBorderColor(e.target.value);
       });
       body.querySelector('#c-border-style')?.addEventListener('change', (e) => updateStyle({ border: { ...(comp.style?.border || {}), style: e.target.value } }));
+
+      const updateBorderGlow = (updates) => {
+        const nextGlow = { ...(comp.style?.border?.glow || {}), ...updates };
+        updateStyle({ border: { ...(comp.style?.border || {}), glow: nextGlow } });
+      };
+      body.querySelector('#c-border-glow-color')?.addEventListener('change', (e) => updateBorderGlow({ color: e.target.value || undefined }));
+      body.querySelector('#c-border-glow-color-pick')?.addEventListener('input', (e) => {
+        const txt = body.querySelector('#c-border-glow-color');
+        if (txt) txt.value = e.target.value;
+        updateBorderGlow({ color: e.target.value });
+      });
+      body.querySelector('#c-border-glow-blur')?.addEventListener('change', (e) => {
+        const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
+        updateBorderGlow({ blur: val });
+      });
+      body.querySelector('#c-border-glow-inset')?.addEventListener('change', (e) => updateBorderGlow({ inset: e.target.checked || undefined }));
 
       const setBg = themeEdit.isOverrideEdit ? updateOverrideBackground : (nextBg) => updateStyle({ background: nextBg });
       const curBg = themeEdit.isOverrideEdit ? (comp.style?.themeOverride?.background || {}) : (comp.style?.background || {});

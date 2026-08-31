@@ -30,6 +30,12 @@ export class DividerComponent extends BaseComponent {
 
     this.applyLine();
 
+    // lineNode didn't exist yet when super.render() ran applyStyles() (offset's
+    // transformTarget chain falls back to it — see BaseComponent.js), so that
+    // first pass had nothing to nudge. Redo it now that the line itself exists,
+    // same fix ButtonComponent applies for its own btnNode.
+    this.applyStyles();
+
     return this.element;
   }
 

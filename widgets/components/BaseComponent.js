@@ -291,6 +291,16 @@ export class BaseComponent {
     if (border.radius !== undefined) {
       surfaceTarget.style.borderRadius = `${border.radius}px`;
     }
+    // FDWS v1.24: soft glow around the border — annunciator bloom, a
+    // selected-state ring. Outward by default; border.glow.inset flips it to
+    // glow inward instead. Set unconditionally (empty string when unset) so a
+    // style.rules swap that drops the glow actually clears a previously-
+    // applied one, same reasoning as typography's glowVal above. box-shadow
+    // isn't used anywhere else on this node, so nothing else to preserve.
+    const glowColor = border.glow && border.glow.color;
+    surfaceTarget.style.boxShadow = glowColor
+      ? `${border.glow.inset ? 'inset ' : ''}0 0 ${border.glow.blur ?? 6}px ${glowColor}`
+      : '';
 
     // 3. Background (none, color, gradient, image) — a rule's background (if
     // its condition matched) wins over per-state, which wins over base. This
@@ -354,7 +364,10 @@ export class BaseComponent {
     // both target the same single node, so they're combined into one
     // `transform` value rather than one silently overwriting the other.
     const orientation = ruleStyle.orientation ?? stateStyle.orientation ?? style.orientation ?? 0;
-    const transformTarget = this.labelNode || this.valueNode || this.inputNode || this.btnNode || this.dotNode;
+    // this.lineNode: core.divider's own line (see DividerComponent.js) — falls in
+    // at the end of the chain so every other component type's existing target
+    // wins first, same as dotNode already does for core.indicator.
+    const transformTarget = this.labelNode || this.valueNode || this.inputNode || this.btnNode || this.dotNode || this.lineNode;
     if (transformTarget) {
       const transformParts = [];
       if (offset.x || offset.y) transformParts.push(`translate(${offset.x || 0}px, ${offset.y || 0}px)`);

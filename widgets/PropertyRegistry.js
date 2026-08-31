@@ -38,7 +38,7 @@
 export const FDWS_VERSIONS = [
   '1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9', '1.10',
   '1.11', '1.12', '1.13', '1.14', '1.15', '1.16', '1.17', '1.18', '1.19', '1.20',
-  '1.21', '1.22', '1.23'
+  '1.21', '1.22', '1.23', '1.24'
 ];
 
 // ---------------------------------------------------------------------------
@@ -225,6 +225,9 @@ export const COMMON_FIELDS = [
   { path: 'style.border.color', control: 'color', tier: 'simple', group: 'Border', tooltip: 'Border color.' },
   { path: 'style.border.radius', control: 'number', tier: 'simple', group: 'Border', tooltip: 'Corner rounding in pixels.' },
   { path: 'style.border.style', control: 'select', options: ['solid', 'dashed', 'dotted'], tier: 'advanced', group: 'Border', fdwsMin: '1.17', tooltip: 'Border line style. Defaults to solid. core.divider uses this same field for its line style.' },
+  { path: 'style.border.glow.color', control: 'color', tier: 'advanced', group: 'Border', fdwsMin: '1.24', tooltip: 'Soft glow around the border — annunciator bloom, selected-state ring. Leave unset for none.' },
+  { path: 'style.border.glow.blur', control: 'number', tier: 'advanced', group: 'Border', fdwsMin: '1.24', tooltip: 'Glow spread radius in pixels. Defaults to 6 if a glow color is set but this is left blank.' },
+  { path: 'style.border.glow.inset', control: 'checkbox', tier: 'advanced', group: 'Border', fdwsMin: '1.24', tooltip: 'Glows inward instead of outward — a highlighted-from-within look instead of a halo around the edge.' },
 
   // --- Background (style.background.*) — runtime already supports color/gradient/image
   // (BaseComponent.js §3); image support has NO Inspector field today, so it is a
