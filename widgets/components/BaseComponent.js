@@ -233,12 +233,22 @@ export class BaseComponent {
     // TWICE — once via super.render() before btnNode exists (so this ran
     // with surfaceTarget === this.element that first time) and once more
     // right after btnNode is created. Without clearing here, the first
-    // pass's border/background stays stranded on this.element forever,
+    // pass's border/background/glow stays stranded on this.element forever,
     // reintroducing the exact double-border/-background this whole
     // surfaceTarget scheme exists to prevent.
+    //
+    // boxShadow (FDWS v1.24 border.glow) is exactly this bug: this.element
+    // never gets an explicit border-radius (only btnNode does, off the
+    // stylesheet default when the author hasn't set style.border.radius),
+    // so a glow stranded there from pass 1 sits at radius 0 while btnNode's
+    // fresh one (pass 2) is correctly rounded — two overlapping shadows,
+    // one square, one round, the square one's corners peeking out past the
+    // round one. Reported live as "a faint square outline" around an
+    // otherwise-rounded button.
     if (surfaceTarget !== this.element) {
       this.element.style.border = '';
       this.element.style.background = '';
+      this.element.style.boxShadow = '';
     }
 
     // 1. Typography
