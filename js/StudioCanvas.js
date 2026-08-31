@@ -624,6 +624,19 @@ export class StudioCanvas {
     container.style.borderRadius = `${style.border?.radius ?? 4}px`;
     container.style.border = `${style.border?.width ?? 1}px solid ${borderColor || '#273344'}`;
     container.style.backgroundColor = bgColor || '#131b26';
+    // FDWS v1.24: style.border.glow — this design-canvas mock never drew it at
+    // all (Device View/the real BaseComponent.js path was the only place it
+    // rendered), so an author tweaking it here saw no glow of their own, just
+    // whatever this component's real (or, unselected, none) editor chrome
+    // happened to show — easy to mistake for "the glow isn't following my
+    // border radius" when it's actually "the glow isn't here yet." Same
+    // borderRadius set two lines up, so this one — unlike .selected's chrome
+    // outline below, which is a fixed-radius outer node — is authored-radius
+    // accurate on this container.
+    const glowColor = style.border?.glow?.color;
+    container.style.boxShadow = glowColor
+      ? `${style.border.glow.inset ? 'inset ' : ''}0 0 ${style.border.glow.blur ?? 6}px ${glowColor}`
+      : '';
 
     if (resolvedBg?.type === 'gradient' && resolvedBg.gradient) {
       container.style.background = resolvedBg.gradient;
