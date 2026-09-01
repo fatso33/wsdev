@@ -38,7 +38,7 @@
 export const FDWS_VERSIONS = [
   '1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9', '1.10',
   '1.11', '1.12', '1.13', '1.14', '1.15', '1.16', '1.17', '1.18', '1.19', '1.20',
-  '1.21', '1.22', '1.23', '1.24', '1.25'
+  '1.21', '1.22', '1.23', '1.24', '1.25', '1.26'
 ];
 
 // ---------------------------------------------------------------------------
@@ -278,7 +278,8 @@ export const COMMON_FIELDS = [
   { path: 'binding.stateVar', control: 'stateVarPicker', tier: 'simple', group: 'Bindings', tooltip: 'Local state[] variable this component reads and re-renders on when it changes.' },
   { path: 'binding.stateRef', control: 'stateRefPicker', tier: 'advanced', group: 'Bindings', tooltip: 'Nested/indexed local state path (e.g. "presets[0].freq") this component’s primary value resolves from.' },
   { path: 'binding.sublabelStateRef', control: 'stateRefPicker', tier: 'advanced', group: 'Bindings', appliesTo: ['core.button'], tooltip: 'Same as Bind to State Path, but for this button’s second (sublabel) text slot — independent of the primary binding.' },
-  { path: 'binding.pollFrequencyHz', control: 'select', options: [{ value: 1, label: 'Normal (1Hz)' }, { value: 20, label: 'Fast (~100Hz cadence)' }], tier: 'simple', group: 'Bindings', tooltip: 'How often the sim pushes this SimVar. Fast is for anything that needs to look smooth in motion (an attitude indicator); Normal is enough for slow-changing values (fuel qty).' },
+  { path: 'binding.pollFrequencyHz', control: 'select', options: [{ value: 1, label: 'Normal (1Hz)' }, { value: 20, label: 'Fast (~100Hz cadence)' }], tier: 'simple', group: 'Bindings', tooltip: 'How often the sim pushes this SimVar. Fast is for anything that needs to look smooth in motion (an attitude indicator); Normal is enough for slow-changing values (fuel qty). Since FDWS v1.26, PC Bridge only sends a SimVar when its value actually changes, so Normal already reacts within a frame of a real change — Fast is now only about getting a value that’s always fluctuating (motion), not about lag.' },
+  { path: 'binding.pollGroup', control: 'text', tier: 'advanced', group: 'Bindings', fdwsMin: '1.26', tooltip: 'Which PC Bridge polling chunk this SimVar joins. Leave blank to default to this widget’s own id, which already groups all of this widget’s own bindings together and away from unrelated widgets’ vars. Only set this to deliberately merge chunks across widgets (e.g. two widgets that share a bus and should always update in lockstep), or to split one unusually noisy var out of an otherwise-quiet widget.' },
   { path: 'binding.deadband', control: 'number', tier: 'advanced', group: 'Bindings', tooltip: 'Ignore changes smaller than this, so a jittery sensor doesn’t spam re-renders.' },
   { path: 'binding.transition', control: 'select', options: ['none', 'ease', 'linear'], tier: 'advanced', group: 'Bindings', tooltip: 'Animates value changes instead of snapping instantly.' },
   { path: 'binding.unit', control: 'text', tier: 'advanced', group: 'Bindings', tooltip: 'Unit the SimVar is requested in (e.g. "knots", "degrees").' },

@@ -917,6 +917,12 @@ export class StudioLayersPanel {
               <input type="number" step="any" min="0" id="sv-deadband" class="prop-input" value="${initial.deadband ?? 0}" />
             </div>
           </div>
+          <div class="modal-form-row">
+            <div class="prop-field">
+              <label>Poll Group <span class="prop-hint" title="FDWS v1.26: which PC Bridge polling chunk this SimVar's data definition joins. Leave blank to default to this widget's own id — already groups all of this widget's own bindings together, away from unrelated widgets' vars. Only set this to deliberately merge chunks across widgets, or split an unusually noisy var out of an otherwise-quiet widget.">ⓘ</span></label>
+              <input type="text" id="sv-pollgroup" class="prop-input" value="${initial.pollGroup || ''}" placeholder="(defaults to this widget's id)" />
+            </div>
+          </div>
         </div>
         <div class="modal-form-row">
           <label>Persistence <span class="prop-hint" title="Don't persist: resets to Default on every widget remount (e.g. switching pages away and back), same as before this field existed. Persist (device storage): saved durably, restored on next app launch — days/weeks later. Session only (FDWS v1.22): survives switching pages within the current running app, but resets the next time the app is actually relaunched — nothing is written to device storage. Disallowed for type &quot;array&quot; with a Sync From set either way — a live feed (flight plans, message queues) is always re-synced fresh and a persisted/session copy of it would just go stale.">ⓘ</span></label>
@@ -1114,6 +1120,8 @@ export class StudioLayersPanel {
           value.syncFrom = syncFrom;
           value.pollFrequencyHz = Number(card.querySelector('#sv-pollrate')?.value) || 1;
           value.deadband = Number(card.querySelector('#sv-deadband')?.value) || 0;
+          const pollGroup = card.querySelector('#sv-pollgroup')?.value.trim();
+          if (pollGroup) value.pollGroup = pollGroup;
         }
         const seedFromContext = card.querySelector('#sv-seedfromcontext')?.value.trim();
         if (seedFromContext) value.seedFromContext = seedFromContext;
