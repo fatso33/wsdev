@@ -228,6 +228,15 @@ export class StudioValidator {
               warnings.push(`State variable "${st.name || idx}" declares pollFrequencyHz but no syncFrom — there's nothing being polled, so this has no effect.`);
             }
           }
+          // FDWS v1.26: pollGroup is likewise only meaningful alongside syncFrom.
+          if (st.pollGroup !== undefined) {
+            if (typeof st.pollGroup !== 'string' || !st.pollGroup.trim()) {
+              warnings.push(`State variable "${st.name || idx}" has a non-string or empty pollGroup (${JSON.stringify(st.pollGroup)}).`);
+            }
+            if (!st.syncFrom) {
+              warnings.push(`State variable "${st.name || idx}" declares pollGroup but no syncFrom — there's nothing being polled, so this has no effect.`);
+            }
+          }
         });
       }
     }
@@ -373,6 +382,10 @@ export class StudioValidator {
           // FDWS v1.7
           if (comp.binding.pollFrequencyHz !== undefined && (typeof comp.binding.pollFrequencyHz !== 'number' || comp.binding.pollFrequencyHz <= 0)) {
             warnings.push(`Component "${comp.id}" has a non-numeric or non-positive binding.pollFrequencyHz (${JSON.stringify(comp.binding.pollFrequencyHz)}).`);
+          }
+          // FDWS v1.26
+          if (comp.binding.pollGroup !== undefined && (typeof comp.binding.pollGroup !== 'string' || !comp.binding.pollGroup.trim())) {
+            warnings.push(`Component "${comp.id}" has a non-string or empty binding.pollGroup (${JSON.stringify(comp.binding.pollGroup)}).`);
           }
         }
 
