@@ -654,6 +654,17 @@ export class StudioInspector {
   // --- COMPONENT INSPECTOR ---
   // ==========================================
   renderComponentInspector(comp) {
+    // Which Appearance style tab ("normal" vs the one state name this
+    // component type supports) is showing — transient UI state, not part of
+    // the widget, so it's tracked on the inspector instance itself and reset
+    // back to "normal" whenever a different component gets selected (this
+    // method re-runs on every keystroke within the SAME component too, so
+    // this can't just default every time — see below).
+    if (this._styleTabCompId !== comp.id) {
+      this._styleTabCompId = comp.id;
+      this._styleTab = 'normal';
+    }
+
     const def = this.state.widgetDef;
     const layerGroups = def.layerGroups || [];
     const layerGroupsMap = new Map(layerGroups.map((lg) => [lg.id, lg.z || 0]));
@@ -849,6 +860,7 @@ export class StudioInspector {
       const stateCfg = resolveStateStyleConfig(comp);
       const stateStyle = (stateCfg && style.states && style.states[stateCfg.name]) || {};
       const stateTypo = stateStyle.typography || {};
+      const stateStroke = stateTypo.stroke || {};
       const stateGlow = stateTypo.glow || {};
       const stateBorder = stateStyle.border || {};
       const stateBorderGlow = stateBorder.glow || {};
@@ -896,6 +908,39 @@ export class StudioInspector {
         });
       }
 
+      // "normal" vs the one state name this component supports (see
+      // renderComponentInspector()'s reset of this._styleTab) — only ever
+      // "state" when stateCfg actually resolved, since that's the only way
+      // the toggle button that sets it gets rendered at all.
+      const activeTab = (stateCfg && this._styleTab === 'state') ? 'state' : 'normal';
+
+      // FDWS v1.25 state-tab fields show the EFFECTIVE value (state override,
+      // falling back to the base style's own value) rather than a blank
+      // placeholder, dimmed via inline opacity whenever there's no explicit
+      // override — so an author can see exactly what they're about to
+      // override, not just that something upstream applies. Clearing a
+      // dimmed field back to empty (or picking "— inherit —" on a select)
+      // removes the override, same as before.
+      const eff = (stateVal, baseVal) => ({ v: stateVal !== undefined ? stateVal : baseVal, dim: stateVal === undefined ? 'opacity:0.55;' : '' });
+      const stFont = eff(stateTypo.font, typo.font || 'Chakra Petch');
+      const stWeight = eff(stateTypo.weight, typo.weight || 700);
+      const stColor = eff(stateTypo.color, effTypoColor || '#f8fafc');
+      const stSize = eff(stateTypo.size, typo.size ?? 13);
+      const stStrokeColor = eff(stateStroke.color, stroke.color || '');
+      const stStrokeWidth = eff(stateStroke.width, stroke.width ?? '');
+      const stGlowColor = eff(stateGlow.color, glow.color || '');
+      const stGlowBlur = eff(stateGlow.blur, glow.blur ?? '');
+      const stBorderStyle = eff(stateBorder.style, border.style || 'solid');
+      const stBorderW = eff(stateBorder.width, border.width ?? 1);
+      const stBorderRad = eff(stateBorder.radius, border.radius ?? 4);
+      const stBorderColor = eff(stateBorder.color, effBorderColor || '#273344');
+      const stBorderGlowColor = eff(stateBorderGlow.color, borderGlow.color || '');
+      const stBorderGlowBlur = eff(stateBorderGlow.blur, borderGlow.blur ?? '');
+      const stBorderGlowInset = eff(stateBorderGlow.inset, borderGlow.inset || false);
+      const stBgType = eff(stateBg.type, effBg.type || 'color');
+      const stBgColor = eff(stateBg.color, effBg.color || '#131b26');
+      const stBgGradient = eff(stateBg.gradient, effBg.gradient || '');
+
       body.innerHTML = `
         ${themeEdit.isOverrideEdit ? `<div class="theme-override-banner">Editing ${this.state.previewTheme.toUpperCase()} theme override — Text/Border/Background Color apply only to this theme; other properties stay shared with the base ${themeEdit.baseTheme} style.</div>` : ''}
         <div class="prop-row-2" style="margin-bottom:4px;">
@@ -913,6 +958,14 @@ export class StudioInspector {
           `).join('')}
         </div>
 
+        ${stateCfg ? `
+        <div class="prop-row-2" style="margin:10px 0 12px;">
+          <button type="button" class="mode-toggle-btn ${activeTab === 'normal' ? 'active' : ''}" id="c-styletab-normal" style="flex:1;">Normal</button>
+          <button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="c-styletab-state" style="flex:1;">${stateCfg.tabLabel}</button>
+        </div>
+        ` : ''}
+
+        <div id="c-tab-normal" style="${activeTab === 'normal' ? '' : 'display:none;'}">
         <div class="prop-section-subtitle">Typography</div>
         <div class="prop-row-2">
           <div class="prop-field" data-tier="advanced">
@@ -924,12 +977,6 @@ export class StudioInspector {
             </select>
           </div>
           <div class="prop-field">
-            <label>Font Size (px)</label>
-            <input type="number" id="c-typo-size" class="prop-input" value="${typo.size ?? 13}" min="8" max="48" />
-          </div>
-        </div>
-        <div class="prop-row-2">
-          <div class="prop-field">
             <label>Font Weight</label>
             <select id="c-typo-weight" class="prop-select">
               <option value="400" ${typo.weight === 400 ? 'selected' : ''}>Regular (400)</option>
@@ -938,6 +985,8 @@ export class StudioInspector {
               <option value="800" ${typo.weight === 800 ? 'selected' : ''}>Heavy (800)</option>
             </select>
           </div>
+        </div>
+        <div class="prop-row-2">
           <div class="prop-field">
             <label>Text Color</label>
             <div class="color-picker-wrap">
@@ -945,20 +994,24 @@ export class StudioInspector {
               <input type="text" id="c-typo-color" class="prop-input" value="${effTypoColor || '#f8fafc'}" />
             </div>
           </div>
+          <div class="prop-field">
+            <label>Font Size (px)</label>
+            <input type="number" id="c-typo-size" class="prop-input" value="${typo.size ?? 13}" min="8" max="48" />
+          </div>
         </div>
 
         <div class="prop-section-subtitle" style="margin-top:10px;" data-tier="advanced">Text Outline & Glow <span class="prop-hint" title="FDWS v1.15. Outline keeps a readout legible over a busy background image without darkening the whole tile. Glow is a soft bloom behind the text — LCD backlight glow, annunciator halo. Leave either blank for none.">ⓘ</span></div>
         <div class="prop-row-2" data-tier="advanced">
-          <div class="prop-field">
-            <label>Outline Width (px)</label>
-            <input type="number" id="c-typo-stroke-width" class="prop-input" value="${stroke.width ?? ''}" min="0" step="1" placeholder="none" />
-          </div>
           <div class="prop-field">
             <label>Outline Color</label>
             <div class="color-picker-wrap">
               <input type="color" id="c-typo-stroke-color-pick" value="${this.toHexColor(stroke.color) || '#000000'}" />
               <input type="text" id="c-typo-stroke-color" class="prop-input" value="${stroke.color || ''}" placeholder="#000000" />
             </div>
+          </div>
+          <div class="prop-field">
+            <label>Outline Width (px)</label>
+            <input type="number" id="c-typo-stroke-width" class="prop-input" value="${stroke.width ?? ''}" min="0" step="1" placeholder="none" />
           </div>
         </div>
         <div class="prop-row-2" data-tier="advanced">
@@ -1017,6 +1070,14 @@ export class StudioInspector {
         </div>
 
         <div class="prop-section-subtitle" style="margin-top:10px;">Border & Radius</div>
+        <div class="prop-field">
+          <label>Border Style <span class="prop-hint" title="FDWS v1.17. core.divider's line uses this same field for its own line style.">ⓘ</span></label>
+          <select id="c-border-style" class="prop-select" ${themeEdit.isOverrideEdit ? 'disabled title="Structural — edit on the base theme."' : ''}>
+            <option value="solid" ${(!border.style || border.style === 'solid') ? 'selected' : ''}>Solid</option>
+            <option value="dashed" ${border.style === 'dashed' ? 'selected' : ''}>Dashed</option>
+            <option value="dotted" ${border.style === 'dotted' ? 'selected' : ''}>Dotted</option>
+          </select>
+        </div>
         <div class="prop-row-2">
           <div class="prop-field">
             <label>Border Width (px)</label>
@@ -1033,14 +1094,6 @@ export class StudioInspector {
             <input type="color" id="c-border-color-pick" value="${this.toHexColor(effBorderColor) || '#273344'}" />
             <input type="text" id="c-border-color" class="prop-input" value="${effBorderColor || '#273344'}" />
           </div>
-        </div>
-        <div class="prop-field">
-          <label>Border Style <span class="prop-hint" title="FDWS v1.17. core.divider's line uses this same field for its own line style.">ⓘ</span></label>
-          <select id="c-border-style" class="prop-select" ${themeEdit.isOverrideEdit ? 'disabled title="Structural — edit on the base theme."' : ''}>
-            <option value="solid" ${(!border.style || border.style === 'solid') ? 'selected' : ''}>Solid</option>
-            <option value="dashed" ${border.style === 'dashed' ? 'selected' : ''}>Dashed</option>
-            <option value="dotted" ${border.style === 'dotted' ? 'selected' : ''}>Dotted</option>
-          </select>
         </div>
 
         <div class="prop-row-2" data-tier="advanced">
@@ -1105,74 +1158,141 @@ export class StudioInspector {
             </div>
           </div>
         </div>
+        </div>
 
         ${stateCfg ? `
-        <div class="prop-section-subtitle" style="margin-top:10px;">${stateCfg.label} <span class="prop-hint" title="FDWS v1.25. Overrides border/background/text color merged over the base style above while this component is in this state. Leave any field blank/default to just inherit the base style for that property.">ⓘ</span></div>
+        <div id="c-tab-state" style="${activeTab === 'state' ? '' : 'display:none;'}">
+        <div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides typography/border/background merged over the base style while this component is ${stateCfg.tabLabel.toLowerCase()}. Dimmed fields are inherited from the Normal style — edit one to override it just for this state, or pick "— inherit —" (clear a text field) to remove an override.</div>
+
+        <div class="prop-section-subtitle" style="margin-top:6px;">Typography</div>
         <div class="prop-row-2">
           <div class="prop-field">
-            <label>Border Width (px)</label>
-            <input type="number" id="c-state-border-w" class="prop-input" value="${stateBorder.width ?? ''}" min="0" max="10" placeholder="inherit" />
+            <label>Font Family</label>
+            <select id="c-state-typo-font" class="prop-select" style="${stFont.dim}">
+              <option value="" ${!stateTypo.font ? 'selected' : ''}>— inherit (${stFont.v}) —</option>
+              <option value="Chakra Petch" ${stateTypo.font === 'Chakra Petch' ? 'selected' : ''}>Chakra Petch (Avionics)</option>
+              <option value="monospace" ${stateTypo.font === 'monospace' ? 'selected' : ''}>Monospace</option>
+              <option value="sans-serif" ${stateTypo.font === 'sans-serif' ? 'selected' : ''}>Sans-Serif</option>
+            </select>
           </div>
           <div class="prop-field">
-            <label>Border Color</label>
-            <div class="color-picker-wrap">
-              <input type="color" id="c-state-border-color-pick" value="${this.toHexColor(stateBorder.color) || '#38bdf8'}" />
-              <input type="text" id="c-state-border-color" class="prop-input" value="${stateBorder.color || ''}" placeholder="inherit" />
-            </div>
+            <label>Font Weight</label>
+            <select id="c-state-typo-weight" class="prop-select" style="${stWeight.dim}">
+              <option value="" ${!stateTypo.weight ? 'selected' : ''}>— inherit (${stWeight.v}) —</option>
+              <option value="400" ${stateTypo.weight === 400 ? 'selected' : ''}>Regular (400)</option>
+              <option value="600" ${stateTypo.weight === 600 ? 'selected' : ''}>Semi-Bold (600)</option>
+              <option value="700" ${stateTypo.weight === 700 ? 'selected' : ''}>Bold (700)</option>
+              <option value="800" ${stateTypo.weight === 800 ? 'selected' : ''}>Heavy (800)</option>
+            </select>
           </div>
         </div>
         <div class="prop-row-2">
           <div class="prop-field">
-            <label>Border Glow Color</label>
+            <label>Text Color</label>
             <div class="color-picker-wrap">
-              <input type="color" id="c-state-border-glow-color-pick" value="${this.toHexColor(stateBorderGlow.color) || '#38bdf8'}" />
-              <input type="text" id="c-state-border-glow-color" class="prop-input" value="${stateBorderGlow.color || ''}" placeholder="none" />
+              <input type="color" id="c-state-typo-color-pick" value="${this.toHexColor(stColor.v) || '#f8fafc'}" />
+              <input type="text" id="c-state-typo-color" class="prop-input" style="${stColor.dim}" value="${stColor.v || ''}" placeholder="inherit" />
             </div>
           </div>
           <div class="prop-field">
-            <label>Glow Spread (px)</label>
-            <input type="number" id="c-state-border-glow-blur" class="prop-input" value="${stateBorderGlow.blur ?? ''}" min="0" step="1" placeholder="6" />
+            <label>Font Size (px)</label>
+            <input type="number" id="c-state-typo-size" class="prop-input" style="${stSize.dim}" value="${stSize.v ?? ''}" min="8" max="48" placeholder="inherit" />
           </div>
         </div>
-        <div class="prop-field">
-          <label>Background Type</label>
-          <select id="c-state-bg-type" class="prop-select">
-            <option value="" ${!stateBg.type ? 'selected' : ''}>— inherit base style —</option>
-            <option value="none" ${stateBg.type === 'none' ? 'selected' : ''}>None (Transparent)</option>
-            <option value="color" ${stateBg.type === 'color' ? 'selected' : ''}>Solid Color</option>
-            <option value="gradient" ${stateBg.type === 'gradient' ? 'selected' : ''}>CSS Gradient</option>
-          </select>
-        </div>
-        <div id="c-state-bg-color-field" class="prop-field" style="${stateBg.type === 'color' ? '' : 'display:none;'}">
-          <label>Background Color</label>
-          <div class="color-picker-wrap">
-            <input type="color" id="c-state-bg-color-pick" value="${this.toHexColor(stateBg.color) || '#131b26'}" />
-            <input type="text" id="c-state-bg-color" class="prop-input" value="${stateBg.color || ''}" />
+
+        <div class="prop-section-subtitle" style="margin-top:10px;">Text Outline & Glow</div>
+        <div class="prop-row-2">
+          <div class="prop-field">
+            <label>Outline Color</label>
+            <div class="color-picker-wrap">
+              <input type="color" id="c-state-typo-stroke-color-pick" value="${this.toHexColor(stStrokeColor.v) || '#000000'}" />
+              <input type="text" id="c-state-typo-stroke-color" class="prop-input" style="${stStrokeColor.dim}" value="${stStrokeColor.v || ''}" placeholder="none" />
+            </div>
           </div>
-        </div>
-        <div id="c-state-bg-gradient-field" class="prop-field" style="${stateBg.type === 'gradient' ? '' : 'display:none;'}">
-          <label>CSS Gradient</label>
-          <input type="text" id="c-state-bg-gradient" class="prop-input" value="${stateBg.gradient || ''}" placeholder="linear-gradient(180deg, #1a2332, #0b0f17)" />
-        </div>
-        <div class="prop-field">
-          <label>Text Color</label>
-          <div class="color-picker-wrap">
-            <input type="color" id="c-state-typo-color-pick" value="${this.toHexColor(stateTypo.color) || '#f8fafc'}" />
-            <input type="text" id="c-state-typo-color" class="prop-input" value="${stateTypo.color || ''}" placeholder="inherit" />
+          <div class="prop-field">
+            <label>Outline Width (px)</label>
+            <input type="number" id="c-state-typo-stroke-width" class="prop-input" style="${stStrokeWidth.dim}" value="${stStrokeWidth.v ?? ''}" min="0" step="1" placeholder="none" />
           </div>
         </div>
         <div class="prop-row-2">
           <div class="prop-field">
             <label>Text Glow Color</label>
             <div class="color-picker-wrap">
-              <input type="color" id="c-state-typo-glow-color-pick" value="${this.toHexColor(stateGlow.color) || '#38bdf8'}" />
-              <input type="text" id="c-state-typo-glow-color" class="prop-input" value="${stateGlow.color || ''}" placeholder="none" />
+              <input type="color" id="c-state-typo-glow-color-pick" value="${this.toHexColor(stGlowColor.v) || '#38bdf8'}" />
+              <input type="text" id="c-state-typo-glow-color" class="prop-input" style="${stGlowColor.dim}" value="${stGlowColor.v || ''}" placeholder="none" />
             </div>
           </div>
           <div class="prop-field">
             <label>Glow Spread (px)</label>
-            <input type="number" id="c-state-typo-glow-blur" class="prop-input" value="${stateGlow.blur ?? ''}" min="0" step="1" placeholder="6" />
+            <input type="number" id="c-state-typo-glow-blur" class="prop-input" style="${stGlowBlur.dim}" value="${stGlowBlur.v ?? ''}" min="0" step="1" placeholder="6" />
           </div>
+        </div>
+
+        <div class="prop-section-subtitle" style="margin-top:10px;">Border & Radius</div>
+        <div class="prop-field">
+          <label>Border Style</label>
+          <select id="c-state-border-style" class="prop-select" style="${stBorderStyle.dim}">
+            <option value="" ${!stateBorder.style ? 'selected' : ''}>— inherit (${stBorderStyle.v}) —</option>
+            <option value="solid" ${stateBorder.style === 'solid' ? 'selected' : ''}>Solid</option>
+            <option value="dashed" ${stateBorder.style === 'dashed' ? 'selected' : ''}>Dashed</option>
+            <option value="dotted" ${stateBorder.style === 'dotted' ? 'selected' : ''}>Dotted</option>
+          </select>
+        </div>
+        <div class="prop-row-2">
+          <div class="prop-field">
+            <label>Border Width (px)</label>
+            <input type="number" id="c-state-border-w" class="prop-input" style="${stBorderW.dim}" value="${stBorderW.v ?? ''}" min="0" max="10" placeholder="inherit" />
+          </div>
+          <div class="prop-field">
+            <label>Corner Radius (px)</label>
+            <input type="number" id="c-state-border-rad" class="prop-input" style="${stBorderRad.dim}" value="${stBorderRad.v ?? ''}" min="0" max="24" placeholder="inherit" />
+          </div>
+        </div>
+        <div class="prop-field">
+          <label>Border Color</label>
+          <div class="color-picker-wrap">
+            <input type="color" id="c-state-border-color-pick" value="${this.toHexColor(stBorderColor.v) || '#38bdf8'}" />
+            <input type="text" id="c-state-border-color" class="prop-input" style="${stBorderColor.dim}" value="${stBorderColor.v || ''}" placeholder="inherit" />
+          </div>
+        </div>
+        <div class="prop-row-2">
+          <div class="prop-field">
+            <label>Border Glow Color</label>
+            <div class="color-picker-wrap">
+              <input type="color" id="c-state-border-glow-color-pick" value="${this.toHexColor(stBorderGlowColor.v) || '#38bdf8'}" />
+              <input type="text" id="c-state-border-glow-color" class="prop-input" style="${stBorderGlowColor.dim}" value="${stBorderGlowColor.v || ''}" placeholder="none" />
+            </div>
+          </div>
+          <div class="prop-field">
+            <label>Glow Spread (px)</label>
+            <input type="number" id="c-state-border-glow-blur" class="prop-input" style="${stBorderGlowBlur.dim}" value="${stBorderGlowBlur.v ?? ''}" min="0" step="1" placeholder="6" />
+          </div>
+        </div>
+        <div class="prop-field">
+          <label style="display:flex;align-items:center;gap:6px;${stBorderGlowInset.dim}"><input type="checkbox" id="c-state-border-glow-inset" ${stBorderGlowInset.v ? 'checked' : ''} /> Glow inward instead of outward</label>
+        </div>
+
+        <div class="prop-section-subtitle" style="margin-top:10px;">Background Fill</div>
+        <div class="prop-field">
+          <label>Background Type</label>
+          <select id="c-state-bg-type" class="prop-select" style="${stBgType.dim}">
+            <option value="" ${!stateBg.type ? 'selected' : ''}>— inherit (${stBgType.v}) —</option>
+            <option value="none" ${stateBg.type === 'none' ? 'selected' : ''}>None (Transparent)</option>
+            <option value="color" ${stateBg.type === 'color' ? 'selected' : ''}>Solid Color</option>
+            <option value="gradient" ${stateBg.type === 'gradient' ? 'selected' : ''}>CSS Gradient</option>
+          </select>
+        </div>
+        <div id="c-state-bg-color-field" class="prop-field" style="${stBgType.v === 'color' ? '' : 'display:none;'}">
+          <label>Background Color</label>
+          <div class="color-picker-wrap">
+            <input type="color" id="c-state-bg-color-pick" value="${this.toHexColor(stBgColor.v) || '#131b26'}" />
+            <input type="text" id="c-state-bg-color" class="prop-input" style="${stBgColor.dim}" value="${stBgColor.v || ''}" />
+          </div>
+        </div>
+        <div id="c-state-bg-gradient-field" class="prop-field" style="${stBgType.v === 'gradient' ? '' : 'display:none;'}">
+          <label>CSS Gradient</label>
+          <input type="text" id="c-state-bg-gradient" class="prop-input" style="${stBgGradient.dim}" value="${stBgGradient.v || ''}" placeholder="linear-gradient(180deg, #1a2332, #0b0f17)" />
+        </div>
         </div>
         ` : ''}
       `;
@@ -1222,6 +1342,19 @@ export class StudioInspector {
       body.querySelector('#c-style-paste')?.addEventListener('click', () => {
         this.state.pasteStyleToComponent(comp.id);
         showToast(`Pasted style onto "${comp.label || comp.id}".`);
+      });
+
+      // FDWS v1.25: Normal/<state> tab toggle — just swaps which fields are
+      // visible (see #c-tab-normal/#c-tab-state's display:none above); the
+      // fields themselves and their change handlers are unaffected by which
+      // tab is showing.
+      body.querySelector('#c-styletab-normal')?.addEventListener('click', () => {
+        this._styleTab = 'normal';
+        this.render();
+      });
+      body.querySelector('#c-styletab-state')?.addEventListener('click', () => {
+        this._styleTab = 'state';
+        this.render();
       });
 
       body.querySelector('#c-typo-font')?.addEventListener('change', (e) => updateStyle({ typography: { ...(comp.style?.typography || {}), font: e.target.value } }));
@@ -1358,9 +1491,38 @@ export class StudioInspector {
       // FDWS v1.25 style.states.<name> section — only rendered when stateCfg
       // resolved above, so every querySelector below just no-ops on a
       // component type without one.
+      body.querySelector('#c-state-typo-font')?.addEventListener('change', (e) => updateStateStyle({ typography: { ...stateTypo, font: e.target.value || undefined } }));
+      body.querySelector('#c-state-typo-weight')?.addEventListener('change', (e) => {
+        const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || undefined);
+        updateStateStyle({ typography: { ...stateTypo, weight: val } });
+      });
+      body.querySelector('#c-state-typo-size')?.addEventListener('change', (e) => {
+        const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || undefined);
+        updateStateStyle({ typography: { ...stateTypo, size: val } });
+      });
+
+      const updateStateStroke = (updates) => {
+        updateStateStyle({ typography: { ...stateTypo, stroke: { ...stateStroke, ...updates } } });
+      };
+      body.querySelector('#c-state-typo-stroke-color')?.addEventListener('change', (e) => updateStateStroke({ color: e.target.value || undefined }));
+      body.querySelector('#c-state-typo-stroke-color-pick')?.addEventListener('input', (e) => {
+        const txt = body.querySelector('#c-state-typo-stroke-color');
+        if (txt) txt.value = e.target.value;
+        updateStateStroke({ color: e.target.value });
+      });
+      body.querySelector('#c-state-typo-stroke-width')?.addEventListener('change', (e) => {
+        const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
+        updateStateStroke({ width: val });
+      });
+
+      body.querySelector('#c-state-border-style')?.addEventListener('change', (e) => updateStateStyle({ border: { ...stateBorder, style: e.target.value || undefined } }));
       body.querySelector('#c-state-border-w')?.addEventListener('change', (e) => {
         const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
         updateStateStyle({ border: { ...stateBorder, width: val } });
+      });
+      body.querySelector('#c-state-border-rad')?.addEventListener('change', (e) => {
+        const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
+        updateStateStyle({ border: { ...stateBorder, radius: val } });
       });
       const setStateBorderColor = (color) => updateStateStyle({ border: { ...stateBorder, color: color || undefined } });
       body.querySelector('#c-state-border-color')?.addEventListener('change', (e) => setStateBorderColor(e.target.value));
@@ -1383,6 +1545,7 @@ export class StudioInspector {
         const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
         updateStateBorderGlow({ blur: val });
       });
+      body.querySelector('#c-state-border-glow-inset')?.addEventListener('change', (e) => updateStateBorderGlow({ inset: e.target.checked || undefined }));
 
       body.querySelector('#c-state-bg-type')?.addEventListener('change', (e) => {
         const type = e.target.value;

@@ -501,16 +501,16 @@ export function getAllFieldPaths() {
 // prevent everywhere else.
 // ---------------------------------------------------------------------------
 export const STATE_STYLE_SUPPORT = {
-  'core.input': () => ({ name: 'editState', label: 'Edit State (While Focused)' }),
+  'core.input': () => ({ name: 'editState', label: 'Edit State (While Focused)', tabLabel: 'Edit State' }),
   'core.button': (props) => (props.variant === 'toggle'
-    ? { name: 'active', label: 'Active State (Toggled On)' }
-    : { name: 'pressed', label: 'Pressed State' }),
-  'core.rocker': () => ({ name: 'pressed', label: 'Pressed State (each zone independently)' }),
-  'core.stepper': () => ({ name: 'pressed', label: 'Pressed State (each button independently)' }),
-  'core.rotary': () => ({ name: 'dragging', label: 'Dragging State' }),
-  'core.slider': () => ({ name: 'dragging', label: 'Dragging State' }),
-  'core.pad': () => ({ name: 'engaged', label: 'Engaged State (pointer down)' }),
-  'core.selector': () => ({ name: 'active', label: 'Active State (each selected position)' })
+    ? { name: 'active', label: 'Active State (Toggled On)', tabLabel: 'Active' }
+    : { name: 'pressed', label: 'Pressed State', tabLabel: 'Pressed' }),
+  'core.rocker': () => ({ name: 'pressed', label: 'Pressed State (each zone independently)', tabLabel: 'Pressed' }),
+  'core.stepper': () => ({ name: 'pressed', label: 'Pressed State (each button independently)', tabLabel: 'Pressed' }),
+  'core.rotary': () => ({ name: 'dragging', label: 'Dragging State', tabLabel: 'Dragging' }),
+  'core.slider': () => ({ name: 'dragging', label: 'Dragging State', tabLabel: 'Dragging' }),
+  'core.pad': () => ({ name: 'engaged', label: 'Engaged State (pointer down)', tabLabel: 'Engaged' }),
+  'core.selector': () => ({ name: 'active', label: 'Active State (each selected position)', tabLabel: 'Active' })
 };
 
 /**
@@ -520,7 +520,7 @@ export const STATE_STYLE_SUPPORT = {
  * those is authored but inert.
  * @param {string} type
  * @param {object} [props]
- * @returns {{name: string, label: string}|null}
+ * @returns {{name: string, label: string, tabLabel: string}|null}
  */
 export function getStateStyleConfig(type, props) {
   const resolver = STATE_STYLE_SUPPORT[type];
