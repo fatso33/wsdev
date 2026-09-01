@@ -85,7 +85,13 @@ export class SelectorComponent extends BaseComponent {
     const props = this.def.props || {};
     const positions = Array.isArray(props.positions) ? props.positions : [];
     this.posNodes.forEach((node, value) => {
-      node.classList.toggle('active', value === this.currentValue);
+      const isActive = value === this.currentValue;
+      node.classList.toggle('active', isActive);
+      // FDWS v1.25: style.states.active is now author-customizable per
+      // position via applyOptionalStateStyle (same per-node mechanism as
+      // core.rocker/core.stepper) -- the .fd-selector-position.active CSS
+      // class's cyan glow stays the default whenever it's unauthored.
+      this.applyOptionalStateStyle(node, 'active', isActive);
     });
     if (this.pointerNode) {
       const active = positions.find((p) => p.value === this.currentValue);

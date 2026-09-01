@@ -111,6 +111,9 @@ export class SliderComponent extends BaseComponent {
       if (this.resolvePointerEvents() === 'none' || this.isInteractionBlocked()) return;
       dragging = true;
       track.setPointerCapture?.(e.pointerId);
+      // FDWS v1.25: 'dragging' state style — single surface (this.element),
+      // same ordinary setState()/applyStyles() path as core.rotary.
+      this.setState('dragging');
       setFromRatio(ratioFromEvent(e), false);
     };
     const onPointerMove = (e) => {
@@ -120,6 +123,7 @@ export class SliderComponent extends BaseComponent {
     const onPointerUp = (e) => {
       if (!dragging) return;
       dragging = false;
+      this.setState(undefined);
       setFromRatio(ratioFromEvent(e), true);
     };
 

@@ -580,6 +580,94 @@ export class BaseComponent {
     }
   }
 
+  /**
+   * FDWS v1.25: applies (or clears) a style.states[stateName] override
+   * directly onto ONE sub-element, for component types that render more than
+   * one independently-interactive surface (core.rocker's zones, core.stepper's
+   * +/- buttons, core.selector's positions) -- setState()/applyStyles() above
+   * always resolve to a single surfaceTarget (this.btnNode || this.element),
+   * which has no way to say "just this zone, not the others." This bypasses
+   * that whole-component model and writes straight to the given node instead.
+   *
+   * No-ops back to that node's existing CSS-class-driven look (border/
+   * background/color/glow all cleared) whenever `active` is false OR the
+   * author hasn't defined style.states[stateName] at all -- every one of
+   * these multi-surface components already had a hardcoded default look for
+   * its pressed/active sub-elements before this existed (see widgets.css'
+   * .fd-rocker-zone-active, .fd-step-btn:active, .fd-selector-position.active),
+   * so an unauthored state changes nothing for any pre-existing widget.
+   * @param {HTMLElement} node
+   * @param {string} stateName
+   * @param {boolean} active
+   */
+  applyOptionalStateStyle(node, stateName, active) {
+    if (!node) return;
+    const style = this.def.style || {};
+    const stateStyle = active ? ((style.states && style.states[stateName]) || null) : null;
+
+    if (!stateStyle) {
+      node.style.border = '';
+      node.style.borderRadius = '';
+      node.style.boxShadow = '';
+      node.style.background = '';
+      node.style.color = '';
+      node.style.textShadow = '';
+      return;
+    }
+
+    const theme = (typeof this.widget?.getPreviewTheme === 'function') ? this.widget.getPreviewTheme() : 'dark';
+    const themeConfig = (typeof this.widget?.getThemeConfig === 'function')
+      ? this.widget.getThemeConfig()
+      : { baseTheme: 'dark', themeMode: 'auto' };
+    const colorCtx = { componentType: this.def.type, layerGroup: this.def.layer?.group };
+    const themeOverride = style.themeOverride || {};
+
+    const typography = stateStyle.typography || {};
+    const border = stateStyle.border || {};
+    const bg = stateStyle.background;
+
+    const adjustedColors = resolveThemedColors(
+      {
+        typographyColor: typography.color,
+        borderColor: border.color,
+        backgroundColor: bg && bg.type === 'color' ? bg.color : undefined
+      },
+      { typographyColor: themeOverride.typography?.color, borderColor: themeOverride.border?.color },
+      colorCtx,
+      theme,
+      themeConfig.baseTheme,
+      themeConfig.themeMode
+    );
+    const resolvedBg = resolveThemedBackground(bg, themeOverride.background, colorCtx, theme, themeConfig.baseTheme, themeConfig.themeMode);
+
+    if (border.width !== undefined) {
+      node.style.borderWidth = `${border.width}px`;
+      node.style.borderStyle = border.width > 0 ? (border.style || 'solid') : 'none';
+    }
+    if (border.color) node.style.borderColor = adjustedColors.borderColor;
+    if (border.radius !== undefined) node.style.borderRadius = `${border.radius}px`;
+    const glowColor = border.glow && border.glow.color;
+    node.style.boxShadow = glowColor
+      ? `${border.glow.inset ? 'inset ' : ''}0 0 ${border.glow.blur ?? 6}px ${glowColor}`
+      : '';
+
+    if (typography.color) node.style.color = adjustedColors.typographyColor;
+    const glowVal = (typography.glow && typography.glow.color)
+      ? `0 0 ${typography.glow.blur ?? 6}px ${typography.glow.color}`
+      : '';
+    node.style.textShadow = glowVal;
+
+    if (resolvedBg) {
+      if (resolvedBg.type === 'none') {
+        node.style.background = 'transparent';
+      } else if (resolvedBg.type === 'color' && resolvedBg.color) {
+        node.style.background = resolvedBg.color;
+      } else if (resolvedBg.type === 'gradient' && resolvedBg.gradient) {
+        node.style.background = resolvedBg.gradient;
+      }
+    }
+  }
+
   destroy() {
     clearTimeout(this._guardAutoCloseTimer);
     if (this.element && this.element.parentNode) {

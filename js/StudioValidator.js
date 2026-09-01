@@ -18,7 +18,8 @@ import {
   ACTIONS,
   VALUE_FORMATS as REGISTRY_VALUE_FORMATS,
   ALLOWED_ASSET_MIME_TYPES,
-  getComponentTypes
+  getComponentTypes,
+  getStateStyleConfig
 } from '../widgets/PropertyRegistry.js';
 
 // A gradient CSS value pasted into a *.color field (background.color most
@@ -505,6 +506,28 @@ export class StudioValidator {
         }
         if (comp.style?.background?.type === 'color' && GRADIENT_VALUE_RE.test((comp.style.background.color || '').trim())) {
           warnings.push(`Component "${comp.id}" has a CSS gradient in Background Color, but Background Type is still "Solid Color" — it renders correctly in dark mode but won't adapt to light mode. Switch Background Type to "CSS Gradient" instead.`);
+        }
+
+        // FDWS v1.25 style.states cross-check: only one state name (if any)
+        // is ever actually read for a given component type/variant — see
+        // PropertyRegistry.js's STATE_STYLE_SUPPORT (BaseComponent.js's
+        // applyStyles()/applyOptionalStateStyle() only ever look up
+        // this.activeStateName, which for these component types is always
+        // set to that one name). An author-typed key that doesn't match
+        // (a typo, a name copied from a different component type, or a
+        // component type with no state-style support at all, e.g.
+        // core.label/core.display) sits in the file with no effect — flag it
+        // here rather than let it look silently correct in Studio.
+        if (comp.style?.states && typeof comp.style.states === 'object') {
+          const supportedEntry = getStateStyleConfig(comp.type, comp.props);
+          const supportedName = supportedEntry?.name;
+          Object.keys(comp.style.states).forEach((stateName) => {
+            if (stateName !== supportedName) {
+              warnings.push(supportedName
+                ? `Component "${comp.id}" declares style.states.${stateName}, but this component type/variant only ever reads style.states.${supportedName} — the ${stateName} entry has no effect.`
+                : `Component "${comp.id}" declares style.states.${stateName}, but this component type has no interaction-state style support at all — it has no effect.`);
+            }
+          });
         }
 
         // FDWS v1.20 §2: renderMode:"inline" only has an effect on an svg+xml

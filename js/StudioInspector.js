@@ -15,7 +15,7 @@ import { openModal, confirmModal, showToast } from './StudioModal.js';
 // "UI list is stale relative to runtime" bug class found four times in the
 // original Studio audit (this file's own trigger/action lists were two of
 // those four instances).
-import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, getFieldsForType } from '../widgets/PropertyRegistry.js';
+import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, getFieldsForType, getStateStyleConfig } from '../widgets/PropertyRegistry.js';
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
@@ -27,6 +27,21 @@ import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/The
 // consistent with the rest of this modal's un-generic-ized fields.
 
 const CUSTOM_OPTION_VALUE = '__custom__';
+
+// FDWS v1.25: style.states.<name> (border/background/typography overrides
+// merged over the base style while a component is in a named interaction
+// state — BaseComponent.applyStyles()'s stateStyle merge, and for multi-
+// surface components BaseComponent.applyOptionalStateStyle()) has existed at
+// runtime since core.button's toggle variant and core.indicator's severity
+// states, but never had Property Inspector UI (PropertyRegistry.js's
+// style.states entry was declared with control:'stateStyleEditor' and never
+// actually implemented). Which state name (if any) applies to a given
+// component type/variant lives in PropertyRegistry.js's
+// STATE_STYLE_SUPPORT/getStateStyleConfig() (shared with StudioValidator.js's
+// cross-check) rather than a local copy here.
+function resolveStateStyleConfig(comp) {
+  return getStateStyleConfig(comp.type, comp.props);
+}
 
 // A "Background Color" field pairs a native <input type="color"> (which can
 // only ever emit a valid hex) with a free-text sibling — free-text on
@@ -831,6 +846,13 @@ export class StudioInspector {
       const align = style.align || {};
       const offset = style.offset || {};
       const assets = this.state.widgetDef.assets || [];
+      const stateCfg = resolveStateStyleConfig(comp);
+      const stateStyle = (stateCfg && style.states && style.states[stateCfg.name]) || {};
+      const stateTypo = stateStyle.typography || {};
+      const stateGlow = stateTypo.glow || {};
+      const stateBorder = stateStyle.border || {};
+      const stateBorderGlow = stateBorder.glow || {};
+      const stateBg = stateStyle.background || {};
       const themeEdit = this.getThemeEditContext();
       // FDWS v1.18: see the widget-root Canvas Appearance block above for the
       // same pattern — Text/Border Color and the whole Background block
@@ -1083,10 +1105,89 @@ export class StudioInspector {
             </div>
           </div>
         </div>
+
+        ${stateCfg ? `
+        <div class="prop-section-subtitle" style="margin-top:10px;">${stateCfg.label} <span class="prop-hint" title="FDWS v1.25. Overrides border/background/text color merged over the base style above while this component is in this state. Leave any field blank/default to just inherit the base style for that property.">ⓘ</span></div>
+        <div class="prop-row-2">
+          <div class="prop-field">
+            <label>Border Width (px)</label>
+            <input type="number" id="c-state-border-w" class="prop-input" value="${stateBorder.width ?? ''}" min="0" max="10" placeholder="inherit" />
+          </div>
+          <div class="prop-field">
+            <label>Border Color</label>
+            <div class="color-picker-wrap">
+              <input type="color" id="c-state-border-color-pick" value="${this.toHexColor(stateBorder.color) || '#38bdf8'}" />
+              <input type="text" id="c-state-border-color" class="prop-input" value="${stateBorder.color || ''}" placeholder="inherit" />
+            </div>
+          </div>
+        </div>
+        <div class="prop-row-2">
+          <div class="prop-field">
+            <label>Border Glow Color</label>
+            <div class="color-picker-wrap">
+              <input type="color" id="c-state-border-glow-color-pick" value="${this.toHexColor(stateBorderGlow.color) || '#38bdf8'}" />
+              <input type="text" id="c-state-border-glow-color" class="prop-input" value="${stateBorderGlow.color || ''}" placeholder="none" />
+            </div>
+          </div>
+          <div class="prop-field">
+            <label>Glow Spread (px)</label>
+            <input type="number" id="c-state-border-glow-blur" class="prop-input" value="${stateBorderGlow.blur ?? ''}" min="0" step="1" placeholder="6" />
+          </div>
+        </div>
+        <div class="prop-field">
+          <label>Background Type</label>
+          <select id="c-state-bg-type" class="prop-select">
+            <option value="" ${!stateBg.type ? 'selected' : ''}>— inherit base style —</option>
+            <option value="none" ${stateBg.type === 'none' ? 'selected' : ''}>None (Transparent)</option>
+            <option value="color" ${stateBg.type === 'color' ? 'selected' : ''}>Solid Color</option>
+            <option value="gradient" ${stateBg.type === 'gradient' ? 'selected' : ''}>CSS Gradient</option>
+          </select>
+        </div>
+        <div id="c-state-bg-color-field" class="prop-field" style="${stateBg.type === 'color' ? '' : 'display:none;'}">
+          <label>Background Color</label>
+          <div class="color-picker-wrap">
+            <input type="color" id="c-state-bg-color-pick" value="${this.toHexColor(stateBg.color) || '#131b26'}" />
+            <input type="text" id="c-state-bg-color" class="prop-input" value="${stateBg.color || ''}" />
+          </div>
+        </div>
+        <div id="c-state-bg-gradient-field" class="prop-field" style="${stateBg.type === 'gradient' ? '' : 'display:none;'}">
+          <label>CSS Gradient</label>
+          <input type="text" id="c-state-bg-gradient" class="prop-input" value="${stateBg.gradient || ''}" placeholder="linear-gradient(180deg, #1a2332, #0b0f17)" />
+        </div>
+        <div class="prop-field">
+          <label>Text Color</label>
+          <div class="color-picker-wrap">
+            <input type="color" id="c-state-typo-color-pick" value="${this.toHexColor(stateTypo.color) || '#f8fafc'}" />
+            <input type="text" id="c-state-typo-color" class="prop-input" value="${stateTypo.color || ''}" placeholder="inherit" />
+          </div>
+        </div>
+        <div class="prop-row-2">
+          <div class="prop-field">
+            <label>Text Glow Color</label>
+            <div class="color-picker-wrap">
+              <input type="color" id="c-state-typo-glow-color-pick" value="${this.toHexColor(stateGlow.color) || '#38bdf8'}" />
+              <input type="text" id="c-state-typo-glow-color" class="prop-input" value="${stateGlow.color || ''}" placeholder="none" />
+            </div>
+          </div>
+          <div class="prop-field">
+            <label>Glow Spread (px)</label>
+            <input type="number" id="c-state-typo-glow-blur" class="prop-input" value="${stateGlow.blur ?? ''}" min="0" step="1" placeholder="6" />
+          </div>
+        </div>
+        ` : ''}
       `;
 
       const updateStyle = (updates) => {
         this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), ...updates } });
+      };
+
+      const updateStateStyle = (updates) => {
+        if (!stateCfg) return;
+        const curStates = comp.style?.states || {};
+        const curEntry = curStates[stateCfg.name] || {};
+        this.state.updateComponent(comp.id, {
+          style: { ...(comp.style || {}), states: { ...curStates, [stateCfg.name]: { ...curEntry, ...updates } } }
+        });
       };
       // FDWS v1.18: writes into style.themeOverride.<field> instead of the
       // base style.<field> — used by the Text/Border Color and Background
@@ -1253,6 +1354,74 @@ export class StudioInspector {
       body.querySelector('#c-bg-image-asset')?.addEventListener('change', (e) => updateBgImage({ assetId: e.target.value }));
       body.querySelector('#c-bg-image-fit')?.addEventListener('change', (e) => updateBgImage({ fit: e.target.value }));
       body.querySelector('#c-bg-image-position')?.addEventListener('change', (e) => updateBgImage({ position: e.target.value || undefined }));
+
+      // FDWS v1.25 style.states.<name> section — only rendered when stateCfg
+      // resolved above, so every querySelector below just no-ops on a
+      // component type without one.
+      body.querySelector('#c-state-border-w')?.addEventListener('change', (e) => {
+        const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
+        updateStateStyle({ border: { ...stateBorder, width: val } });
+      });
+      const setStateBorderColor = (color) => updateStateStyle({ border: { ...stateBorder, color: color || undefined } });
+      body.querySelector('#c-state-border-color')?.addEventListener('change', (e) => setStateBorderColor(e.target.value));
+      body.querySelector('#c-state-border-color-pick')?.addEventListener('input', (e) => {
+        const txt = body.querySelector('#c-state-border-color');
+        if (txt) txt.value = e.target.value;
+        setStateBorderColor(e.target.value);
+      });
+
+      const updateStateBorderGlow = (updates) => {
+        updateStateStyle({ border: { ...stateBorder, glow: { ...stateBorderGlow, ...updates } } });
+      };
+      body.querySelector('#c-state-border-glow-color')?.addEventListener('change', (e) => updateStateBorderGlow({ color: e.target.value || undefined }));
+      body.querySelector('#c-state-border-glow-color-pick')?.addEventListener('input', (e) => {
+        const txt = body.querySelector('#c-state-border-glow-color');
+        if (txt) txt.value = e.target.value;
+        updateStateBorderGlow({ color: e.target.value });
+      });
+      body.querySelector('#c-state-border-glow-blur')?.addEventListener('change', (e) => {
+        const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
+        updateStateBorderGlow({ blur: val });
+      });
+
+      body.querySelector('#c-state-bg-type')?.addEventListener('change', (e) => {
+        const type = e.target.value;
+        body.querySelector('#c-state-bg-color-field').style.display = type === 'color' ? '' : 'none';
+        body.querySelector('#c-state-bg-gradient-field').style.display = type === 'gradient' ? '' : 'none';
+        if (!type) updateStateStyle({ background: undefined });
+        else if (type === 'none') updateStateStyle({ background: { type: 'none' } });
+        else if (type === 'color') updateStateStyle({ background: { type: 'color', color: stateBg.color || '#131b26' } });
+        else if (type === 'gradient') updateStateStyle({ background: { type: 'gradient', gradient: stateBg.gradient || 'linear-gradient(180deg, #1a2332, #0b0f17)' } });
+      });
+      body.querySelector('#c-state-bg-color')?.addEventListener('change', (e) => updateStateStyle({ background: { type: 'color', color: e.target.value } }));
+      body.querySelector('#c-state-bg-color-pick')?.addEventListener('input', (e) => {
+        const txt = body.querySelector('#c-state-bg-color');
+        if (txt) txt.value = e.target.value;
+        updateStateStyle({ background: { type: 'color', color: e.target.value } });
+      });
+      body.querySelector('#c-state-bg-gradient')?.addEventListener('change', (e) => updateStateStyle({ background: { type: 'gradient', gradient: e.target.value } }));
+
+      const setStateTypoColor = (color) => updateStateStyle({ typography: { ...stateTypo, color: color || undefined } });
+      body.querySelector('#c-state-typo-color')?.addEventListener('change', (e) => setStateTypoColor(e.target.value));
+      body.querySelector('#c-state-typo-color-pick')?.addEventListener('input', (e) => {
+        const txt = body.querySelector('#c-state-typo-color');
+        if (txt) txt.value = e.target.value;
+        setStateTypoColor(e.target.value);
+      });
+
+      const updateStateTypoGlow = (updates) => {
+        updateStateStyle({ typography: { ...stateTypo, glow: { ...stateGlow, ...updates } } });
+      };
+      body.querySelector('#c-state-typo-glow-color')?.addEventListener('change', (e) => updateStateTypoGlow({ color: e.target.value || undefined }));
+      body.querySelector('#c-state-typo-glow-color-pick')?.addEventListener('input', (e) => {
+        const txt = body.querySelector('#c-state-typo-glow-color');
+        if (txt) txt.value = e.target.value;
+        updateStateTypoGlow({ color: e.target.value });
+      });
+      body.querySelector('#c-state-typo-glow-blur')?.addEventListener('change', (e) => {
+        const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
+        updateStateTypoGlow({ blur: val });
+      });
     })(appearanceBody.appendChild(document.createElement('div')));
 
     const bindDivider = document.createElement('div');

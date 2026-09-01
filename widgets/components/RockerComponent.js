@@ -30,7 +30,14 @@ export class RockerComponent extends BaseComponent {
         if (this.resolvePointerEvents() === 'none' || this.isInteractionBlocked()) return;
         e.preventDefault();
         zoneEl.setPointerCapture?.(e.pointerId);
+        // The default cyan fill (unchanged, hardcoded in widgets.css) always
+        // applies via this class; FDWS v1.25's style.states.pressed layers an
+        // author-defined override on top via applyOptionalStateStyle, applied
+        // per-zone since a rocker's two zones need independent looks — see
+        // BaseComponent.applyOptionalStateStyle()'s doc comment for why this
+        // can't just be this.setState('pressed').
         zoneEl.classList.add('fd-rocker-zone-active');
+        this.applyOptionalStateStyle(zoneEl, 'pressed', true);
         this.widget?.handleInteraction?.(this.def, 'zoneActive', { zoneId: zone.id });
         if (zone.writeEvent) this.widget?.dispatchSimEvent?.(zone.writeEvent, 1);
 
@@ -47,6 +54,7 @@ export class RockerComponent extends BaseComponent {
         this.repeatTimers.delete(zone.id);
         if (zoneEl.classList.contains('fd-rocker-zone-active')) {
           zoneEl.classList.remove('fd-rocker-zone-active');
+          this.applyOptionalStateStyle(zoneEl, 'pressed', false);
           this.widget?.handleInteraction?.(this.def, 'zoneReleased', { zoneId: zone.id });
         }
       };

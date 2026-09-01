@@ -59,6 +59,13 @@ export class InputComponent extends BaseComponent {
       this.isFocused = true;
       this.dirty = false;
       this.element.classList.add('focused');
+      // FDWS v1.25: editState — merged style.states.editState (border/
+      // background/typography) applies for the whole time this field is
+      // focused, author-customizable in place of the old hardcoded
+      // .fd-comp-input-wrapper.focused cyan outline (still the default look
+      // whenever editState isn't authored — see applyStyles()'s stateStyle
+      // merge, which no-ops back to the base style in that case).
+      this.setState('editState');
       const wasEmpty = inputEl.value === '';
       if (this.formatSpec && wasEmpty && this.formatSpec.autoPrefill) {
         // FDWS v1.11 §1.1: auto-prefill (e.g. the "1" every COM/NAV
@@ -69,12 +76,38 @@ export class InputComponent extends BaseComponent {
         inputEl.value = this.renderMask(this.maskBuffer);
         inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
       } else if (props.selectOnFocus && !wasEmpty) {
-        // FDWS v1.11 §1.3: only selects existing text — an empty field has
-        // nothing to select, and this deliberately doesn't fight with the
-        // auto-prefill branch above (mutually exclusive on "wasEmpty").
-        inputEl.select();
+        // FDWS v1.11 §1.3, revised in v1.25: used to call inputEl.select()
+        // here, which put a real native selection in the field the instant
+        // it was tapped -- that's exactly what triggers Android Chrome's
+        // cut/copy/paste/select-all toolbar on a value-bearing field, even
+        // though the selection was made programmatically rather than by a
+        // long-press. Arm a "next keystroke replaces the whole value" flag
+        // instead (consumed by the beforeinput listener below) so typing
+        // still immediately overwrites the old value, but no native
+        // selection ever sits there for the OS to build a toolbar around.
+        // editState (above) is the visual cue that the field is armed, in
+        // place of the native selection highlight.
+        this.pendingReplace = true;
       }
       this.widget?.handleInteraction?.(this.def, 'focus', { value: inputEl.value, originalEvent: e });
+    });
+
+    // Consumes the pendingReplace flag set above, exactly once, on whatever
+    // the user does first after focusing. Only an actual typed character
+    // (inputType 'insertText') gets the replace treatment -- setting the
+    // selection to the full value immediately before the browser commits the
+    // insertion makes it replace that selection natively, the same outcome
+    // select()-then-type used to produce, just without ever leaving a
+    // standing selection for the toolbar to attach to. Backspace/Delete/
+    // paste/arrow-key-then-type etc. just clear the flag and edit normally
+    // from wherever the caret actually is -- those aren't a "type a new
+    // value" gesture.
+    inputEl.addEventListener('beforeinput', (e) => {
+      if (!this.pendingReplace) return;
+      this.pendingReplace = false;
+      if (e.inputType === 'insertText') {
+        inputEl.setSelectionRange(0, inputEl.value.length);
+      }
     });
 
     inputEl.addEventListener('input', () => {
@@ -98,7 +131,9 @@ export class InputComponent extends BaseComponent {
 
     inputEl.addEventListener('blur', (e) => {
       this.isFocused = false;
+      this.pendingReplace = false;
       this.element.classList.remove('focused');
+      this.setState(undefined);
       if (this.dirty) {
         this.validateAndCommit(inputEl.value);
         this.dirty = false;

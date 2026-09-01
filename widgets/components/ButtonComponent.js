@@ -92,6 +92,22 @@ export class ButtonComponent extends BaseComponent {
       this.ledNode = led;
     }
 
+    // FDWS v1.25: 'pressed' state style — replaces the old hardcoded, fixed-
+    // color CSS :active rule (.fd-comp-btn-inner:active in widgets.css, still
+    // the default look whenever style.states.pressed isn't authored) with an
+    // author-customizable one, same style.states mechanism the toggle
+    // variant's 'active'/'inactive' already uses below in update(). Scoped to
+    // momentary/swap only — toggle already owns activeStateName for its own
+    // on/off state via setState() in update(), and a transient 'pressed'
+    // would fight with that.
+    if (variant !== 'toggle') {
+      const clearPressed = () => this.setState(undefined);
+      btn.addEventListener('pointerdown', () => this.setState('pressed'));
+      btn.addEventListener('pointerup', clearPressed);
+      btn.addEventListener('pointercancel', clearPressed);
+      btn.addEventListener('pointerleave', clearPressed);
+    }
+
     this.btnNode = btn;
     this.element.appendChild(btn);
 

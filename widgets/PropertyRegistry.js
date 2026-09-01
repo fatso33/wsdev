@@ -38,7 +38,7 @@
 export const FDWS_VERSIONS = [
   '1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9', '1.10',
   '1.11', '1.12', '1.13', '1.14', '1.15', '1.16', '1.17', '1.18', '1.19', '1.20',
-  '1.21', '1.22', '1.23', '1.24'
+  '1.21', '1.22', '1.23', '1.24', '1.25'
 ];
 
 // ---------------------------------------------------------------------------
@@ -260,7 +260,14 @@ export const COMMON_FIELDS = [
   { path: 'style.offset.y', control: 'number', tier: 'advanced', group: 'Layout', tooltip: 'Fine vertical pixel nudge, on top of Align. Paint-only — doesn’t affect layout or tap targets.' },
 
   // --- Per-state style overrides ---
-  { path: 'style.states', control: 'stateStyleEditor', tier: 'advanced', group: 'Layout', tooltip: 'Style overrides applied when this component enters a named state (e.g. "pressed", "active") — merged over the base typography/border/background/align above, not a replacement for them.' },
+  // FDWS v1.25: this field itself (and the runtime that reads it) predates
+  // v1.25 -- core.button's toggle variant and core.indicator's severity
+  // states already used it. What's new is Studio UI: StudioInspector.js's
+  // component Appearance section now renders a live editor for whichever
+  // state name applies to the selected component type (see
+  // STATE_STYLE_CONFIG there), so control:'stateStyleEditor' finally has a
+  // real implementation instead of being declared-but-unrendered.
+  { path: 'style.states', control: 'stateStyleEditor', tier: 'advanced', group: 'Layout', fdwsMin: '1.25', tooltip: 'Style overrides applied when this component enters a named state (e.g. "pressed", "active", "editState", "dragging") — merged over the base typography/border/background above, not a replacement for them. Which state name applies depends on component type; see the "State Style" section in Appearance for this component.' },
 
   // --- Visibility ---
   { path: 'visibleWhen', control: 'conditionBuilder', tier: 'advanced', group: 'Visibility', tooltip: 'Hides this component entirely unless a condition on state/telemetry is met.' },
@@ -479,4 +486,43 @@ export function getAllFieldPaths() {
   COMMON_FIELDS.forEach((f) => all.add(f.path));
   Object.values(TYPE_FIELDS).forEach((fields) => fields.forEach((f) => all.add(f.path)));
   return [...all];
+}
+
+// ---------------------------------------------------------------------------
+// FDWS v1.25: style.states[stateName] — single source for which state name(s)
+// a given component type actually consumes at runtime (see
+// shared/widgets/components/BaseComponent.js's applyStyles()/
+// applyOptionalStateStyle(), and each component's own render() for where
+// setState()/applyOptionalStateStyle() gets called). Both
+// widget-studio/js/StudioInspector.js (which state-style editor section to
+// show) and StudioValidator.js (flagging an authored style.states entry that
+// component type never reads) import this instead of each keeping their own
+// copy — the same "two files, easy to forget" drift this registry exists to
+// prevent everywhere else.
+// ---------------------------------------------------------------------------
+export const STATE_STYLE_SUPPORT = {
+  'core.input': () => ({ name: 'editState', label: 'Edit State (While Focused)' }),
+  'core.button': (props) => (props.variant === 'toggle'
+    ? { name: 'active', label: 'Active State (Toggled On)' }
+    : { name: 'pressed', label: 'Pressed State' }),
+  'core.rocker': () => ({ name: 'pressed', label: 'Pressed State (each zone independently)' }),
+  'core.stepper': () => ({ name: 'pressed', label: 'Pressed State (each button independently)' }),
+  'core.rotary': () => ({ name: 'dragging', label: 'Dragging State' }),
+  'core.slider': () => ({ name: 'dragging', label: 'Dragging State' }),
+  'core.pad': () => ({ name: 'engaged', label: 'Engaged State (pointer down)' }),
+  'core.selector': () => ({ name: 'active', label: 'Active State (each selected position)' })
+};
+
+/**
+ * Resolves the one state-style entry (if any) a given component type/variant
+ * actually reads at runtime. Returns null for a type with no state-style
+ * support at all (e.g. core.label, core.display) — style.states on one of
+ * those is authored but inert.
+ * @param {string} type
+ * @param {object} [props]
+ * @returns {{name: string, label: string}|null}
+ */
+export function getStateStyleConfig(type, props) {
+  const resolver = STATE_STYLE_SUPPORT[type];
+  return resolver ? resolver(props || {}) : null;
 }

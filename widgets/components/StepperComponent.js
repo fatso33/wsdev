@@ -33,6 +33,21 @@ export class StepperComponent extends BaseComponent {
       this.widget?.handleInteraction?.(this.def, 'increment', { step: props.step || 1 });
     });
 
+    // FDWS v1.25: 'pressed' state style, per-button (the +/- buttons need
+    // independent looks) via applyOptionalStateStyle -- replaces/layers over
+    // the default hardcoded .fd-step-btn:active CSS the same way
+    // ButtonComponent's momentary variant does. A click's own pointerdown
+    // already fires :active natively for the default look; this only adds
+    // the author-customizable override on top, cleared on pointerup/cancel/
+    // leave same as everywhere else this pattern's used.
+    [decBtn, incBtn].forEach((stepBtn) => {
+      const clearPressed = () => this.applyOptionalStateStyle(stepBtn, 'pressed', false);
+      stepBtn.addEventListener('pointerdown', () => this.applyOptionalStateStyle(stepBtn, 'pressed', true));
+      stepBtn.addEventListener('pointerup', clearPressed);
+      stepBtn.addEventListener('pointercancel', clearPressed);
+      stepBtn.addEventListener('pointerleave', clearPressed);
+    });
+
     this.element.appendChild(decBtn);
     this.element.appendChild(incBtn);
     return this.element;

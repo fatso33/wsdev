@@ -46,6 +46,9 @@ export class PadComponent extends BaseComponent {
     const onPointerDown = (e) => {
       if (this.resolvePointerEvents() === 'none') return;
       this.element.setPointerCapture?.(e.pointerId);
+      // FDWS v1.25: 'engaged' state style — single surface (this.element),
+      // active for as long as any pointer is down on the pad (pinch included).
+      if (this.activePointers.size === 0) this.setState('engaged');
       this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       lastX = e.clientX;
       lastY = e.clientY;
@@ -91,6 +94,7 @@ export class PadComponent extends BaseComponent {
     const onPointerUp = (e) => {
       this.activePointers.delete(e.pointerId);
       if (this.activePointers.size < 2) pinchStartDist = null;
+      if (this.activePointers.size === 0) this.setState(undefined);
     };
 
     this.element.addEventListener('pointerdown', onPointerDown);

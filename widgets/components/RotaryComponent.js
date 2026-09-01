@@ -75,6 +75,11 @@ export class RotaryComponent extends BaseComponent {
       startY = e.clientY;
       accumulated = 0;
       knobWrap.setPointerCapture?.(e.pointerId);
+      // FDWS v1.25: 'dragging' state style — this component had no visual
+      // feedback at all while being dragged before this; single surface
+      // (this.element, same node the base style already targets), so the
+      // ordinary setState()/applyStyles() path applies directly.
+      this.setState('dragging');
       this.widget.handleInteraction(this.def, 'dragStart', { originalEvent: e });
     };
 
@@ -95,6 +100,7 @@ export class RotaryComponent extends BaseComponent {
     const onPointerUp = (e) => {
       if (!isDragging) return;
       isDragging = false;
+      this.setState(undefined);
       this.widget.handleInteraction(this.def, 'dragEnd', { originalEvent: e });
     };
 
