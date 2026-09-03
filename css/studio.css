@@ -14,6 +14,7 @@
   
   --accent-cyan: #00d8f6;
   --accent-cyan-glow: rgba(0, 216, 246, 0.25);
+  --accent-magenta: #ff2ee0;
   --accent-blue: #3b82f6;
   --accent-green: #22c55e;
   --accent-amber: #f59e0b;
@@ -236,6 +237,33 @@ body, html {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 0.3-A: PC Bridge connection indicator. Cyan = bridge only, magenta = sim
+   connected too (mirrors the PWA's menu-button connection dot exactly —
+   sim-connected implies bridge-connected, so its color wins whenever both
+   are true; see StudioApp.js's wireBridgeConnection()). */
+.studio-bridge-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-label);
+}
+.studio-bridge-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: background 0.2s ease;
+}
+.studio-bridge-status.bridge-connected .studio-bridge-status-dot {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan-glow);
+}
+.studio-bridge-status.sim-connected .studio-bridge-status-dot {
+  background: var(--accent-magenta);
+  box-shadow: 0 0 6px var(--accent-magenta);
 }
 
 .nav-help-item {
@@ -1815,6 +1843,47 @@ body, html {
   padding-left: 8px;
   border-left: 2px solid var(--studio-panel-border);
 }
+
+/* 0.2-D: live keystroke diff for a raw SimVar/event custom input — shows
+   what sanitizeWithReport() would strip (e.g. pasted forum syntax) before
+   it silently vanishes at save/import time. */
+.prop-sanitize-diff {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--accent-amber);
+}
+
+/* 0.3-B: live paste-and-test row + 0.1-C(c) unit resolution display. */
+.prop-live-info {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--accent-cyan);
+}
+.paste-test-row-studio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.paste-test-row-studio .paste-result {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-label);
+  flex: 1;
+  min-width: 0;
+}
+.btn-small {
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 10px;
+  border: 1px solid var(--studio-input-border);
+  background: var(--studio-surface);
+  color: var(--text-white);
+  flex-shrink: 0;
+}
+.btn-small:hover { background: var(--studio-surface-hover); }
 
 .prop-field label {
   font-size: 10px;

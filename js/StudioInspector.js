@@ -5,6 +5,7 @@
  */
 
 import { StudioValidator } from './StudioValidator.js';
+import { SecurityValidator } from '../core/SecurityValidator.js';
 import { ValueFormatter } from '../widgets/components/ValueFormatter.js';
 import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_NAMES } from '../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
@@ -27,6 +28,32 @@ import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/The
 // consistent with the rest of this modal's un-generic-ized fields.
 
 const CUSTOM_OPTION_VALUE = '__custom__';
+
+// 0.3-B: same parser as pc-bridge/config-ui.html's paste box (duplicated,
+// not imported -- config-ui.html is a plain non-module <script>, this is an
+// ES module; it's a small pure function with no dependencies, so a copy is
+// lower-risk than forcing a module boundary between them). Parses a pasted
+// community/forum string into structured read fields. Only the read shapes
+// are handled here -- Studio's Live Test is read-only (0.1-C(c)'s live
+// unit/profile resolution and a read probe), unlike config-ui.html's paste
+// box which also handles write/H:Event syntax for its Save workflow.
+function parsePastedReadBinding(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return { kind: 'empty' };
+
+  // "(A:Name, Unit)" or "(L:Name, Unit)"
+  let m = text.match(/^\(\s*([A-Za-z]:[A-Za-z0-9_:.\-\s]+?)\s*,\s*([A-Za-z0-9_%. \/]+?)\s*\)\s*$/);
+  if (m) {
+    return { kind: 'read', name: m[1].trim(), unit: m[2].trim(), raw: text };
+  }
+
+  // Bare name, no parens/prefix/arrow -- "TRANSPONDER CODE:1" or "xpndrCode"
+  if (!/[()]/.test(text) && !/>/.test(text)) {
+    return { kind: 'read', name: text, unit: null, raw: text };
+  }
+
+  return { kind: 'unsupported', raw: text };
+}
 
 // FDWS v1.25: style.states.<name> (border/background/typography overrides
 // merged over the base style while a component is in a named interaction
@@ -70,9 +97,14 @@ export class StudioInspector {
    * @param {HTMLElement} container
    * @param {import('./StudioState.js').StudioState} state
    */
-  constructor(container, state) {
+  constructor(container, state, simBridge) {
     this.container = container;
     this.state = state;
+    // 0.3-B: live paste-and-test probes + Deck Event unit resolution
+    // through StudioApp.js's PC Bridge connection. Optional — every call
+    // site below checks it's present and connected before using it, so the
+    // inspector still renders fully offline (just without the live-test row).
+    this.simBridge = simBridge || null;
 
     // Every prop edit (even a single keystroke's "change" event, or a color
     // picker's continuous "input" drag) notifies the state and triggers a full
@@ -1663,6 +1695,10 @@ export class StudioInspector {
       };
 
       const readIsCustom = !!binding.readSimVar && !getDeckEventsByKind('read').some((e) => e.name === binding.readSimVar);
+      // FDWS v1.2 §1.5: only a raw A:/L:/H:/K: address's unit is ours to set —
+      // a bare Deck Event's unit is resolved from the active PC Bridge
+      // profile, and typing a value here would just be ignored at runtime.
+      const isRawAddress = /^(A|L|H|K):/i.test(binding.readSimVar || '');
       const writeIsCustom = !!binding.writeEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.writeEvent);
 
       const ackIsCustom = !!binding.ackEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.ackEvent);
@@ -1684,6 +1720,7 @@ export class StudioInspector {
           <select id="c-bind-read-custom-select" class="prop-select">${buildCustomOptions(customReads, binding.readSimVar)}</select>
           <label>Or type a new custom variable / raw SimVar (L:/A:...)</label>
           <input type="text" id="c-bind-read-custom-input" class="prop-input" value="${readIsCustom ? (binding.readSimVar || '') : ''}" placeholder="e.g. myCustomVar, L:FBW_TAXI_LIGHT_INTENSITY" />
+          <div class="prop-sanitize-diff hidden" id="c-bind-read-custom-diff"></div>
         </div>
 
         <div class="prop-row-2">
@@ -1716,8 +1753,23 @@ export class StudioInspector {
         </div>
 
         <div class="prop-field" data-tier="advanced">
-          <label>SimConnect Unit <span class="prop-hint" title="Tells SimConnect what type to return the raw value as (e.g. degrees, knots, Bool, Number). Leave blank to use the host's default ('Number').">ⓘ</span></label>
-          <input type="text" id="c-bind-unit" class="prop-input" value="${binding.unit || ''}" placeholder="Number" />
+          <label>SimConnect Unit ${isRawAddress ? `<span class="prop-hint" title="Tells SimConnect what type to return the raw value as (e.g. degrees, knots, Bool, Number). Leave blank to use the host's default ('Number').">ⓘ</span>` : `<span class="prop-hint" title="Unit is set by PC Bridge for this Deck Event.">ⓘ</span>`}</label>
+          <input type="text" id="c-bind-unit" class="prop-input" value="${binding.unit || ''}" placeholder="${isRawAddress ? 'Number' : 'Unit is set by PC Bridge for this Deck Event'}" ${isRawAddress ? '' : 'disabled'} />
+          <div class="prop-live-info hidden" id="c-bind-resolved-info"></div>
+        </div>
+
+        <!-- 0.3-B: live paste-and-test through StudioApp.js's PC Bridge
+             connection -- same probe config-ui.html's paste box uses,
+             reached here over the WS RPC layer (SimBridge.probeReadSimVar/
+             resolveDeckEvent) instead of Electron IPC. -->
+        <div class="prop-field" data-tier="advanced" id="c-bind-live-test-block">
+          <label>Live Test <span class="prop-hint" title="Paste a forum string (e.g. (A:TRANSPONDER IDENT:1, Bool)) or test the Read Deck Event above directly against your connected PC Bridge. Read-only, isolated from any real widget's chunk.">ⓘ</span></label>
+          <input type="text" class="prop-input" id="c-bind-live-paste-input" placeholder="Paste from a forum post, e.g. (A:TRANSPONDER IDENT:1, Bool)" />
+          <div class="paste-test-row-studio">
+            <button type="button" class="btn-small" id="c-bind-live-parse-btn">Parse</button>
+            <button type="button" class="btn-small" id="c-bind-live-test-btn">Test Live</button>
+            <span class="paste-result" id="c-bind-live-test-result"></span>
+          </div>
         </div>
 
         <div class="prop-field" data-tier="advanced">
@@ -1738,6 +1790,26 @@ export class StudioInspector {
           <select id="c-bind-write-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.writeEvent)}</select>
           <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
           <input type="text" id="c-bind-write-custom-input" class="prop-input" value="${writeIsCustom ? (binding.writeEvent || '') : ''}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+          <div class="prop-sanitize-diff hidden" id="c-bind-write-custom-diff"></div>
+        </div>
+
+        <!-- 0.3-C: fire-and-watch write test. Not transmit-ack -- fires the
+             CURRENT Write Deck Event above through the real dispatch path
+             (SimBridge.sendEvent(), the same mechanism a real widget uses,
+             not the calculator-code test path 0.2-A/0.3-B use for reads),
+             then compares a SimVar you pick before/after so a "successful"
+             transmit that does nothing in the cockpit can't pass as working. -->
+        <div class="prop-field" data-tier="advanced" id="c-bind-firewatch-block">
+          <label>Fire &amp; Watch <span class="prop-hint" title="Fires the Write Deck Event above through the real dispatch path (what actually happens when this binding is used), then reads a SimVar you pick before and after to confirm something really moved. A correct event can legitimately do nothing in the wrong aircraft state (e.g. ident with the transponder off) -- that's reported as 'nothing moved', never 'this doesn't work'.">ⓘ</span></label>
+          <input type="text" class="prop-input" id="c-bind-firewatch-simvar" placeholder="SimVar to observe, e.g. A:TRANSPONDER IDENT:1" />
+          <div class="prop-row-2">
+            <input type="text" class="prop-input" id="c-bind-firewatch-unit" placeholder="Unit, e.g. Bool" />
+            <input type="text" class="prop-input" id="c-bind-firewatch-value" placeholder="Value to send" value="1" />
+          </div>
+          <div class="paste-test-row-studio">
+            <button type="button" class="btn-small" id="c-bind-firewatch-btn">Fire &amp; Watch</button>
+            <span class="paste-result" id="c-bind-firewatch-result"></span>
+          </div>
         </div>
 
         <div class="prop-field">
@@ -1784,6 +1856,7 @@ export class StudioInspector {
           <div class="prop-field prop-custom-block ${ackIsCustom ? '' : 'hidden'}" id="c-bind-ack-custom-block">
             <select id="c-bind-ack-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.ackEvent)}</select>
             <input type="text" id="c-bind-ack-custom-input" class="prop-input" value="${ackIsCustom ? (binding.ackEvent || '') : ''}" placeholder="Custom acknowledge event" />
+            <div class="prop-sanitize-diff hidden" id="c-bind-ack-custom-diff"></div>
           </div>
           <div class="prop-field">
             <label>Push Event <span class="prop-hint" title="Fired when a component with a push/click action (e.g. core.rotary's center push) is pressed, separate from its normal turn/drag write event.">ⓘ</span></label>
@@ -1792,6 +1865,7 @@ export class StudioInspector {
           <div class="prop-field prop-custom-block ${pushIsCustom ? '' : 'hidden'}" id="c-bind-push-custom-block">
             <select id="c-bind-push-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.pushEvent)}</select>
             <input type="text" id="c-bind-push-custom-input" class="prop-input" value="${pushIsCustom ? (binding.pushEvent || '') : ''}" placeholder="Custom push event" />
+            <div class="prop-sanitize-diff hidden" id="c-bind-push-custom-diff"></div>
           </div>
           <div class="prop-field">
             <label>Event Category <span class="prop-hint" title="SimConnect event category for Write/Ack/Push events. K_EVENT covers almost everything — only change this if a specific SimConnect event documents a different category.">ⓘ</span></label>
@@ -1804,12 +1878,34 @@ export class StudioInspector {
         this.state.updateComponent(comp.id, { binding: { ...(comp.binding || {}), ...updates } });
       };
 
-      // Wires one default-select + custom-block pair (kind: 'read' or 'write').
+      // Wires one default-select + custom-block pair (kind: 'read'/'write'/
+      // 'ack'/'push'). readSimVar uses the SimVar character class, the
+      // other three are all SimConnect event names.
       const wireBindingKind = (kind, bindingField) => {
         const defaultSelect = body.querySelector(`#c-bind-${kind}`);
         const customBlock = body.querySelector(`#c-bind-${kind}-custom-block`);
         const customSelect = body.querySelector(`#c-bind-${kind}-custom-select`);
         const customInput = body.querySelector(`#c-bind-${kind}-custom-input`);
+        const diffEl = body.querySelector(`#c-bind-${kind}-custom-diff`);
+        const sanitizeKind = bindingField === 'readSimVar' ? 'simvar' : 'event';
+
+        // Shows what sanitizeWithReport() would strip, live as the user
+        // types — doesn't touch the field itself, just surfaces the diff
+        // before a stray forum-paste character silently vanishes at
+        // import/export time instead (see 0.2-D's finding: this input used
+        // to be a bare .trim() with no validation at all).
+        const updateDiffHint = () => {
+          if (!diffEl || !customInput) return;
+          const { removed } = SecurityValidator.sanitizeWithReport(sanitizeKind, customInput.value);
+          if (removed.length > 0) {
+            diffEl.textContent = `Removed ${removed.map((c) => `"${c}"`).join(' ')} — did you mean to paste forum syntax like "(A:TRANSPONDER IDENT:1, Bool)"? Only the cleaned text will be saved.`;
+            diffEl.classList.remove('hidden');
+          } else {
+            diffEl.textContent = '';
+            diffEl.classList.add('hidden');
+          }
+        };
+        customInput?.addEventListener('input', updateDiffHint);
 
         defaultSelect?.addEventListener('change', () => {
           if (defaultSelect.value === CUSTOM_OPTION_VALUE) {
@@ -1824,17 +1920,21 @@ export class StudioInspector {
             customBlock?.classList.add('hidden');
             if (customSelect) customSelect.value = '';
             if (customInput) customInput.value = '';
+            updateDiffHint();
             updateBinding({ [bindingField]: defaultSelect.value || undefined });
           }
         });
 
         customSelect?.addEventListener('change', () => {
           if (customSelect.value && customInput) customInput.value = customSelect.value;
-          updateBinding({ [bindingField]: customInput?.value.trim() || undefined });
+          updateDiffHint();
+          const { cleaned } = SecurityValidator.sanitizeWithReport(sanitizeKind, customInput?.value || '');
+          updateBinding({ [bindingField]: cleaned || undefined });
         });
 
         customInput?.addEventListener('change', () => {
-          updateBinding({ [bindingField]: customInput.value.trim() || undefined });
+          const { cleaned } = SecurityValidator.sanitizeWithReport(sanitizeKind, customInput.value);
+          updateBinding({ [bindingField]: cleaned || undefined });
         });
       };
 
@@ -1898,6 +1998,162 @@ export class StudioInspector {
       body.querySelector('#c-bind-deadband')?.addEventListener('change', (e) => updateBinding({ deadband: Number(e.target.value) || 0 }));
       body.querySelector('#c-bind-unit')?.addEventListener('change', (e) => updateBinding({ unit: e.target.value.trim() || undefined }));
       body.querySelector('#c-bind-eventcategory')?.addEventListener('change', (e) => updateBinding({ eventCategory: e.target.value.trim() || undefined }));
+
+      // 0.3-B: live paste-and-test + 0.1-C(c) unit resolution.
+      {
+        const livePasteInput = body.querySelector('#c-bind-live-paste-input');
+        const liveParseBtn = body.querySelector('#c-bind-live-parse-btn');
+        const liveTestBtn = body.querySelector('#c-bind-live-test-btn');
+        const liveResultEl = body.querySelector('#c-bind-live-test-result');
+        const resolvedInfoEl = body.querySelector('#c-bind-resolved-info');
+
+        liveParseBtn?.addEventListener('click', () => {
+          const parsed = parsePastedReadBinding(livePasteInput?.value);
+          if (parsed.kind === 'empty') {
+            liveResultEl.textContent = '';
+            return;
+          }
+          if (parsed.kind !== 'read') {
+            liveResultEl.textContent = 'Only read syntax is testable here — e.g. "(A:Name, Unit)" or a bare name.';
+            return;
+          }
+          const readSelect = body.querySelector('#c-bind-read');
+          const readCustomBlock = body.querySelector('#c-bind-read-custom-block');
+          const readCustomInput = body.querySelector('#c-bind-read-custom-input');
+          if (readSelect) readSelect.value = CUSTOM_OPTION_VALUE;
+          readCustomBlock?.classList.remove('hidden');
+          if (readCustomInput) readCustomInput.value = parsed.name;
+          // Gate on whether the PARSED name is raw, not the unit field's
+          // current disabled attribute -- that attribute reflects the OLD
+          // readSimVar (still bare, at this point), while parsing a raw
+          // address here is exactly what's about to unlock it. Checking the
+          // stale attribute silently dropped `unit` from the update every
+          // time (caught live: pasting "(A:TRANSPONDER IDENT:1, Bool)"
+          // filled the name but left Unit empty).
+          const isParsedRaw = /^(A|L|H|K):/i.test(parsed.name);
+          const unitInput = body.querySelector('#c-bind-unit');
+          const updates = { readSimVar: parsed.name };
+          if (parsed.unit && isParsedRaw) {
+            if (unitInput) unitInput.value = parsed.unit;
+            updates.unit = parsed.unit;
+          }
+          // updateBinding() triggers a synchronous full re-render (see
+          // wireBindingKind's comment on this same pattern elsewhere in this
+          // file) -- liveResultEl is detached immediately after this call,
+          // so a confirmation message here wouldn't stick. The re-rendered
+          // fields themselves (name filled, unit enabled+filled) are the
+          // visible confirmation instead.
+          updateBinding(updates);
+        });
+
+        liveTestBtn?.addEventListener('click', async () => {
+          if (!this.simBridge || !this.simBridge.connected) {
+            liveResultEl.textContent = 'Not connected to PC Bridge.';
+            return;
+          }
+          const currentReadSimVar = (comp.binding || {}).readSimVar;
+          if (!currentReadSimVar) {
+            liveResultEl.textContent = 'No Read Deck Event set.';
+            return;
+          }
+          liveResultEl.textContent = 'Testing…';
+          const isRaw = /^(A|L|H|K):/i.test(currentReadSimVar);
+          try {
+            if (isRaw) {
+              const unitVal = body.querySelector('#c-bind-unit')?.value.trim();
+              const value = await this.simBridge.probeReadSimVar(currentReadSimVar, unitVal);
+              liveResultEl.textContent = `✅ Live value: ${value}`;
+            } else {
+              const resolved = await this.simBridge.resolveDeckEvent(currentReadSimVar);
+              if (!resolved) {
+                liveResultEl.textContent = `❌ "${currentReadSimVar}" has no mapping in the active profile.`;
+                return;
+              }
+              const value = await this.simBridge.probeReadSimVar(resolved.simVar, resolved.unit);
+              liveResultEl.textContent = `✅ Live value: ${value} (${resolved.simVar} / ${resolved.unit})`;
+            }
+          } catch (err) {
+            liveResultEl.textContent = `❌ ${err.message}`;
+          }
+        });
+
+        // 0.1-C(c): show what a bare Deck Event actually resolves to right
+        // now, e.g. "Unit: Bco16 — from profile 'Default'" -- the first
+        // time Studio has ever shown this instead of just the logical name.
+        if (resolvedInfoEl && !isRawAddress && binding.readSimVar && this.simBridge?.connected) {
+          resolvedInfoEl.textContent = 'Resolving…';
+          resolvedInfoEl.classList.remove('hidden');
+          this.simBridge.resolveDeckEvent(binding.readSimVar).then((resolved) => {
+            // Panel may have re-rendered (different component selected, or a
+            // binding edit) by the time this resolves -- only touch the DOM
+            // if this exact element is still live.
+            if (!resolvedInfoEl.isConnected) return;
+            resolvedInfoEl.textContent = resolved
+              ? `Unit: ${resolved.unit} — from profile "${resolved.profileName}"`
+              : `"${binding.readSimVar}" has no mapping in the active profile.`;
+          });
+        }
+      }
+
+      // 0.3-C: fire-and-watch write test.
+      {
+        const fwSimVarInput = body.querySelector('#c-bind-firewatch-simvar');
+        const fwUnitInput = body.querySelector('#c-bind-firewatch-unit');
+        const fwValueInput = body.querySelector('#c-bind-firewatch-value');
+        const fwBtn = body.querySelector('#c-bind-firewatch-btn');
+        const fwResultEl = body.querySelector('#c-bind-firewatch-result');
+
+        fwBtn?.addEventListener('click', async () => {
+          if (!this.simBridge || !this.simBridge.connected) {
+            fwResultEl.textContent = 'Not connected to PC Bridge.';
+            return;
+          }
+          const currentWriteEvent = (comp.binding || {}).writeEvent;
+          if (!currentWriteEvent) {
+            fwResultEl.textContent = 'No Write Deck Event set.';
+            return;
+          }
+          const observeSimVar = fwSimVarInput?.value.trim();
+          if (!observeSimVar) {
+            fwResultEl.textContent = 'Enter a SimVar to observe first.';
+            return;
+          }
+          const observeUnit = fwUnitInput?.value.trim();
+          const fireValue = Number(fwValueInput?.value) || 0;
+
+          fwBtn.disabled = true;
+          try {
+            fwResultEl.textContent = 'Reading before value…';
+            const before = await this.simBridge.probeReadSimVar(observeSimVar, observeUnit);
+
+            fwResultEl.textContent = 'Firing…';
+            // Real dispatch path -- same sendEvent() a real widget's tap
+            // uses (server.js's dispatchSimEvent -> transmitClientEvent),
+            // NOT the calculator-code test path 0.2-A/0.3-B's read tests use.
+            // This is deliberately what 0.2-A's paste box labelled as
+            // unverified for a non-H:Event write -- fire-and-watch is that
+            // verification.
+            this.simBridge.sendEvent(currentWriteEvent, fireValue);
+
+            await new Promise((resolve) => setTimeout(resolve, 700));
+            fwResultEl.textContent = 'Reading after value…';
+            const after = await this.simBridge.probeReadSimVar(observeSimVar, observeUnit);
+
+            if (before !== after) {
+              fwResultEl.textContent = `✅ ${before} → ${after} — confirmed, something moved.`;
+            } else {
+              // Never claim "this doesn't work" -- a correct event can
+              // legitimately no-op in the wrong aircraft state (ident with
+              // the transponder off, gear down on the ground, etc.).
+              fwResultEl.textContent = `⚠ Still ${before} — nothing moved. Check aircraft state (a correct event can legitimately no-op).`;
+            }
+          } catch (err) {
+            fwResultEl.textContent = `❌ ${err.message}`;
+          } finally {
+            fwBtn.disabled = false;
+          }
+        });
+      }
 
       const updateTransition = () => {
         const msRaw = body.querySelector('#c-bind-transition-ms')?.value;

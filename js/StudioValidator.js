@@ -6,6 +6,7 @@
  */
 
 import { parseStateRef } from '../widgets/utils/StateRefPath.js';
+import { DECK_EVENTS } from '../core/deckEvents.js';
 // Widget Studio 2.0, Phase 0: these were four separate hand-maintained arrays
 // (here, and their real-runtime counterparts in PropertyRegistry.js/
 // InteractionDispatcher.js) with no check that they agreed — the exact "UI list
@@ -284,6 +285,45 @@ export class StudioValidator {
     const detectedReadSimVars = new Set();
     const detectedWriteEvents = new Set();
     const componentIds = new Set();
+    const catalogReadNames = new Set(DECK_EVENTS.filter((e) => e.kind === 'read').map((e) => e.name));
+    const catalogWriteNames = new Set(DECK_EVENTS.filter((e) => e.kind === 'write').map((e) => e.name));
+
+    // 0.2-D: three explicit rules for a binding value (readSimVar/writeEvent/
+    // ackEvent/pushEvent), replacing the old bare `.trim()` with no checks at
+    // all (writeEvent/ackEvent/pushEvent) or a too-strict character class
+    // that flagged every space-containing raw SimVar as "unusual"
+    // (readSimVar's old /^[a-zA-Z0-9_:]+$/).
+    //   1. Block on malformed — fails the identifier/address shape entirely
+    //      (e.g. "1K:XPNDR_IDENT_ON" — a leading digit is invalid whether
+    //      read as a bare name or a prefix escape hatch).
+    //   2. Warn on well-formed but unrecognised (e.g. "XPNDR_IDNET_ON") — a
+    //      likely typo, not a hard error.
+    //   3. Never block a bare name just for being unrecognised —
+    //      registerDiscoveredVars() (profileManager.js) exists precisely so
+    //      a well-formed custom name works before any catalog entry exists
+    //      for it. A raw prefixed address is never checked against the
+    //      catalog at all — it's an escape hatch by design (FDWS v1.2 §1.5).
+    const validateBindingValue = (compId, kind, rawValue, fieldLabel) => {
+      const clean = rawValue.trim();
+      const isPrefixed = /^(A|L|H|K):/i.test(clean);
+      // No parens even for a prefixed simvar — same reasoning as
+      // SecurityValidator.sanitizeWithReport(): they're forum/RPN paste
+      // debris (e.g. a stray "(A:X, Bool)" wrapper), never part of a real
+      // raw address.
+      const shapeOk = isPrefixed
+        ? (kind === 'simvar' ? /^[A-Za-z0-9_:.\-\s]+$/ : /^[A-Za-z0-9_:.\-]+$/).test(clean)
+        : /^[A-Za-z_][A-Za-z0-9_.]*$/.test(clean);
+      if (!shapeOk) {
+        errors.push(`Component "${compId}" ${fieldLabel} "${clean}" is malformed — not a valid raw address (A:/L:/H:/K:...) or bare Deck Event name.`);
+        return;
+      }
+      if (!isPrefixed) {
+        const catalogNames = kind === 'simvar' ? catalogReadNames : catalogWriteNames;
+        if (!catalogNames.has(clean)) {
+          warnings.push(`Component "${compId}" ${fieldLabel} "${clean}" is not a recognised Deck Event — check spelling if this wasn't intentional (custom/discovered names are fine).`);
+        }
+      }
+    };
 
     const maxCols = def.layout?.grid?.columns || 64;
     const maxRows = def.layout?.grid?.rows || 64;
@@ -357,20 +397,19 @@ export class StudioValidator {
         // Bindings check
         if (comp.binding) {
           if (comp.binding.readSimVar) {
-            const clean = comp.binding.readSimVar.trim();
-            if (!/^[a-zA-Z0-9_:]+$/.test(clean)) {
-              warnings.push(`Component "${comp.id}" readSimVar "${clean}" contains unusual characters.`);
-            }
-            detectedReadSimVars.add(clean);
+            validateBindingValue(comp.id, 'simvar', comp.binding.readSimVar, 'readSimVar');
+            detectedReadSimVars.add(comp.binding.readSimVar.trim());
           }
           if (comp.binding.writeEvent) {
-            const clean = comp.binding.writeEvent.trim();
-            detectedWriteEvents.add(clean);
+            validateBindingValue(comp.id, 'event', comp.binding.writeEvent, 'writeEvent');
+            detectedWriteEvents.add(comp.binding.writeEvent.trim());
           }
           if (comp.binding.ackEvent) {
+            validateBindingValue(comp.id, 'event', comp.binding.ackEvent, 'ackEvent');
             detectedWriteEvents.add(comp.binding.ackEvent.trim());
           }
           if (comp.binding.pushEvent) {
+            validateBindingValue(comp.id, 'event', comp.binding.pushEvent, 'pushEvent');
             detectedWriteEvents.add(comp.binding.pushEvent.trim());
           }
           // FDWS v1.3: a "$context.<key>.value" binding resolves against the popover's
@@ -439,6 +478,7 @@ export class StudioValidator {
             }
             if (inter.action) {
               if (inter.action.event) {
+                validateBindingValue(comp.id, 'event', inter.action.event, `interaction #${interIdx + 1} action.event`);
                 detectedWriteEvents.add(inter.action.event.trim());
               }
               if (!this.CORE_ACTION_TYPES.includes(inter.action.type)) {

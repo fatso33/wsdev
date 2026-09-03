@@ -73,6 +73,50 @@ export class SecurityValidator {
   }
 
   /**
+   * Like sanitizeSimVar()/sanitizeEventName(), but reports what it removed
+   * instead of just silently returning the cleaned string. Those two
+   * functions have ~17 call sites between them, several on hot runtime
+   * paths with no UI to show a report in -- rather than change their return
+   * shape (and every caller), this is a separate entry point for the two
+   * places that actually want one: an import-time validator and a
+   * keystroke-level authoring UI, both showing the user a diff so a pasted
+   * forum string ("(A:TRANSPONDER IDENT:1, Bool)") reads as "we stripped
+   * `,` `(` `)` — did you mean to paste forum syntax?" instead of just
+   * mangling it invisibly.
+   *
+   * Character class is deliberately STRICTER than SIMVAR_REGEX above for the
+   * 'simvar' kind: SIMVAR_REGEX tolerates `(`/`)` (some historical reason
+   * upstream of this function, left alone per the no-touch rule), but this
+   * function's whole purpose is catching forum/RPN paste debris -- and
+   * `(`/`)` are exactly that, never part of a real bare Deck Event name or a
+   * raw A:/L:/H:/K: address. Verified against the motivating case: pasting
+   * "(A:TRANSPONDER IDENT:1, Bool)" with parens left allowed strips only the
+   * comma, leaving "(A:TRANSPONDER IDENT:1 Bool)" -- still-wrapped garbage
+   * that no longer even starts with "A:", so a raw-address check downstream
+   * (Studio's unit-field-ownership toggle, 0.1-C) misclassifies it. Stripping
+   * parens too was the fix.
+   * @param {'simvar'|'event'} kind
+   * @param {string} value
+   * @returns {{cleaned: string|null, removed: string[], truncated: boolean}}
+   *   cleaned is null if nothing valid survived; removed is the distinct set
+   *   of disallowed characters that were stripped (empty if none were);
+   *   truncated is true if the result was cut down to the max length.
+   */
+  static sanitizeWithReport(kind, value) {
+    if (typeof value !== 'string') {
+      return { cleaned: null, removed: [], truncated: false };
+    }
+    const disallowedRe = kind === 'simvar' ? /[^A-Za-z0-9_:\.\-\s]/g : /[^A-Za-z0-9_:\.\-]/g;
+    const maxLen = kind === 'simvar' ? 128 : 64;
+    const trimmed = value.trim();
+    const removed = [...new Set(trimmed.match(disallowedRe) || [])];
+    let cleaned = trimmed.replace(disallowedRe, '');
+    const truncated = cleaned.length > maxLen;
+    if (truncated) cleaned = cleaned.slice(0, maxLen);
+    return { cleaned: cleaned.length > 0 ? cleaned : null, removed, truncated };
+  }
+
+  /**
    * Escapes text content for safe rendering in HTML contexts
    * @param {string} str
    * @returns {string}

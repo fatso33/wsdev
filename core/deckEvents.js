@@ -45,6 +45,7 @@ export const DECK_EVENTS = [
   { name: 'nav2StbyFreq', kind: 'read', category: 'radio', label: 'NAV 2 Standby Freq' },
   { name: 'xpndrCode', kind: 'read', category: 'radio', label: 'Transponder Code' },
   { name: 'xpndrModeState', kind: 'read', category: 'radio', label: 'Transponder Mode State' },
+  { name: 'xpndrIdentState', kind: 'read', category: 'radio', label: 'Transponder Ident State' },
 
   { name: 'com1Swap', kind: 'write', category: 'radio', label: 'COM 1 Swap' },
   { name: 'com1StbySet', kind: 'write', category: 'radio', label: 'COM 1 Standby Set' },

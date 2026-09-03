@@ -13,6 +13,8 @@ import { StudioMenuBar } from './StudioMenuBar.js';
 import { StudioStatusBar } from './StudioStatusBar.js';
 import { StudioValidator } from './StudioValidator.js';
 import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
+import { SimBridge } from '../core/SimBridge.js';
+import { StudioBridgeAdapter } from './StudioBridgeAdapter.js';
 
 // "What's the current FDWS spec version" display string — previously
 // hardcoded as "v1.14" in several places (this header badge, the footer
@@ -37,6 +39,14 @@ export class StudioApp {
     this.simBench = null;
     this.menuBar = null;
     this.statusBar = null;
+
+    // 0.3-A: PC Bridge connection. getResolvedUrl() (shared/SimBridge.js)
+    // picks ws:// vs wss:// off window.location.protocol — a Studio opened
+    // locally on the sim PC (http://localhost:3001, say) connects over plain
+    // ws://localhost:8080, no certificate involved; only a GitHub Pages
+    // (https://) hosted Studio would hit the self-signed-cert wall.
+    this.bridgeAdapter = new StudioBridgeAdapter(this.state);
+    this.simBridge = new SimBridge(this.bridgeAdapter);
   }
 
   init() {
@@ -44,6 +54,7 @@ export class StudioApp {
 
     this.buildWorkspaceDOM();
     this.mountSubsystems();
+    this.wireBridgeConnection();
     this.attachGlobalShortcuts();
 
     // Initial validation check
@@ -94,6 +105,11 @@ export class StudioApp {
         </div>
 
         <div class="studio-nav-right">
+          <!-- 0.3-A: PC Bridge connection indicator -->
+          <div id="studio-bridge-status" class="studio-bridge-status" title="Not connected to PC Bridge">
+            <span class="studio-bridge-status-dot"></span>
+            <span class="studio-bridge-status-label">Offline</span>
+          </div>
           <div class="nav-help-links">
             <span class="nav-help-item" title="Conforming to Flight Deck Widget Standard v${LATEST_FDWS_VERSION}">Standard: <strong>v${LATEST_FDWS_VERSION}.0</strong></span>
           </div>
@@ -131,7 +147,7 @@ export class StudioApp {
     const statusBarEl = document.getElementById('studio-bottom-menubar');
 
     this.layersPanel = new StudioLayersPanel(leftEl, this.state);
-    this.inspector = new StudioInspector(rightEl, this.state);
+    this.inspector = new StudioInspector(rightEl, this.state, this.simBridge);
     this.simBench = new StudioSimBench(simBenchEl, this.state);
     this.menuBar = new StudioMenuBar(topMenuEl, this.state);
     this.statusBar = new StudioStatusBar(statusBarEl, this.state, this.simBench);
@@ -162,6 +178,48 @@ export class StudioApp {
         if (revEl) revEl.textContent = `r${this.state.widgetDef.revision || 1}`;
       }
     });
+  }
+
+  /**
+   * 0.3-A: connects to PC Bridge and drives the header's connection
+   * indicator off BRIDGE_STATUS (WebSocket up/down) and SIM_STATUS
+   * (SimConnect up/down on the PC side, independent of the WS connection
+   * itself — mirrors the PWA menu button's cyan/magenta distinction).
+   */
+  wireBridgeConnection() {
+    const statusEl = document.getElementById('studio-bridge-status');
+    const labelEl = statusEl?.querySelector('.studio-bridge-status-label');
+    if (!statusEl || !labelEl) return;
+
+    let bridgeConnected = false;
+    let simConnected = false;
+
+    const render = () => {
+      statusEl.classList.toggle('bridge-connected', bridgeConnected);
+      statusEl.classList.toggle('sim-connected', simConnected);
+      if (simConnected) {
+        labelEl.textContent = 'Sim Connected';
+        statusEl.title = 'PC Bridge connected, SimConnect live';
+      } else if (bridgeConnected) {
+        labelEl.textContent = 'Bridge Only';
+        statusEl.title = 'PC Bridge connected, waiting for MSFS';
+      } else {
+        labelEl.textContent = 'Offline';
+        statusEl.title = 'Not connected to PC Bridge';
+      }
+    };
+
+    this.bridgeAdapter.subscribe('BRIDGE_STATUS', ({ connected }) => {
+      bridgeConnected = connected;
+      if (!connected) simConnected = false;
+      render();
+    });
+    this.bridgeAdapter.subscribe('SIM_STATUS', ({ connected }) => {
+      simConnected = connected;
+      render();
+    });
+
+    this.simBridge.connect();
   }
 
   renderActiveViewport() {
