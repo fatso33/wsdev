@@ -81,11 +81,35 @@ export class SelectorComponent extends BaseComponent {
     this.widget?.handleInteraction?.(this.def, 'positionChange', { from, to: pos.value });
   }
 
+  /**
+   * Whether an authored position value denotes the same position as the value
+   * currently held.
+   *
+   * ⚠ These must NOT be compared with `===`. `props.positions[].value` is
+   * whatever the widget author wrote — very often a string like "OFF"/"STBY"/
+   * "ALT" — while a SimVar bound with unit `Enum` (which is how a mode dial is
+   * normally bound) arrives as a NUMBER. `"1" === 1` is false, so a correctly
+   * bound dial simply never highlighted any position, and it read as a styling
+   * bug rather than a comparison one.
+   *
+   * ⚠ Coerced HERE and nowhere else, deliberately. Normalising `currentValue`
+   * on arrival in update() would change what gets written back out and what
+   * `positionChange` reports to handleInteraction — the authored value is the
+   * contract with the widget author, so it stays intact and only the
+   * comparison is made tolerant.
+   */
+  isSamePosition(positionValue) {
+    // No value yet means nothing is active — without this, String(undefined)
+    // would match a literal "undefined" position value.
+    if (this.currentValue === undefined || this.currentValue === null) return false;
+    return String(positionValue) === String(this.currentValue);
+  }
+
   applyActivePosition() {
     const props = this.def.props || {};
     const positions = Array.isArray(props.positions) ? props.positions : [];
     this.posNodes.forEach((node, value) => {
-      const isActive = value === this.currentValue;
+      const isActive = this.isSamePosition(value);
       node.classList.toggle('active', isActive);
       // FDWS v1.25: style.states.active is now author-customizable per
       // position via applyOptionalStateStyle (same per-node mechanism as
@@ -94,7 +118,9 @@ export class SelectorComponent extends BaseComponent {
       this.applyOptionalStateStyle(node, 'active', isActive);
     });
     if (this.pointerNode) {
-      const active = positions.find((p) => p.value === this.currentValue);
+      // Same comparison as the highlight above — these two must agree, or the
+      // lit position and the pointer point at different things.
+      const active = positions.find((p) => this.isSamePosition(p.value));
       if (active) {
         this.pointerNode.style.transform = `translate(-50%, -100%) rotate(${active.angle || 0}deg)`;
       }
