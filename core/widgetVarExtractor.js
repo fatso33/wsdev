@@ -88,7 +88,23 @@ export function extractWidgetVariables(widgetDef) {
     if (isBareIdentifier(name)) writes.add(name);
   }
 
-  return { reads: [...reads], writes: [...writes] };
+  // FDWS v1.27 (1.0-A): widget-declared Deck Events are a fourth source, and
+  // the only one that also carries a SUGGESTED binding. That suggestion is what
+  // lets an installed widget arrive already mapped instead of leaving a row of
+  // empty placeholders for the user to fill in.
+  const suggestions = {};
+  for (const entry of widgetDef.deckEvents || []) {
+    if (!entry || !isBareIdentifier(entry.name)) continue;
+    (entry.kind === 'write' ? writes : reads).add(entry.name);
+    if (entry.suggest) {
+      suggestions[entry.name] = { ...entry.suggest, kind: entry.kind, label: entry.label, category: entry.category };
+    }
+  }
+
+  // `suggestions` is additive: the two long-standing callers (pc-bridge's
+  // auto-registration and both apps' picker UIs) destructure { reads, writes }
+  // and keep working untouched.
+  return { reads: [...reads], writes: [...writes], suggestions };
 }
 
 /**

@@ -631,6 +631,130 @@ export class StudioInspector {
       });
     }));
 
+    // Group 3b: FDWS v1.27 (1.0-A) — Deck Events this widget declares, with the
+    // binding each one should default to. Authoring UI ships with the spec
+    // field, per the standing rule that no FDWS addition goes out JSON-only.
+    this.container.appendChild(this.buildAccordionGroup('DECK EVENTS (v1.27)', false, (body) => {
+      const events = def.deckEvents || [];
+      body.innerHTML = `
+        <p class="prop-help">
+          Names this widget binds to, plus the SimVar/event each should map to by
+          default. PC Bridge copies a suggestion into its profile table on
+          install, so the widget arrives working instead of leaving empty rows.
+          A row the user later edits is never overwritten by an update.
+        </p>
+        <p class="prop-help">
+          Namespace custom names with a dot — <code>fenix.xpndrIdent</code> — so
+          two authors can each define an "xpndrIdent" without colliding. A name
+          matching a built-in Deck Event is rejected on import.
+        </p>
+        <div id="de-list"></div>
+        <button id="de-add" class="panel-full-btn" style="margin-top:8px;">+ Declare a Deck Event</button>
+      `;
+
+      const list = body.querySelector('#de-list');
+      if (!events.length) {
+        list.innerHTML = '<div class="caps-empty" style="padding:6px 0;">None declared.</div>';
+      }
+      events.forEach((ev, i) => {
+        const row = document.createElement('div');
+        row.className = 'de-row';
+        const isRead = ev.kind === 'read';
+        row.innerHTML = `
+          <div class="de-row-head">
+            <span class="caps-tag ${isRead ? 'read' : 'write'}">${isRead ? 'READ' : 'WRITE'}</span>
+            <strong>${ev.name || '(unnamed)'}</strong>
+            <button type="button" class="btn-mini-close" data-de-del="${i}" title="Remove">✕</button>
+          </div>
+          <div class="de-row-sub">${ev.label || ev.name || ''}${ev.category ? ' · ' + ev.category : ''}</div>
+          <div class="de-row-sub">${
+            isRead
+              ? (ev.suggest?.simvar ? `→ ${ev.suggest.simvar}${ev.suggest.unit ? ' / ' + ev.suggest.unit : ''}` : '→ no suggested binding')
+              : (ev.suggest?.event ? `⇄ ${ev.suggest.event}${ev.suggest.valueFormat ? ' / ' + ev.suggest.valueFormat : ''}` : '⇄ no suggested binding')
+          }</div>
+        `;
+        list.appendChild(row);
+      });
+
+      body.querySelectorAll('[data-de-del]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.dataset.deDel);
+          const next = (this.state.widgetDef.deckEvents || []).slice();
+          next.splice(idx, 1);
+          this.state.setDeckEvents(next);
+          this.render();
+        });
+      });
+
+      body.querySelector('#de-add')?.addEventListener('click', async () => {
+        const result = await openModal({
+          title: 'Declare a Deck Event',
+          submitLabel: 'Add',
+          bodyHtml: `
+            <div class="modal-form-row"><label>Name</label>
+              <input type="text" id="de-name" class="prop-input" placeholder="fenix.xpndrIdent" /></div>
+            <div class="modal-form-row"><label>Direction</label>
+              <select id="de-kind" class="prop-select">
+                <option value="read">Read — telemetry in (a lamp, a readout)</option>
+                <option value="write">Write — a command out (a button, a switch)</option>
+              </select></div>
+            <div class="modal-form-row"><label>Label</label>
+              <input type="text" id="de-label" class="prop-input" placeholder="Fenix Transponder Ident" /></div>
+            <div class="modal-form-row"><label>Category</label>
+              <input type="text" id="de-category" class="prop-input" value="custom" /></div>
+            <div class="modal-form-row"><label id="de-sug-label">Suggested SimVar</label>
+              <input type="text" id="de-sug-a" class="prop-input" placeholder="L:S_XPDR_IDENT" /></div>
+            <div class="modal-form-row"><label id="de-sug2-label">Unit</label>
+              <input type="text" id="de-sug-b" class="prop-input" placeholder="Number" /></div>
+            <p class="modal-confirm-text">The suggestion is optional — without one the row installs empty and the user maps it themselves.</p>
+          `,
+          onMount: (card) => {
+            const kind = card.querySelector('#de-kind');
+            const relabel = () => {
+              const w = kind.value === 'write';
+              card.querySelector('#de-sug-label').textContent = w ? 'Suggested Event' : 'Suggested SimVar';
+              card.querySelector('#de-sug2-label').textContent = w ? 'Value Format' : 'Unit';
+              card.querySelector('#de-sug-a').placeholder = w ? 'XPNDR_IDENT_ON  or  H:A320_XPDR_IDENT' : 'L:S_XPDR_IDENT';
+              card.querySelector('#de-sug-b').placeholder = w ? 'FIXED_1' : 'Number';
+            };
+            kind.addEventListener('change', relabel);
+            relabel();
+            card.querySelector('#de-name')?.focus();
+          },
+          onSubmit: (card) => {
+            const name = card.querySelector('#de-name').value.trim();
+            if (!name) return { error: 'A name is required.' };
+            if (/^[ALHK]:/i.test(name)) {
+              return { error: 'That is a raw address, not a Deck Event — raw addresses bypass profiles and need no declaration.' };
+            }
+            if (DECK_EVENT_NAMES.includes(name)) {
+              return { error: `"${name}" is a built-in Deck Event. Namespace yours instead, e.g. "myaircraft.${name}".` };
+            }
+            if ((this.state.widgetDef.deckEvents || []).some((e) => e.name === name)) {
+              return { error: `"${name}" is already declared by this widget.` };
+            }
+            const kind = card.querySelector('#de-kind').value;
+            const a = card.querySelector('#de-sug-a').value.trim();
+            const b = card.querySelector('#de-sug-b').value.trim();
+            const entry = {
+              name, kind,
+              label: card.querySelector('#de-label').value.trim() || name,
+              category: card.querySelector('#de-category').value.trim() || 'custom'
+            };
+            if (a) entry.suggest = kind === 'write'
+              ? { event: a, ...(b ? { valueFormat: b } : {}) }
+              : { simvar: a, ...(b ? { unit: b } : {}) };
+            return { value: entry };
+          }
+        });
+        if (!result) return;
+        const next = (this.state.widgetDef.deckEvents || []).concat([result]);
+        this.state.setDeckEvents(next);
+        showToast(`Declared "${result.name}".`);
+        this.render();
+      });
+    }));
+
     // Group 4: Capabilities Summary (§11 Rule 5)
     this.container.appendChild(this.buildAccordionGroup('CAPABILITIES MATRIX (§11)', false, (body) => {
       const caps = def.capabilities || { readSimVars: [], writeEvents: [] };

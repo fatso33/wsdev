@@ -10,6 +10,22 @@
 // gotcha that left both capped at '1.7' when v1.8 shipped. '1.0' is kept as a
 // pre-doc legacy value neither validator ever stopped accepting.
 import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
+// './' not '../': sync-shared.mjs places this file and deckEvents.js in the
+// SAME directory in both apps (js/core/ and core/), and these import paths are
+// written for those destinations rather than for shared/ itself.
+import { DECK_EVENT_NAMES } from './deckEvents.js';
+
+// FDWS v1.27: the write-side encodings a suggested binding may name. Mirrors
+// pc-bridge/profileManager.js's transformValue() switch and config-ui.html's
+// FORMAT_OPTIONS — a suggestion naming anything else could not be applied.
+//
+// ⚠ Deliberately NOT PropertyRegistry.VALUE_FORMATS, despite the overlapping
+// member names. That list is the DISPLAY formatter set ValueFormatter.js uses
+// to render a value in a widget (RAW_TEXT, DEGREE_3, SQUAWK_CODE, ...); this is
+// the WRITE encoding PC Bridge applies on the way out to SimConnect. They share
+// six names and differ at both ends — this set has MHZ_FLOAT, which that one
+// does not. Reusing either for the other would silently accept nonsense.
+const WRITE_VALUE_FORMATS = ['HZ_INT', 'KHZ_INT', 'MHZ_FLOAT', 'BCD_HEX', 'RAW_INT', 'FIXED_0', 'FIXED_1'];
 
 export class SecurityValidator {
   // Event Name Whitelist Regex: Max 64 chars, case-tolerant alphanumeric, underscore, colon, dot,
@@ -546,6 +562,74 @@ export class SecurityValidator {
             if (clean) foundSimVars.add(clean.toLowerCase());
           }
         });
+      }
+
+      // 3b. FDWS v1.27 (1.0-A): widget-declared Deck Events with suggested
+      // bindings. Higher-trust surface than anything else in a definition —
+      // this is install-time input to PC Bridge's profile store, not styling —
+      // so unknown keys are dropped rather than preserved, and every field is
+      // checked rather than merely sanitized.
+      if (sanitized.deckEvents !== undefined) {
+        if (!Array.isArray(sanitized.deckEvents)) {
+          errors.push('deckEvents must be an array.');
+          delete sanitized.deckEvents;
+        } else {
+          const cleaned = [];
+          sanitized.deckEvents.forEach((entry, i) => {
+            if (!entry || typeof entry !== 'object') {
+              errors.push(`deckEvents[${i}] must be an object.`);
+              return;
+            }
+            const name = SecurityValidator.sanitizeEventName(entry.name);
+            if (!name) {
+              errors.push(`deckEvents[${i}] has an invalid or missing "name".`);
+              return;
+            }
+            // FDWS v1.27 / 1.0-B: a raw address needs no profile row at all —
+            // it bypasses the Deck Event layer — so declaring one here is a
+            // category error, not a mapping.
+            if (/^[ALHK]:/i.test(name)) {
+              errors.push(`deckEvents[${i}] "${name}" is a raw address, not a Deck Event — those bypass profiles and need no declaration.`);
+              return;
+            }
+            // 1.0-B: custom names may not shadow a catalog name. Same rule
+            // deckEventPacks.parsePackFile() already enforces for packs;
+            // widget-declared events are the second way in and need it too.
+            if (DECK_EVENT_NAMES.includes(name)) {
+              errors.push(`deckEvents[${i}] "${name}" collides with a built-in Deck Event — custom names must be new (namespace them, e.g. "fenix.${name}").`);
+              return;
+            }
+            if (entry.kind !== 'read' && entry.kind !== 'write') {
+              errors.push(`deckEvents[${i}] "${name}" needs kind "read" or "write".`);
+              return;
+            }
+            const out = {
+              name,
+              kind: entry.kind,
+              category: typeof entry.category === 'string' ? entry.category.slice(0, 32) : 'custom',
+              label: typeof entry.label === 'string' ? entry.label.slice(0, 64) : name
+            };
+            const suggest = entry.suggest;
+            if (suggest && typeof suggest === 'object') {
+              const s2 = {};
+              if (entry.kind === 'read') {
+                const sv = SecurityValidator.sanitizeSimVar(suggest.simvar);
+                if (sv) s2.simvar = sv;
+                if (typeof suggest.unit === 'string') s2.unit = suggest.unit.slice(0, 32);
+              } else {
+                const ev = SecurityValidator.sanitizeEventName(suggest.event);
+                if (ev) s2.event = ev;
+                if (WRITE_VALUE_FORMATS.includes(suggest.valueFormat)) s2.valueFormat = suggest.valueFormat;
+                else if (suggest.valueFormat !== undefined) {
+                  warnings.push(`deckEvents[${i}] "${name}" has an unknown valueFormat "${suggest.valueFormat}" — ignored.`);
+                }
+              }
+              if (Object.keys(s2).length) out.suggest = s2;
+            }
+            cleaned.push(out);
+          });
+          sanitized.deckEvents = cleaned;
+        }
       }
 
       // 4. Capabilities cross-check warning (§11 Rule 5)

@@ -14,6 +14,13 @@ import { DECK_EVENTS } from '../core/deckEvents.js';
 // session (interaction types, value formats, custom bindings, triggers). Now
 // re-exported as static properties (unchanged call sites in StudioInspector.js)
 // but backed by one literal array each, in PropertyRegistry.js.
+import { DECK_EVENT_NAMES } from '../core/deckEvents.js';
+
+// FDWS v1.27: PC Bridge's WRITE encodings — deliberately not PropertyRegistry's
+// VALUE_FORMATS, which is the display-formatter set. See the same note in
+// shared/SecurityValidator.js.
+const WRITE_VALUE_FORMATS = ['HZ_INT', 'KHZ_INT', 'MHZ_FLOAT', 'BCD_HEX', 'RAW_INT', 'FIXED_0', 'FIXED_1'];
+
 import {
   FDWS_VERSIONS,
   ACTIONS,
@@ -72,6 +79,72 @@ export class StudioValidator {
 
     if (!def.schemaVersion || typeof def.schemaVersion !== 'string') {
       errors.push('Missing or invalid "schemaVersion" (must be semver string, e.g. "1.1.0").');
+    }
+
+    // FDWS v1.27: widget-declared Deck Events. Checked here as well as in
+    // SecurityValidator so an author sees the problem while authoring, rather
+    // than at import time on another machine — the same reason 0.2-D moved
+    // binding validation into the Studio box.
+    if (def.deckEvents !== undefined) {
+      if (!Array.isArray(def.deckEvents)) {
+        errors.push('"deckEvents" must be an array (FDWS v1.27).');
+      } else {
+        const seen = new Set();
+        def.deckEvents.forEach((entry, i) => {
+          const where = `deckEvents[${i}]`;
+          if (!entry || typeof entry !== 'object') {
+            errors.push(`${where} must be an object.`);
+            return;
+          }
+          const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+          if (!name) {
+            errors.push(`${where} is missing a "name".`);
+            return;
+          }
+          // Tracked so the namespace *advice* below stays quiet on a name that
+          // is already rejected outright — suggesting
+          // "fenix.A:TRANSPONDER IDENT:1" is noise, and a validator that emits
+          // absurd advice alongside a real error is how warnings get ignored.
+          let nameRejected = false;
+          if (/^[ALHK]:/i.test(name)) {
+            errors.push(`${where} "${name}" is a raw address, not a Deck Event — raw addresses bypass profiles entirely and need no declaration.`);
+            nameRejected = true;
+          }
+          if (DECK_EVENT_NAMES.includes(name)) {
+            errors.push(`${where} "${name}" collides with a built-in Deck Event. Namespace yours instead, e.g. "myaircraft.${name}".`);
+            nameRejected = true;
+          }
+          if (seen.has(name)) {
+            errors.push(`${where} declares "${name}" more than once.`);
+          }
+          seen.add(name);
+          if (entry.kind !== 'read' && entry.kind !== 'write') {
+            errors.push(`${where} "${name}" needs "kind": "read" or "write".`);
+          }
+          if (!nameRejected && !name.includes('.')) {
+            warnings.push(`Deck Event "${name}" isn't namespaced. Prefix it with your aircraft or pack (e.g. "fenix.${name}") so two authors can't claim the same name (FDWS v1.27 §2).`);
+          }
+          const suggest = entry.suggest;
+          if (suggest !== undefined) {
+            if (typeof suggest !== 'object' || suggest === null) {
+              errors.push(`${where} "${name}" has a non-object "suggest".`);
+            } else if (entry.kind === 'write') {
+              if (suggest.valueFormat !== undefined && !WRITE_VALUE_FORMATS.includes(suggest.valueFormat)) {
+                errors.push(`${where} "${name}" suggests unknown valueFormat "${suggest.valueFormat}". Expected one of: ${WRITE_VALUE_FORMATS.join(', ')}.`);
+              }
+              if (!suggest.event) {
+                warnings.push(`Deck Event "${name}" has a "suggest" with no "event" — it will install as an empty row.`);
+              }
+            } else if (entry.kind === 'read') {
+              if (!suggest.simvar) {
+                warnings.push(`Deck Event "${name}" has a "suggest" with no "simvar" — it will install as an empty row.`);
+              } else if (!suggest.unit) {
+                warnings.push(`Deck Event "${name}" suggests "${suggest.simvar}" with no unit — PC Bridge will default to "number", which is wrong for a text variable (use "string") and for most dimensioned ones.`);
+              }
+            }
+          }
+        });
+      }
     }
 
     if (!def.id || typeof def.id !== 'string') {

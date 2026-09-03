@@ -317,6 +317,22 @@ export class StudioState {
     this.notify('WIDGET_META_UPDATED', { meta: this.widgetDef.meta });
   }
 
+  /**
+   * FDWS v1.27: `deckEvents` is a TOP-LEVEL field, not part of `meta`.
+   * updateWidgetMeta() spreads everything it is given into widgetDef.meta and
+   * lifts only id/revision out, so routing deck events through it silently
+   * buried them at meta.deckEvents where nothing reads them — the validators
+   * and the panel all passed while the field went nowhere. Its own setter,
+   * so the destination is unambiguous.
+   * @param {Array|undefined} events omit/undefined to clear the field entirely
+   */
+  setDeckEvents(events) {
+    this.saveHistory('Update Deck Events');
+    if (events && events.length) this.widgetDef.deckEvents = events;
+    else delete this.widgetDef.deckEvents;
+    this.notify('WIDGET_META_UPDATED', { deckEvents: this.widgetDef.deckEvents });
+  }
+
   updateWidgetLayout(layoutUpdates) {
     this.saveHistory('Update Widget Layout');
     this.widgetDef.layout = { ...this.widgetDef.layout, ...layoutUpdates };
