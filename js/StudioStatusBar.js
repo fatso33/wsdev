@@ -21,10 +21,11 @@ export class StudioStatusBar {
    * @param {import('./StudioState.js').StudioState} state
    * @param {import('./StudioSimBench.js').StudioSimBench} simBench
    */
-  constructor(container, state, simBench) {
+  constructor(container, state, simBench, simVarTester) {
     this.container = container;
     this.state = state;
     this.simBench = simBench;
+    this.simVarTester = simVarTester;
 
     this.initDOM();
     this.attachEventListeners();
@@ -82,6 +83,11 @@ export class StudioStatusBar {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
           Sim Bench
         </button>
+
+        <button id="btn-simvartester" class="bar-btn" title="Paste, test and fire SimVars/events against the live sim (0.4-B)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.35-4.35"></path></svg>
+          SimVar Tester
+        </button>
       </div>
 
       <div class="bottom-bar-right"></div>
@@ -96,6 +102,12 @@ export class StudioStatusBar {
   attachEventListeners() {
     this.container.querySelector('#btn-validate')?.addEventListener('click', () => this.showValidationModal());
     this.container.querySelector('#btn-simbench')?.addEventListener('click', () => this.simBench.toggle());
+    // The two drawers share a slot at the bottom of the workspace, so opening
+    // one closes the other rather than stacking them.
+    this.container.querySelector('#btn-simvartester')?.addEventListener('click', () => {
+      this.simBench.close();
+      this.simVarTester.toggle();
+    });
   }
 
   showValidationModal() {

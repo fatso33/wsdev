@@ -266,6 +266,24 @@ body, html {
   box-shadow: 0 0 6px var(--accent-magenta);
 }
 
+/* 0.3-A follow-up: the pill doubles as the PC Bridge server setting — Studio
+   is usually opened over file://or http://, where SimBridge's auto-detected
+   ws:// can never reach the https-only bridge. See StudioApp.promptBridgeServerUrl(). */
+.studio-bridge-status.is-clickable {
+  cursor: pointer;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: 3px;
+  transition: background 0.15s ease;
+}
+.studio-bridge-status.is-clickable:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.07));
+}
+.studio-bridge-status.is-clickable:focus-visible {
+  outline: 1px solid var(--accent-cyan);
+  outline-offset: 1px;
+}
+
 .nav-help-item {
   font-size: 11px;
   color: var(--text-label);
@@ -2764,3 +2782,60 @@ body, html {
   font-family: var(--font-mono);
   user-select: none;
 }
+
+/* ---------------------------------------------------------------------------
+   0.4-B: SimVar Tester drawer + Property Inspector paste rows.
+   The drawer reuses .studio-sim-bench-drawer's shell (see StudioSimVarTester.js)
+   so the two bottom-bar tools read as siblings; only its body is styled here.
+   --------------------------------------------------------------------------- */
+.svt-body {
+  padding: 14px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+.svt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.svt-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.svt-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Inputs must be allowed to shrink inside a flex row, or a long placeholder
+   forces the row wider than the drawer and the buttons fall off the edge. */
+.svt-row .prop-input {
+  flex: 1;
+  min-width: 0;
+}
+.svt-row .prop-input.svt-narrow {
+  flex: 0 0 92px;
+}
+.svt-row .bar-btn { flex-shrink: 0; }
+.svt-result {
+  font-size: 11px;
+  color: var(--text-label);
+  min-height: 14px;
+  line-height: 1.45;
+}
+
+.prop-paste-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.prop-paste-row .prop-input {
+  flex: 1;
+  min-width: 0;
+}
+.prop-paste-row .btn-small { flex-shrink: 0; }

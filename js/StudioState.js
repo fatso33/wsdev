@@ -114,6 +114,13 @@ export class StudioState {
     this.widgetDef = JSON.parse(JSON.stringify(STUDIO_TEMPLATES[0]));
     StudioValidator.syncCapabilities(this.widgetDef);
 
+    // 0.4-B: the single parsed result from the bottom-bar SimVar Tester.
+    // Lives on state rather than being threaded through as a dependency so
+    // both the tester (writer) and the Property Inspector's Paste buttons
+    // (readers) reach it without knowing about each other. `null` until
+    // something has been parsed.
+    this.testerParsed = null;
+
     this.selectedComponentId = null;
     this.hoveredComponentId = null;
     this.selectedLayerGroupId = null;
@@ -179,6 +186,12 @@ export class StudioState {
 
     // Check if previous session exists in localStorage
     this.restoreSession();
+  }
+
+  /** 0.4-B: bottom-bar tester -> Property Inspector paste buttons. */
+  setTesterParsed(parsed) {
+    this.testerParsed = parsed;
+    this.notify('TESTER_PARSED');
   }
 
   subscribe(listener) {

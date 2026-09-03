@@ -53,19 +53,35 @@ export class SimBridge {
     let clean = (newUrl || '').trim();
     if (clean) {
       if (!clean.startsWith('ws://') && !clean.startsWith('wss://') && !clean.startsWith('http://') && !clean.startsWith('https://')) {
-        const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        clean = `${protocol}//${clean}`;
+        // A bare host ("192.168.1.50:8080") defaults to wss://, NOT to a
+        // scheme derived from window.location.protocol. PC Bridge creates
+        // exactly one server — `https.createServer()` in pc-bridge/server.js,
+        // with no plain-HTTP fallback — so ws:// is never a reachable target
+        // and deriving it from an http://-served page produced a URL that
+        // could not work by construction. That bit Widget Studio hardest
+        // (normally opened over file:// or a local http:// dev server), but
+        // the PWA had the same latent bug whenever it wasn't served from PC
+        // Bridge's own https:// address. An explicitly typed ws:// is still
+        // honored below, for a hand-modified bridge without TLS.
+        clean = `wss://${clean}`;
       } else if (clean.startsWith('http://')) {
         clean = clean.replace(/^http:\/\//, 'ws://');
       } else if (clean.startsWith('https://')) {
         clean = clean.replace(/^https:\/\//, 'wss://');
       }
       this.serverUrl = clean;
+      // Keep customUrl in step with the stored value. It used to be read once
+      // in the constructor and never updated, so any consumer reading it back
+      // after a set (rather than re-reading localStorage, which is what the
+      // PWA's SettingsView does) saw a stale value — Widget Studio's server
+      // dialog hit exactly that, opening blank instead of pre-filled.
+      this.customUrl = clean;
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('flightdeck_bridge_custom_url', clean);
       }
     } else {
       this.serverUrl = null;
+      this.customUrl = null;
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem('flightdeck_bridge_custom_url');
       }
