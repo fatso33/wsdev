@@ -2662,6 +2662,23 @@ body, html {
   gap: 12px;
 }
 
+/* Wave 0a (Part 6.4): visible autosave-restore banner — reuses the same
+   amber warning treatment as .dirty-pill.dirty/.text-amber elsewhere here. */
+.restore-draft-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: rgba(245, 158, 11, 0.12);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.4);
+  font-size: 12px;
+  color: #f59e0b;
+}
+
+.restore-draft-banner.hidden { display: none; }
+
+.restore-draft-text { flex: 1; }
+
 .val-status-banner {
   padding: 10px 12px;
   border-radius: 6px;

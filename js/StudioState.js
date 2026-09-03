@@ -106,6 +106,20 @@ export const DEVICE_PROFILES = {
   }
 };
 
+/**
+ * Wave 0a (V17): a session-local token identifying THIS in-memory editing
+ * session, independent of whatever `id` the widget currently claims. Two
+ * different blank widgets both still carrying the default
+ * `com.flightdeck.customwidget` id get two different tokens, so
+ * saveCurrentWidgetToLibrary() can tell "I'm re-saving the widget I've been
+ * editing" apart from "a DIFFERENT widget happens to share this id" — the
+ * exact ambiguity that let two unrenamed widgets silently overwrite each
+ * other.
+ */
+function randomInstanceId() {
+  return `ed_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export class StudioState {
   constructor() {
     this.listeners = new Set();
@@ -113,6 +127,13 @@ export class StudioState {
     // Default to NAV1 template
     this.widgetDef = JSON.parse(JSON.stringify(STUDIO_TEMPLATES[0]));
     StudioValidator.syncCapabilities(this.widgetDef);
+    this.editorInstanceId = randomInstanceId();
+
+    // Wave 0a (Part 6.4): set by restoreSession() below when an autosaved
+    // draft is found, instead of restoring it silently. StudioApp renders a
+    // dismissible banner off this — see keepRestoredSession()/
+    // discardRestoredSession().
+    this.restoredSessionInfo = null;
 
     // 0.4-B: the single parsed result from the bottom-bar SimVar Tester.
     // Lives on state rather than being threaded through as a dependency so
@@ -251,6 +272,11 @@ export class StudioState {
     if (recordHistory) {
       this.saveHistory(historyLabel);
     }
+    this.editorInstanceId = randomInstanceId();
+    // Whatever restoredSessionInfo described no longer matches what's about
+    // to be loaded (New/Import/etc.) — the restore banner's Keep/Discard
+    // decision is moot once the author has moved on to a different widget.
+    this.restoredSessionInfo = null;
     this.widgetDef = JSON.parse(JSON.stringify(newDef));
     if (!this.widgetDef.fdws) this.widgetDef.fdws = '1.2';
     if (!this.widgetDef.schemaVersion) this.widgetDef.schemaVersion = '1.2.0';
@@ -916,13 +942,34 @@ export class StudioState {
     }
   }
 
+  /**
+   * Wave 0a (V17): sync, no side effects — call before saving to find out
+   * whether saveCurrentWidgetToLibrary() is about to silently overwrite a
+   * DIFFERENT widget that happens to share this id (as opposed to a normal
+   * re-save of the widget already being edited, which is always safe).
+   * @returns {null|{existingName: string, existingRevision: number}}
+   */
+  getSaveCollision() {
+    const saved = this.loadSavedWidgets();
+    const existing = saved.find((w) => w.id === this.widgetDef.id);
+    if (!existing) return null;
+    if (existing.__editorInstanceId === this.editorInstanceId) return null;
+    return {
+      existingName: existing.meta?.name || existing.id,
+      existingRevision: existing.revision || 1
+    };
+  }
+
   saveCurrentWidgetToLibrary() {
     this.widgetDef.revision = (this.widgetDef.revision || 1) + 1;
     StudioValidator.syncCapabilities(this.widgetDef);
 
     const saved = this.loadSavedWidgets();
     const existingIdx = saved.findIndex((w) => w.id === this.widgetDef.id);
-    const widgetSnapshot = JSON.parse(JSON.stringify(this.widgetDef));
+    // __editorInstanceId is stamped onto the LIBRARY snapshot only, never onto
+    // this.widgetDef itself — export always serializes this.widgetDef
+    // directly, so it can never leak into a .fdwidget/JSON export.
+    const widgetSnapshot = { ...JSON.parse(JSON.stringify(this.widgetDef)), __editorInstanceId: this.editorInstanceId };
 
     if (existingIdx >= 0) {
       saved[existingIdx] = widgetSnapshot;
@@ -942,6 +989,17 @@ export class StudioState {
     }
   }
 
+  /**
+   * Wave 0a (V17): the "Save as new ID" branch of the collision prompt —
+   * repoints the current widget at a fresh id before saving, so the
+   * colliding library entry is left untouched.
+   * @param {string} newId
+   */
+  saveCurrentWidgetToLibraryAsNewId(newId) {
+    this.widgetDef.id = newId;
+    return this.saveCurrentWidgetToLibrary();
+  }
+
   deleteSavedWidget(id) {
     const saved = this.loadSavedWidgets().filter((w) => w.id !== id);
     try {
@@ -955,24 +1013,63 @@ export class StudioState {
 
   persistSession() {
     try {
-      localStorage.setItem('fdws_current_session', JSON.stringify(this.widgetDef));
+      localStorage.setItem('fdws_current_session', JSON.stringify({ savedAt: Date.now(), widgetDef: this.widgetDef }));
     } catch {
       // Ignore quota error
     }
   }
 
+  /**
+   * Wave 0a (Part 6.4): restores an autosaved draft same as before, but no
+   * longer silently — a "restored an abandoned draft" banner (StudioApp.js)
+   * is the whole point; a silent restore was flagged as a new trap in the
+   * opposite direction (reappearing work the author thought they'd walked
+   * away from). Sets restoredSessionInfo instead of just applying the def;
+   * keepRestoredSession()/discardRestoredSession() resolve it.
+   */
   restoreSession() {
     try {
       const raw = localStorage.getItem('fdws_current_session');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.id && parsed.components) {
-          this.widgetDef = parsed;
-          StudioValidator.syncCapabilities(this.widgetDef);
-        }
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      // Back-compat: a session stored before this change is a bare widgetDef
+      // (no savedAt wrapper) — still restore it once, just with no timestamp.
+      const isWrapped = parsed && typeof parsed === 'object' && parsed.widgetDef;
+      const def = isWrapped ? parsed.widgetDef : parsed;
+      const savedAt = isWrapped ? parsed.savedAt : null;
+      if (def && def.id && def.components) {
+        this.widgetDef = def;
+        StudioValidator.syncCapabilities(this.widgetDef);
+        this.restoredSessionInfo = { name: def.meta?.name || def.id, id: def.id, savedAt };
       }
     } catch {
       // Ignore parse errors
     }
+  }
+
+  /** Wave 0a: dismiss the restore banner, keeping the restored draft as-is. */
+  keepRestoredSession() {
+    this.restoredSessionInfo = null;
+    this.notify('GENERAL');
+  }
+
+  /**
+   * Wave 0a: dismiss the restore banner AND discard the draft — resets to
+   * the same default the constructor would have loaded had there been
+   * nothing to restore.
+   */
+  discardRestoredSession() {
+    this.restoredSessionInfo = null;
+    try {
+      localStorage.removeItem('fdws_current_session');
+    } catch {
+      // Ignore
+    }
+    this.widgetDef = JSON.parse(JSON.stringify(STUDIO_TEMPLATES[0]));
+    this.editorInstanceId = randomInstanceId();
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.selectedComponentId = null;
+    this.selectedLayerGroupId = null;
+    this.notify('WIDGET_DEF_LOADED', { widgetDef: this.widgetDef });
   }
 }

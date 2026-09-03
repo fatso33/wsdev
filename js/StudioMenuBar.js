@@ -12,6 +12,23 @@ import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
 
 const LATEST_FDWS_VERSION = FDWS_VERSIONS[FDWS_VERSIONS.length - 1];
 
+// Widget name/author round-trips through the saved-widget library and
+// import/export, so it can carry attacker-controlled text by the time it
+// reaches a modal's innerHTML — same reasoning as the identical helper in
+// StudioSimVarTester.js (LVar names there, widget metadata here).
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+const WIDGET_CATEGORIES = ['Avionics', 'Controls', 'Gauges', 'Alerts', 'Utilities'];
+
+/** Reverse-DNS-ish shape the Inspector's own Package ID field and StudioValidator both expect. */
+function slugifyIdSegment(s) {
+  return String(s ?? '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '') || 'widget';
+}
+
 export class StudioMenuBar {
   /**
    * @param {HTMLElement} container
@@ -119,12 +136,7 @@ export class StudioMenuBar {
     });
 
     // Save Widget
-    this.container.querySelector('#btn-save-widget')?.addEventListener('click', () => {
-      const ok = this.state.saveCurrentWidgetToLibrary();
-      if (ok) {
-        this.showToast(`Saved "${this.state.widgetDef.meta?.name}" (Rev ${this.state.widgetDef.revision}) to local library!`);
-      }
-    });
+    this.container.querySelector('#btn-save-widget')?.addEventListener('click', () => this.saveWidget());
 
     // Import
     const importInput = this.container.querySelector('#menu-import-input');
@@ -163,8 +175,7 @@ export class StudioMenuBar {
         this.state.redo();
         e.preventDefault();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        this.state.saveCurrentWidgetToLibrary();
-        this.showToast(`Saved "${this.state.widgetDef.meta?.name}"`);
+        this.saveWidget();
         e.preventDefault();
       }
     });
@@ -189,13 +200,152 @@ export class StudioMenuBar {
     }
   }
 
+  /**
+   * Wave 0a (V8 + V21): "New" used to be a bare yes/no confirm with no naming
+   * step, cloning the template's hardcoded id/name/author verbatim — which is
+   * both why every new widget collided on the same library id (V17) and why
+   * the Inspector's widget-root METADATA group was the only form in the app
+   * that looked like "name your widget" (an author would type into it, then
+   * lose it to New's generic "unsaved changes" confirm — V21). Now the naming
+   * step lives here, where it belongs, and the current widget's own name/id
+   * are named explicitly in the warning rather than a generic "unsaved
+   * changes" phrase.
+   */
   async promptNewWidget() {
-    const blank = STUDIO_TEMPLATES.find((t) => t.id === 'com.flightdeck.customwidget') || STUDIO_TEMPLATES[0];
-    const ok = await confirmModal('Create a new blank widget? Unsaved changes to the current widget will be cleared.', { title: 'New Widget' });
-    if (ok) {
-      this.state.setWidgetDef(blank, true, 'New Widget');
-      this.showToast('Created new widget.');
+    const blankTemplate = STUDIO_TEMPLATES.find((t) => t.id === 'com.flightdeck.customwidget') || STUDIO_TEMPLATES[0];
+    const savedWidgets = this.state.loadSavedWidgets();
+    const currentName = this.state.widgetDef.meta?.name || this.state.widgetDef.id || 'Untitled Widget';
+    const currentId = this.state.widgetDef.id || '';
+    const prefillAuthor = this.state.widgetDef.meta?.author || '';
+
+    const result = await openModal({
+      title: 'Create New Widget',
+      bodyHtml: `
+        ${this.state.isDirty ? `
+          <p class="modal-confirm-text" style="color:#f59e0b;">
+            This will discard "${escapeHtml(currentName)}" (${escapeHtml(currentId)}), including any
+            unsaved changes to its name, layout, and components. Save it first if you want to keep it.
+          </p>
+        ` : ''}
+        <div class="prop-field">
+          <label>Widget Name</label>
+          <input type="text" id="nw-name" class="prop-input" placeholder="e.g. NAV 1 Radio" autofocus />
+        </div>
+        <div class="prop-row-2">
+          <div class="prop-field">
+            <label>Category</label>
+            <select id="nw-category" class="prop-select">
+              ${WIDGET_CATEGORIES.map((c) => `<option value="${c}" ${c === 'Controls' ? 'selected' : ''}>${c}</option>`).join('')}
+            </select>
+          </div>
+          <div class="prop-field">
+            <label>Author</label>
+            <input type="text" id="nw-author" class="prop-input" value="${escapeHtml(prefillAuthor)}" placeholder="Author Name" />
+          </div>
+        </div>
+        <div class="prop-field">
+          <label>Package ID (Reverse-DNS)</label>
+          <input type="text" id="nw-id" class="prop-input" placeholder="com.author.widgetname" />
+        </div>
+      `,
+      submitLabel: 'Create',
+      onMount: (card) => {
+        const nameEl = card.querySelector('#nw-name');
+        const authorEl = card.querySelector('#nw-author');
+        const idEl = card.querySelector('#nw-id');
+        let idManuallyEdited = false;
+        idEl.addEventListener('input', () => { idManuallyEdited = true; });
+        const syncId = () => {
+          if (idManuallyEdited) return;
+          idEl.value = `com.${slugifyIdSegment(authorEl.value) || 'author'}.${slugifyIdSegment(nameEl.value) || 'widget'}`;
+        };
+        nameEl.addEventListener('input', syncId);
+        authorEl.addEventListener('input', syncId);
+      },
+      onSubmit: (card) => {
+        const name = card.querySelector('#nw-name').value.trim();
+        const category = card.querySelector('#nw-category').value;
+        const author = card.querySelector('#nw-author').value.trim();
+        const id = card.querySelector('#nw-id').value.trim();
+        if (!name) return { error: 'Widget Name is required.' };
+        if (!/^[a-z0-9]+(\.[a-z0-9-]+)+$/i.test(id)) {
+          return { error: 'Package ID should look like "com.author.widgetname".' };
+        }
+        if (savedWidgets.some((w) => w.id === id)) {
+          return { error: `A saved widget already uses id "${id}" — choose a different one.` };
+        }
+        return { value: { name, category, author, id } };
+      }
+    });
+
+    if (!result) return;
+
+    const newDef = JSON.parse(JSON.stringify(blankTemplate));
+    newDef.id = result.id;
+    newDef.revision = 1;
+    newDef.meta = { ...(newDef.meta || {}), name: result.name, category: result.category, author: result.author };
+
+    this.state.setWidgetDef(newDef, true, 'New Widget');
+    this.showToast(`Created new widget "${result.name}".`);
+  }
+
+  /**
+   * Wave 0a (V17): Save used to be findIndex-then-overwrite with no
+   * uniqueness check — any two widgets that still shared the (formerly
+   * hardcoded) default id silently destroyed each other on save, no second
+   * author required. state.getSaveCollision() distinguishes "re-saving the
+   * widget I'm already editing" (always safe) from "a DIFFERENT widget in
+   * the library happens to share this id" (needs a decision).
+   */
+  async saveWidget() {
+    const collision = this.state.getSaveCollision();
+    if (!collision) {
+      const ok = this.state.saveCurrentWidgetToLibrary();
+      if (ok) this.showToast(`Saved "${this.state.widgetDef.meta?.name}" (Rev ${this.state.widgetDef.revision}) to local library!`);
+      return;
     }
+
+    const currentName = this.state.widgetDef.meta?.name || this.state.widgetDef.id;
+    const currentId = this.state.widgetDef.id;
+    const result = await openModal({
+      title: 'Save — ID Already In Use',
+      bodyHtml: `
+        <p class="modal-confirm-text">
+          A saved widget titled "${escapeHtml(collision.existingName)}" (Rev ${collision.existingRevision}) already
+          uses id "${escapeHtml(currentId)}". The widget you're saving now is titled "${escapeHtml(currentName)}" —
+          this is a different widget, not a re-save of that one.
+        </p>
+        <p class="modal-confirm-text">Overwriting will permanently replace "${escapeHtml(collision.existingName)}" in your local library.</p>
+      `,
+      submitLabel: 'Overwrite',
+      cancelLabel: 'Cancel',
+      onMount: (card, cleanup) => {
+        const footer = card.querySelector('.modal-footer');
+        const altBtn = document.createElement('button');
+        altBtn.type = 'button';
+        altBtn.className = 'bar-btn';
+        altBtn.textContent = 'Save as New ID';
+        altBtn.addEventListener('click', () => cleanup('new-id'));
+        footer.insertBefore(altBtn, footer.querySelector('[data-modal-submit]'));
+      }
+    });
+
+    if (result === true) {
+      const ok = this.state.saveCurrentWidgetToLibrary();
+      if (ok) this.showToast(`Overwrote "${collision.existingName}" — saved as "${this.state.widgetDef.meta?.name}" (Rev ${this.state.widgetDef.revision}).`);
+    } else if (result === 'new-id') {
+      const savedWidgets = this.state.loadSavedWidgets();
+      const baseId = currentId.replace(/\.\d+$/, '');
+      let n = 2;
+      let candidate = `${baseId}.${n}`;
+      while (savedWidgets.some((w) => w.id === candidate)) {
+        n += 1;
+        candidate = `${baseId}.${n}`;
+      }
+      const ok = this.state.saveCurrentWidgetToLibraryAsNewId(candidate);
+      if (ok) this.showToast(`Saved as new widget "${this.state.widgetDef.meta?.name}" (id: ${candidate}, Rev ${this.state.widgetDef.revision}).`);
+    }
+    // result === null (Cancel/Escape): no-op.
   }
 
   async handleImportFile(file) {

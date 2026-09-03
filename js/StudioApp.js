@@ -69,6 +69,7 @@ export class StudioApp {
     this.buildWorkspaceDOM();
     this.mountSubsystems();
     this.wireBridgeConnection();
+    this.wireRestoreBanner();
     this.attachGlobalShortcuts();
 
     // Initial validation check
@@ -132,6 +133,10 @@ export class StudioApp {
 
       <!-- Main Action Menu Bar (spans full width, under header) -->
       <nav id="studio-top-menubar" class="studio-menubar-top"></nav>
+
+      <!-- Wave 0a (Part 6.4): visible autosave-restore banner, hidden unless
+           StudioState found a draft on load -->
+      <div id="studio-restore-banner" class="restore-draft-banner hidden"></div>
 
       <!-- Main Workspace Body (3-Column Layout) -->
       <main class="studio-main-layout">
@@ -250,6 +255,45 @@ export class StudioApp {
     });
 
     this.simBridge.connect();
+  }
+
+  /**
+   * Wave 0a (Part 6.4): restoreSession() (StudioState.js) still auto-restores
+   * an autosaved draft on load, but no longer silently — it sets
+   * restoredSessionInfo instead, and this renders the visible banner off of
+   * it. Marcus's flagged risk in the other direction: an old, abandoned
+   * experiment silently reappearing is its own trap, so Keep/Discard are both
+   * one click and neither is hidden behind a badge someone could miss.
+   */
+  wireRestoreBanner() {
+    const banner = document.getElementById('studio-restore-banner');
+    if (!banner) return;
+
+    const render = () => {
+      const info = this.state.restoredSessionInfo;
+      if (!info) {
+        banner.classList.add('hidden');
+        banner.innerHTML = '';
+        return;
+      }
+      const when = info.savedAt ? new Date(info.savedAt).toLocaleString() : 'an earlier session';
+      const safeName = String(info.name ?? '').replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+      banner.innerHTML = `
+        <span class="restore-draft-text">Restored an autosaved draft — "${safeName}" (saved ${when}).</span>
+        <button type="button" id="restore-draft-keep" class="bar-btn">Keep</button>
+        <button type="button" id="restore-draft-discard" class="bar-btn">Discard</button>
+      `;
+      banner.classList.remove('hidden');
+      banner.querySelector('#restore-draft-keep')?.addEventListener('click', () => this.state.keepRestoredSession());
+      banner.querySelector('#restore-draft-discard')?.addEventListener('click', () => this.state.discardRestoredSession());
+    };
+
+    render();
+    this.state.subscribe((changeType) => {
+      if (changeType === 'GENERAL' || changeType === 'WIDGET_DEF_LOADED') render();
+    });
   }
 
   /**

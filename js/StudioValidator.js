@@ -39,6 +39,11 @@ import {
 // comes out identical instead of adapting. Caught live on a real widget.
 const GRADIENT_VALUE_RE = /^(?:repeating-)?(?:linear|radial|conic)-gradient\(/i;
 
+// Wave 0a (V20): component types whose own runtime component class dispatches
+// binding.writeEvent itself (no interaction row required) — see the comment
+// at its one call site below for how this was verified.
+const SELF_DISPATCHING_WRITE_EVENT_TYPES = ['core.input', 'core.selector', 'core.slider'];
+
 export class StudioValidator {
   // Widget Studio 2.0, Phase 0 (adjustment pass): this was a fourth
   // hand-copied list, separate from PropertyRegistry.js's TYPE_FIELDS, that
@@ -476,6 +481,23 @@ export class StudioValidator {
           if (comp.binding.writeEvent) {
             validateBindingValue(comp.id, 'event', comp.binding.writeEvent, 'writeEvent');
             detectedWriteEvents.add(comp.binding.writeEvent.trim());
+            // Wave 0a (V20): InputComponent/SelectorComponent/SliderComponent
+            // dispatch binding.writeEvent themselves (grep dispatchSimEvent
+            // shared/widgets/components/*.js) — every other component type
+            // (core.button among them) relies entirely on an interaction row
+            // whose core.dispatchEvent action either leaves "event" blank
+            // (falls back to this field, InteractionDispatcher.js:101) or
+            // repeats it explicitly. Without one, the Inspector's "Write Deck
+            // Event" field looks like a working connection and does nothing.
+            if (!SELF_DISPATCHING_WRITE_EVENT_TYPES.includes(comp.type)) {
+              const consumed = Array.isArray(comp.interactions) && comp.interactions.some((i) => (
+                i.action?.type === 'core.dispatchEvent'
+                && (!i.action.event || i.action.event.trim() === comp.binding.writeEvent.trim())
+              ));
+              if (!consumed) {
+                warnings.push(`Component "${comp.id}" sets binding.writeEvent ("${comp.binding.writeEvent}") but this component type doesn't send it automatically, and no interaction dispatches it (add e.g. tap → "Dispatch Sim Event" with Event left blank to use this binding) — nothing on this component currently sends this value to the simulator.`);
+              }
+            }
           }
           if (comp.binding.ackEvent) {
             validateBindingValue(comp.id, 'event', comp.binding.ackEvent, 'ackEvent');

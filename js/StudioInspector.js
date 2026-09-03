@@ -2529,18 +2529,39 @@ export class StudioInspector {
         // bug class from this repo's own audit history — fixed here by
         // requiring explicit opt-in instead of inferring intent from a
         // color input that can never be truly empty).
-        const style = {};
+        //
+        // Wave 0a (V18): this used to rebuild `style` from scratch out of
+        // only these 4 controls, which silently dropped anything authored
+        // through this row's own "Advanced JSON" textarea (glow, stroke,
+        // gradient, align, offset, orientation, ...) the moment ANY other
+        // control in the row was touched — the sole escape hatch to those
+        // properties destroying itself on the first ordinary edit. Now it
+        // starts from the rule's existing style and only touches the two
+        // sub-properties (typography.color/border.color) these two
+        // checkboxes actually own, leaving everything else (including
+        // whatever the JSON textarea last wrote) untouched. background stays
+        // a wholesale replace/delete — it's exclusive-replace at runtime
+        // (BaseComponent.applyStyles()), so there's nothing to preserve there.
+        const style = JSON.parse(JSON.stringify(rule.style || {}));
         if (rowEl.querySelector('.cf-text-color-on')?.checked) {
-          style.typography = { color: rowEl.querySelector('.cf-text-color')?.value };
+          style.typography = { ...(style.typography || {}), color: rowEl.querySelector('.cf-text-color')?.value };
+        } else if (style.typography) {
+          delete style.typography.color;
+          if (Object.keys(style.typography).length === 0) delete style.typography;
         }
         if (rowEl.querySelector('.cf-border-color-on')?.checked) {
-          style.border = { color: rowEl.querySelector('.cf-border-color')?.value };
+          style.border = { ...(style.border || {}), color: rowEl.querySelector('.cf-border-color')?.value };
+        } else if (style.border) {
+          delete style.border.color;
+          if (Object.keys(style.border).length === 0) delete style.border;
         }
         const bgType = rowEl.querySelector('.cf-bg-type')?.value;
         if (bgType === 'color') {
           style.background = { type: 'color', color: rowEl.querySelector('.cf-bg-color')?.value || '#131b26' };
         } else if (bgType === 'image') {
           style.background = { type: 'image', image: { assetId: rowEl.querySelector('.cf-bg-image')?.value || '' } };
+        } else {
+          delete style.background;
         }
         return { when, style };
       };
