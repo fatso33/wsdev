@@ -18,6 +18,17 @@
  * v1.3, Widget Popovers only, nor v1.4, which formalizes `revision` and
  * clarifies that bare names are host-defined rather than raw `A:` SimVars,
  * touches this namespace.)
+ *
+ * Two views over the same traversal (walkBindingSites):
+ *   - extractWidgetVariables() — the bare logical NAMES a widget references,
+ *     for auto-registering profile rows and building picker lists.
+ *   - extractBindingRows() / applyBindingRow() — the same sites as editable
+ *     rows, for the PWA's per-component bindings list (Release 1.1-C), which
+ *     needs to write a corrected name back to the exact place it came from.
+ * Sharing one walker is deliberate: when these were about to become two
+ * traversals, the second one immediately revealed that the first had been
+ * missing `interactions[].action.event` — i.e. every button — since it was
+ * written.
  */
 
 const PREFIXED_RE = /^(A|L|H|K):/i;
@@ -27,34 +38,172 @@ export function isBareIdentifier(name) {
 }
 
 /**
- * Recursively walks a components[] tree (including core.list itemTemplate
- * subtrees and core.container children) collecting logical readSimVar names
- * (reads) and writeEvent/pushEvent/ackEvent/zone-writeEvent names (writes).
+ * Normalizes an interaction's action(s) to an array. FDWS widgets in the wild
+ * use both shapes: `interactions[].action` (a single object — what every
+ * shipped widget actually writes) and `interactions[].actions` (an array).
+ * Reading only one of them silently skips the other.
  */
-function walkComponents(components, reads, writes) {
+function actionsOf(interaction) {
+  if (!interaction) return [];
+  if (interaction.action) return [interaction.action];
+  return Array.isArray(interaction.actions) ? interaction.actions : [];
+}
+
+/**
+ * The single traversal every extractor here shares. Visits each component in
+ * a components[] tree (including core.container children and core.list
+ * itemTemplate subtrees) and reports every sim-facing binding site it carries,
+ * via `visit(site)`.
+ *
+ * A "site" is one place a logical name lives, with enough information to write
+ * a new one back — see extractBindingRows() for the row shape.
+ *
+ * ⚠ Local-state bindings (`stateVar`, `stateRef`) are deliberately NOT sites.
+ * They address the widget's own state, never the sim, and listing them would
+ * bury the handful of real sim bindings among dozens of irrelevant rows —
+ * com12combo alone has 47 of them against 6 real ones.
+ */
+function walkBindingSites(components, visit, path = []) {
   if (!Array.isArray(components)) return;
 
-  for (const comp of components) {
+  components.forEach((comp, i) => {
+    const compPath = [...path, i];
+    const at = (extra) => visit({
+      compPath,
+      componentId: comp.id || null,
+      componentType: comp.type || null,
+      componentLabel: comp.label || comp.props?.label || comp.id || comp.type || 'component',
+      ...extra
+    });
+
     const binding = comp.binding;
     if (binding) {
-      if (isBareIdentifier(binding.readSimVar)) reads.add(binding.readSimVar);
-      if (isBareIdentifier(binding.writeEvent)) writes.add(binding.writeEvent);
-      if (isBareIdentifier(binding.pushEvent)) writes.add(binding.pushEvent);
-      if (isBareIdentifier(binding.ackEvent)) writes.add(binding.ackEvent);
+      if (binding.readSimVar) at({ kind: 'read', source: 'binding', field: 'readSimVar', name: binding.readSimVar });
+      if (binding.writeEvent) at({ kind: 'write', source: 'binding', field: 'writeEvent', name: binding.writeEvent });
+      if (binding.pushEvent) at({ kind: 'write', source: 'binding', field: 'pushEvent', name: binding.pushEvent });
+      if (binding.ackEvent) at({ kind: 'write', source: 'binding', field: 'ackEvent', name: binding.ackEvent });
     }
 
     // core.rocker: each zone carries its own writeEvent instead of binding.writeEvent
     const zones = comp.props?.zones;
     if (Array.isArray(zones)) {
-      for (const zone of zones) {
-        if (isBareIdentifier(zone?.writeEvent)) writes.add(zone.writeEvent);
-      }
+      zones.forEach((zone, zi) => {
+        if (zone?.writeEvent) at({ kind: 'write', source: 'zone', field: 'writeEvent', index: zi, name: zone.writeEvent });
+      });
     }
 
+    // core.dispatchEvent actions. This is where a BUTTON's write lives — a
+    // button's own `binding` is usually empty, so an extractor that reads only
+    // `binding.*` misses every button in the library. That was a real gap: a
+    // widget whose only sim write is a button tap (com1Swap, xpndrIdent, and
+    // the custom THROTTLE1_SET) registered no placeholder profile row on
+    // install, so the name resolved to nothing until someone added the row by
+    // hand — the silent-failure mode this workstream exists to remove.
+    (comp.interactions || []).forEach((interaction, ii) => {
+      actionsOf(interaction).forEach((action, ai) => {
+        if (action?.type === 'core.dispatchEvent' && action.event) {
+          at({
+            kind: 'write',
+            source: 'interaction',
+            field: 'event',
+            index: ii,
+            actionIndex: ai,
+            trigger: interaction.trigger || interaction.on || null,
+            value: action.value,
+            name: action.event
+          });
+        }
+      });
+    });
+
     // Nested trees: core.container children, core.list itemTemplate
-    if (Array.isArray(comp.components)) walkComponents(comp.components, reads, writes);
-    if (Array.isArray(comp.itemTemplate?.components)) walkComponents(comp.itemTemplate.components, reads, writes);
+    if (Array.isArray(comp.components)) walkBindingSites(comp.components, visit, [...compPath, 'components']);
+    if (Array.isArray(comp.itemTemplate?.components)) walkBindingSites(comp.itemTemplate.components, visit, [...compPath, 'itemTemplate']);
+  });
+}
+
+/**
+ * Collects the bare logical names out of a components[] tree. Thin wrapper
+ * over walkBindingSites() so name collection and the per-row listing in
+ * extractBindingRows() can never disagree about what counts as a binding.
+ */
+function walkComponents(components, reads, writes) {
+  walkBindingSites(components, (site) => {
+    if (!isBareIdentifier(site.name)) return;
+    (site.kind === 'read' ? reads : writes).add(site.name);
+  });
+}
+
+/**
+ * Lists every sim-facing binding in a widget definition as an editable row —
+ * one per binding site, not per component, since a single component can carry
+ * both a read and a write.
+ *
+ * Unlike extractWidgetVariables(), this keeps PREFIXED names too (`A:`, `L:`,
+ * `K:`, `H:`): a raw address is exactly the kind of binding someone needs to
+ * inspect and fix, even though it bypasses the Deck Event layer and so has no
+ * profile row to register.
+ *
+ * @param {object} widgetDef
+ * @returns {Array<{compPath: Array, componentId: string|null, componentType: string|null,
+ *   componentLabel: string, kind: 'read'|'write', source: 'binding'|'zone'|'interaction',
+ *   field: string, index?: number, actionIndex?: number, trigger?: string|null,
+ *   value?: number, name: string, isRaw: boolean}>}
+ */
+export function extractBindingRows(widgetDef) {
+  if (!widgetDef || typeof widgetDef !== 'object') return [];
+  const rows = [];
+  walkBindingSites(widgetDef.components, (site) => {
+    rows.push({ ...site, isRaw: !isBareIdentifier(site.name) });
+  });
+  return rows;
+}
+
+/**
+ * Writes a new logical name back to the exact site a row came from, mutating
+ * `widgetDef` in place. Lives beside the traversal on purpose: a caller that
+ * reconstructed this path itself would silently target the wrong component the
+ * first time the shape of a nested tree changed.
+ * @returns {boolean} whether the write landed
+ */
+export function applyBindingRow(widgetDef, row, newName) {
+  if (!widgetDef || !row || !Array.isArray(row.compPath)) return false;
+
+  let list = widgetDef.components;
+  let comp = null;
+  for (const step of row.compPath) {
+    if (typeof step === 'number') {
+      if (!Array.isArray(list)) return false;
+      comp = list[step];
+      if (!comp) return false;
+    } else if (step === 'components') {
+      list = comp.components;
+    } else if (step === 'itemTemplate') {
+      list = comp.itemTemplate?.components;
+    }
   }
+  if (!comp) return false;
+
+  const value = newName || '';
+  if (row.source === 'binding') {
+    comp.binding = comp.binding || {};
+    comp.binding[row.field] = value;
+    return true;
+  }
+  if (row.source === 'zone') {
+    const zone = comp.props?.zones?.[row.index];
+    if (!zone) return false;
+    zone.writeEvent = value;
+    return true;
+  }
+  if (row.source === 'interaction') {
+    const interaction = comp.interactions?.[row.index];
+    const action = actionsOf(interaction)[row.actionIndex];
+    if (!action) return false;
+    action.event = value;
+    return true;
+  }
+  return false;
 }
 
 /**

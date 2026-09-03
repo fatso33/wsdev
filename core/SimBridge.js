@@ -595,12 +595,22 @@ export class SimBridge {
    * @param {string} logicalName
    * @returns {Promise<{simVar: string, unit: string, profileName: string}|null>}
    */
-  resolveDeckEvent(logicalName) {
+  /**
+   * Asks PC Bridge what a logical name actually resolves to under the active
+   * profile.
+   * @param {string} logicalName
+   * @param {'read'|'write'} [kind='read'] - which profile table to look in.
+   *   Reads resolve to `{simVar, unit, profileName, raw}`, writes to
+   *   `{event, valueFormat, profileName, raw}`. Defaults to 'read' so the
+   *   long-standing single-argument callers behave exactly as before.
+   * @returns {Promise<object|null>} null when unmapped or disconnected
+   */
+  resolveDeckEvent(logicalName, kind = 'read') {
     if (!this.connected) return Promise.resolve(null);
     const requestId = `resolve_de_${this.reqCounter++}_${Date.now()}`;
     return new Promise((resolve) => {
       this.pendingAcks.set(requestId, (packet) => resolve(packet.resolved));
-      this.sendRaw({ type: 'RESOLVE_DECK_EVENT', requestId, logicalName });
+      this.sendRaw({ type: 'RESOLVE_DECK_EVENT', requestId, logicalName, kind });
       setTimeout(() => {
         if (this.pendingAcks.has(requestId)) {
           this.pendingAcks.delete(requestId);
