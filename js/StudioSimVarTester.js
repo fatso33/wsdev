@@ -127,6 +127,13 @@ export class StudioSimVarTester {
     } else if (parsed.kind === 'hevent') {
       resultEl.textContent = `H:Event: ${parsed.event}. Test and Save use the same path here, so a green Test result is trustworthy.`;
       this.container.querySelector('#svt-fw-event').value = parsed.event;
+    } else if (parsed.kind === 'lvarset') {
+      // Same transport as an H:Event (calculator code via the shim), so the
+      // prefix is kept — it is what routes the dispatch — and the trustworthy
+      // Test/Save wording applies here too.
+      resultEl.textContent = `Sets local variable ${parsed.event}${parsed.value !== null ? ` to ${parsed.value}` : ''}. Test and Save use the same path here, so a green Test result is trustworthy.`;
+      this.container.querySelector('#svt-fw-event').value = parsed.event;
+      if (parsed.value !== null) this.container.querySelector('#svt-fw-value').value = parsed.value;
     } else if (parsed.kind === 'write') {
       resultEl.textContent = `Write event: ${parsed.event}${parsed.value !== null ? ` (value ${parsed.value})` : ''}. ⚠ Test runs via calculator code; a saved binding dispatches differently — use Fire & Watch below to verify that path.`;
       this.container.querySelector('#svt-fw-event').value = parsed.event.replace(/^K:/i, '');

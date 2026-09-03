@@ -21,27 +21,50 @@
  * all, which is distinct from an explicit 0.
  */
 
+/**
+ * Classifies a write target by its prefix. Three kinds, two transports:
+ * `write` (K:) goes out via transmitClientEvent; `hevent` (H:) and `lvarset`
+ * (L:) are both calculator code executed by the WASM shim. They stay separate
+ * kinds because the UI copy differs — "fires an event" vs "sets a variable" —
+ * but every consumer that handles one of the shim kinds must handle both.
+ */
+function classifyWriteTarget(target, value, raw) {
+  if (/^H:/i.test(target)) return { kind: 'hevent', event: target, value, raw };
+  if (/^L:/i.test(target)) return { kind: 'lvarset', event: target, value, raw };
+  return { kind: 'write', event: target, value, raw };
+}
+
 export function parsePastedBinding(raw) {
   const text = String(raw || '').trim();
   if (!text) return { kind: 'empty' };
 
-  // Write: "<value> (><event>)" -- "1 (>K:XPNDR_IDENT_ON)"
+  // Write: "<value> (><target>)" -- "1 (>K:XPNDR_IDENT_ON)", "1 (>L:S_XPDR_IDENT)"
   let m = text.match(/^(-?[\d.]+)\s*\(\s*>\s*([A-Za-z0-9_:.\-\s]+?)\s*\)\s*$/);
   if (m) {
-    const event = m[2].trim();
-    return { kind: /^H:/i.test(event) ? 'hevent' : 'write', event, value: Number(m[1]), raw: text };
+    return classifyWriteTarget(m[2].trim(), Number(m[1]), text);
   }
 
-  // Write: bare H:Event with no value -- "(>H:AS1000_PFD_SOFTKEY_1)"
-  m = text.match(/^\(\s*>\s*(H:[A-Za-z0-9_:.\-]+)\s*\)\s*$/i);
+  // Write with no explicit value -- "(>K:COM1_RADIO_SWAP)", "(>H:AS1000_PFD_SOFTKEY_1)".
+  // Was H:-only, which left the valueless K: form — how HubHop publishes most
+  // toggles, and the single most common paste there is — falling through to
+  // 'complex' and reporting itself as untestable.
+  m = text.match(/^\(\s*>\s*([A-Za-z0-9_:.\-\s]+?)\s*\)\s*$/);
   if (m) {
-    return { kind: 'hevent', event: m[1], value: null, raw: text };
+    return classifyWriteTarget(m[1].trim(), null, text);
   }
 
   // Read: "(A:Name, Unit)" or "(L:Name, Unit)"
   m = text.match(/^\(\s*([A-Za-z]:[A-Za-z0-9_:.\-\s]+?)\s*,\s*([A-Za-z0-9_%. \/]+?)\s*\)\s*$/);
   if (m) {
     return { kind: 'read', name: m[1].trim(), unit: m[2].trim(), raw: text };
+  }
+
+  // Read with no unit -- "(L:S_XPDR_IDENT)". HubHop lists LVars this way
+  // constantly. `unit: null` is already the "caller decides" signal the bare-name
+  // branch below uses, so consumers need no new handling for it.
+  m = text.match(/^\(\s*([A-Za-z]:[A-Za-z0-9_:.\-\s]+?)\s*\)\s*$/);
+  if (m) {
+    return { kind: 'read', name: m[1].trim(), unit: null, raw: text };
   }
 
   // Read: bare name, no parens/prefix/arrow -- "TRANSPONDER CODE:1" or "xpndrCode"
