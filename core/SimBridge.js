@@ -389,7 +389,11 @@ export class SimBridge {
     if (
       packet.type === 'PROBE_READ_RESULT' || packet.type === 'PROBE_READ_ERROR' ||
       packet.type === 'PROBE_WRITE_RESULT' || packet.type === 'PROBE_WRITE_ERROR' ||
-      packet.type === 'RESOLVE_DECK_EVENT_RESULT'
+      packet.type === 'RESOLVE_DECK_EVENT_RESULT' ||
+      // 1.1-B: WIGGLE_ERROR answers either startWiggle() or stopWiggle(), which
+      // is why both handlers branch on packet.type rather than assuming success.
+      packet.type === 'WIGGLE_STARTED' || packet.type === 'WIGGLE_RESULT' ||
+      packet.type === 'WIGGLE_ERROR'
     ) {
       if (packet.requestId && this.pendingAcks.has(packet.requestId)) {
         const resolve = this.pendingAcks.get(packet.requestId);
@@ -595,6 +599,60 @@ export class SimBridge {
    * @param {string} logicalName
    * @returns {Promise<{simVar: string, unit: string, profileName: string}|null>}
    */
+  /**
+   * 1.1-B wiggle-to-find: starts watching every LVar the loaded aircraft
+   * defines. Resolves once the watch is running, with how many are being
+   * watched and whether this took a session over from another client — there
+   * is only one search at a time across the whole bridge.
+   * @returns {Promise<{lvarCount: number, tookOver: boolean}>}
+   */
+  startWiggle() {
+    if (!this.connected) return Promise.reject(new Error('Not connected to PC Bridge.'));
+    const requestId = `wiggle_start_${this.reqCounter++}_${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      this.pendingAcks.set(requestId, (packet) => {
+        if (packet.type === 'WIGGLE_ERROR') reject(new Error(packet.reason));
+        else resolve({ lvarCount: packet.lvarCount, tookOver: !!packet.tookOver });
+      });
+      this.sendRaw({ type: 'START_WIGGLE', requestId });
+      setTimeout(() => {
+        if (this.pendingAcks.has(requestId)) {
+          this.pendingAcks.delete(requestId);
+          reject(new Error('PC Bridge did not answer. If the in-sim module was just installed, MSFS must be restarted.'));
+        }
+      }, 8000);
+    });
+  }
+
+  /**
+   * Ends the search and returns the ranked candidates.
+   * @returns {Promise<{lvarCount:number, samples:number, movedCount:number,
+   *   filteredContinuous:number, truncatedSamples:number, candidates:object[]}>}
+   */
+  stopWiggle() {
+    if (!this.connected) return Promise.reject(new Error('Not connected to PC Bridge.'));
+    const requestId = `wiggle_stop_${this.reqCounter++}_${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      this.pendingAcks.set(requestId, (packet) => {
+        if (packet.type === 'WIGGLE_ERROR') reject(new Error(packet.reason));
+        else resolve(packet);
+      });
+      this.sendRaw({ type: 'STOP_WIGGLE', requestId });
+      setTimeout(() => {
+        if (this.pendingAcks.has(requestId)) {
+          this.pendingAcks.delete(requestId);
+          reject(new Error('PC Bridge did not answer.'));
+        }
+      }, 8000);
+    });
+  }
+
+  /** Abandons a search without ranking. Fire-and-forget; never rejects. */
+  cancelWiggle() {
+    if (!this.connected) return;
+    try { this.sendRaw({ type: 'CANCEL_WIGGLE' }); } catch { /* going away anyway */ }
+  }
+
   /**
    * Asks PC Bridge what a logical name actually resolves to under the active
    * profile.

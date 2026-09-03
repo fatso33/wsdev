@@ -21,6 +21,13 @@
 
 import { parsePastedBinding } from './StudioBindingParse.js';
 
+// LVar names come from the aircraft, not from us, and land in innerHTML.
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 export class StudioSimVarTester {
   /**
    * @param {HTMLElement} container
@@ -60,6 +67,23 @@ export class StudioSimVarTester {
           <div class="svt-result" id="svt-result"></div>
         </div>
 
+        <!-- 1.1-B: wiggle-to-find. Payware exposes its switches as local
+             variables nobody documented, so instead of listing hundreds of
+             meaningless names, watch them all and let the user move the real
+             control. Results load into the Paste & Test box above, so Test and
+             the Property Inspector's Paste buttons work on them unchanged. -->
+        <div class="svt-section">
+          <label class="svt-label">Find It By Moving It
+            <span class="prop-hint" title="Watches every local variable the loaded aircraft defines, then reports which ones changed while you moved a control in the cockpit. Variables that change constantly on their own (camera position, timers) are filtered out automatically. Needs the in-sim module installed.">ⓘ</span>
+          </label>
+          <div class="svt-row">
+            <button type="button" class="bar-btn" id="svt-wiggle">Start search</button>
+            <span class="svt-inline-hint" id="svt-wiggle-hint">Start this, move the switch in the cockpit, then stop.</span>
+          </div>
+          <div class="svt-result" id="svt-wiggle-result"></div>
+          <div id="svt-wiggle-list"></div>
+        </div>
+
         <div class="svt-section">
           <label class="svt-label">Fire &amp; Watch
             <span class="prop-hint" title="Fires an event through the REAL dispatch path (the same one a widget's tap uses), reading a SimVar you name before and after to confirm something actually moved. A correct event can legitimately do nothing in the wrong aircraft state — that is reported as 'nothing moved', never as failure.">ⓘ</span>
@@ -84,6 +108,12 @@ export class StudioSimVarTester {
     this.container.querySelector('#svt-parse')?.addEventListener('click', () => this.handleParse());
     this.container.querySelector('#svt-test')?.addEventListener('click', () => this.handleTest());
     this.container.querySelector('#svt-fw-go')?.addEventListener('click', () => this.handleFireAndWatch());
+    this.container.querySelector('#svt-wiggle')?.addEventListener('click', () => this.handleWiggle());
+    // Delegated: the candidate rows are re-rendered on every search.
+    this.container.querySelector('#svt-wiggle-list')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-wiggle-use]');
+      if (btn) this.useWiggleCandidate(Number(btn.dataset.wiggleUse));
+    });
   }
 
   toggle() {
@@ -162,6 +192,83 @@ export class StudioSimVarTester {
     } catch (err) {
       resultEl.textContent = `❌ ${err.message}`;
     }
+  }
+
+  /**
+   * 1.1-B: toggles the search. There is one session across the whole bridge —
+   * the PC Bridge config window can be running one too — so a start here may
+   * take that one over, and we say so rather than letting it look like the
+   * other window silently broke.
+   */
+  async handleWiggle() {
+    const btn = this.container.querySelector('#svt-wiggle');
+    const hint = this.container.querySelector('#svt-wiggle-hint');
+    const resultEl = this.container.querySelector('#svt-wiggle-result');
+    const listEl = this.container.querySelector('#svt-wiggle-list');
+
+    if (!this.simBridge?.connected) {
+      resultEl.textContent = 'Not connected to PC Bridge — set the server address from the status pill in the top bar.';
+      return;
+    }
+
+    if (!this.wiggleSearching) {
+      btn.disabled = true;
+      resultEl.textContent = 'Starting — reading every local variable the aircraft defines…';
+      listEl.innerHTML = '';
+      try {
+        const { lvarCount, tookOver } = await this.simBridge.startWiggle();
+        this.wiggleSearching = true;
+        btn.textContent = 'Stop and show what moved';
+        btn.classList.add('active');
+        hint.textContent = `Watching ${lvarCount} variables — move the control now.`;
+        resultEl.textContent = tookOver
+          ? '⚠ Took over a search already running elsewhere (only one at a time).'
+          : '';
+      } catch (err) {
+        resultEl.textContent = `❌ ${err.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+      return;
+    }
+
+    btn.disabled = true;
+    resultEl.textContent = 'Ranking what moved…';
+    try {
+      const r = await this.simBridge.stopWiggle();
+      this.wiggleCandidates = r.candidates || [];
+      const bits = [`${r.lvarCount} watched`, `${r.samples} samples`, `${r.movedCount} moved`];
+      if (r.filteredContinuous) bits.push(`${r.filteredContinuous} always-changing hidden`);
+      if (r.truncatedSamples) bits.push(`⚠ ${r.truncatedSamples} samples hit the report limit`);
+      resultEl.textContent = bits.join(' · ');
+
+      listEl.innerHTML = this.wiggleCandidates.length
+        ? this.wiggleCandidates.map((c, i) => `
+            <div class="svt-wiggle-cand">
+              <span class="svt-wiggle-name">${escapeHtml(c.simVar)}</span>
+              <span class="svt-wiggle-val">= ${escapeHtml(String(c.value))}</span>
+              ${c.alreadyBound ? '<span class="svt-wiggle-tag">already bound</span>' : ''}
+              <button type="button" class="bar-btn" data-wiggle-use="${i}">Use</button>
+            </div>`).join('')
+        : '<div class="svt-result">Nothing changed that wasn’t already moving on its own. Move the control while the search is running — or it may not be driven by a local variable at all.</div>';
+    } catch (err) {
+      resultEl.textContent = `❌ ${err.message}`;
+    } finally {
+      this.wiggleSearching = false;
+      btn.textContent = 'Start search';
+      btn.classList.remove('active');
+      btn.disabled = false;
+    }
+  }
+
+  /** Loads a candidate into Paste & Test, so everything downstream is unchanged. */
+  useWiggleCandidate(index) {
+    const c = (this.wiggleCandidates || [])[index];
+    if (!c) return;
+    this.container.querySelector('#svt-input').value = `(${c.simVar})`;
+    this.handleParse();
+    this.container.querySelector('#svt-result').textContent =
+      `Loaded ${c.simVar} from the search — Test it, then Paste it onto a component's Read binding.`;
   }
 
   async handleFireAndWatch() {

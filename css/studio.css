@@ -2829,6 +2829,45 @@ body, html {
   line-height: 1.45;
 }
 
+/* 1.1-B wiggle-to-find (StudioSimVarTester) */
+.svt-inline-hint {
+  font-size: 11px;
+  color: var(--text-label);
+  opacity: 0.75;
+}
+#svt-wiggle.active {
+  border-color: var(--accent-amber, #d29922);
+  color: var(--accent-amber, #d29922);
+}
+.svt-wiggle-cand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.svt-wiggle-cand + .svt-wiggle-cand { border-top: 1px solid var(--studio-panel-border); }
+.svt-wiggle-name {
+  font-family: ui-monospace, Consolas, monospace;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.svt-wiggle-val {
+  flex: 0 0 auto;
+  color: var(--text-label);
+  font-variant-numeric: tabular-nums;
+}
+.svt-wiggle-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--accent-amber, #d29922);
+  border: 1px solid var(--accent-amber, #d29922);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
 .prop-paste-row {
   display: flex;
   align-items: center;
