@@ -246,7 +246,7 @@ export const COMMON_FIELDS = [
   { path: 'style.typography.font', control: 'text', tier: 'advanced', group: 'Typography', default: undefined, tooltip: 'CSS font-family override. Leave blank to use the app’s default cockpit typeface.' },
   { path: 'style.typography.size', control: 'number', tier: 'simple', group: 'Typography', default: undefined, tooltip: 'Text size in pixels.' },
   { path: 'style.typography.weight', control: 'select', options: [400, 500, 600, 700], tier: 'simple', group: 'Typography', default: undefined, tooltip: 'Font weight — higher is bolder.' },
-  { path: 'style.typography.color', control: 'color', tier: 'simple', group: 'Typography', default: undefined, tooltip: 'Text color.' },
+  { path: 'style.typography.color', control: 'color', tier: 'simple', guided: true, group: 'Typography', default: undefined, tooltip: 'Text color.' },
   { path: 'style.typography.stroke.width', control: 'number', tier: 'advanced', group: 'Typography', fdwsMin: '1.15', default: undefined, tooltip: 'Text outline thickness in pixels — keeps a readout legible over a busy background image without darkening the whole tile.' },
   { path: 'style.typography.stroke.color', control: 'color', tier: 'advanced', group: 'Typography', fdwsMin: '1.15', default: undefined, tooltip: 'Text outline color.' },
   { path: 'style.typography.glow.color', control: 'color', tier: 'advanced', group: 'Typography', fdwsMin: '1.15', default: undefined, tooltip: 'Soft glow color behind the text — LCD backlight bloom, annunciator glow. Leave unset for none.' },
@@ -256,8 +256,8 @@ export const COMMON_FIELDS = [
   { path: 'style.orientation', control: 'select', options: [0, 90, 180, 270], tier: 'advanced', group: 'Layout', fdwsMin: '1.15', default: 0, tooltip: 'Rotates this component’s text — 90/270 set proper vertical typesetting for placards and rotary-style side labels; 180 is upside-down.' },
 
   // --- Border (style.border.*) ---
-  { path: 'style.border.width', control: 'number', tier: 'simple', group: 'Border', default: undefined, tooltip: 'Border thickness in pixels. 0 removes the border.' },
-  { path: 'style.border.color', control: 'color', tier: 'simple', group: 'Border', default: undefined, tooltip: 'Border color.' },
+  { path: 'style.border.width', control: 'number', tier: 'simple', guided: true, group: 'Border', default: undefined, tooltip: 'Border thickness in pixels. 0 removes the border.' },
+  { path: 'style.border.color', control: 'color', tier: 'simple', guided: true, group: 'Border', default: undefined, tooltip: 'Border color.' },
   { path: 'style.border.radius', control: 'number', tier: 'simple', group: 'Border', default: undefined, tooltip: 'Corner rounding in pixels.' },
   { path: 'style.border.style', control: 'select', options: ['solid', 'dashed', 'dotted'], tier: 'advanced', group: 'Border', fdwsMin: '1.17', default: 'solid', tooltip: 'Border line style. Defaults to solid. core.divider uses this same field for its line style.' },
   { path: 'style.border.glow.color', control: 'color', tier: 'advanced', group: 'Border', fdwsMin: '1.24', default: undefined, tooltip: 'Soft glow around the border — annunciator bloom, selected-state ring. Leave unset for none.' },
@@ -308,8 +308,8 @@ export const COMMON_FIELDS = [
   { path: 'visibleWhen', control: 'conditionBuilder', tier: 'advanced', group: 'Visibility', default: undefined, tooltip: 'Hides this component entirely unless a condition on state/telemetry is met.' },
 
   // --- Bindings (binding.*) — SIMVARS & BINDINGS panel ---
-  { path: 'binding.readSimVar', control: 'simVarPicker', tier: 'simple', group: 'Bindings', default: undefined, tooltip: 'SimVar this component displays. Updates live from the simulator.' },
-  { path: 'binding.writeEvent', control: 'eventPicker', tier: 'simple', group: 'Bindings', default: undefined, tooltip: 'Deck Event dispatched when this component is interacted with (a button tap, a slider drag, etc.).' },
+  { path: 'binding.readSimVar', control: 'simVarPicker', tier: 'simple', guided: true, group: 'Bindings', default: undefined, tooltip: 'SimVar this component displays. Updates live from the simulator.' },
+  { path: 'binding.writeEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Bindings', default: undefined, tooltip: 'Deck Event dispatched when this component is interacted with (a button tap, a slider drag, etc.).' },
   { path: 'binding.stateVar', control: 'stateVarPicker', tier: 'simple', group: 'Bindings', default: undefined, tooltip: 'Local state[] variable this component reads and re-renders on when it changes.' },
   { path: 'binding.stateRef', control: 'stateRefPicker', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Nested/indexed local state path (e.g. "presets[0].freq") this component’s primary value resolves from.' },
   { path: 'binding.sublabelStateRef', control: 'stateRefPicker', tier: 'advanced', group: 'Bindings', appliesTo: ['core.button'], default: undefined, tooltip: 'Same as Bind to State Path, but for this button’s second (sublabel) text slot — independent of the primary binding.' },
@@ -325,7 +325,7 @@ export const COMMON_FIELDS = [
 
 export const TYPE_FIELDS = {
   'core.label': [
-    { path: 'props.text', control: 'text', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Static label text, shown when nothing overrides it.' },
+    { path: 'props.text', control: 'text', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Static label text, shown when nothing overrides it.' },
     { path: 'props.truncate', control: 'checkbox', tier: 'advanced', group: 'Content', default: false, tooltip: 'Cuts off overflowing text with an ellipsis instead of wrapping/overflowing.' },
     // Pre-v1.8, undocumented, horizontal-only alignment. Kept live (LabelComponent.js
     // only applies it when style.align.h is unset) and auto-migrated to style.align.h
@@ -343,7 +343,7 @@ export const TYPE_FIELDS = {
     // would have silently dropped ODOMETER from the dropdown — a real regression, not
     // just a display gap. Fixed with a display-only literal `options:` array instead of
     // `optionsRef`, so core.input's own dropdown (which still uses optionsRef) is unaffected.
-    { path: 'props.format', control: 'select', options: [...VALUE_FORMATS, 'ODOMETER'], tier: 'simple', group: 'Content', default: 'RAW_INT', tooltip: 'How the raw value is formatted for display (e.g. FREQUENCY_COM shows "118.000"). "ODOMETER" (FDWS v1.20) is display-only — appended here rather than to the shared VALUE_FORMATS list, since it has no meaning as a core.input mask.' },
+    { path: 'props.format', control: 'select', options: [...VALUE_FORMATS, 'ODOMETER'], tier: 'simple', guided: true, group: 'Content', default: 'RAW_INT', tooltip: 'How the raw value is formatted for display (e.g. FREQUENCY_COM shows "118.000"). "ODOMETER" (FDWS v1.20) is display-only — appended here rather than to the shared VALUE_FORMATS list, since it has no meaning as a core.input mask.' },
     // FDWS v1.20 §4: mechanical rolling-digit-drum readout — DisplayComponent.js
     // branches its whole render()/update() to renderOdometer()/setOdometerValue()
     // when props.format === 'ODOMETER', bypassing ValueFormatter entirely (a
@@ -367,14 +367,14 @@ export const TYPE_FIELDS = {
     { path: 'props.coordAxis', control: 'select', options: ['lat', 'lon'], tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Latitude (N/S) or longitude (E/W) — only used by the LATLON_DMS and COORD_DECIMAL formats.', showWhen: { path: 'props.format', equalsAny: ['LATLON_DMS', 'COORD_DECIMAL'] } }
   ],
   'core.button': [
-    { path: 'props.label', control: 'text', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Primary button text, shown when binding.stateRef is unset or resolves empty.' },
+    { path: 'props.label', control: 'text', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Primary button text, shown when binding.stateRef is unset or resolves empty.' },
     { path: 'props.sublabel', control: 'text', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Secondary line of text, shown when binding.sublabelStateRef is unset or resolves empty.' },
-    { path: 'props.variant', control: 'select', options: [{ value: 'momentary', label: 'Momentary (Push)' }, { value: 'toggle', label: 'Toggle (On / Off)' }, { value: 'swap', label: 'Swap Active / Standby' }], tier: 'simple', group: 'Content', default: 'momentary', tooltip: 'Button behavior style. ("preset" was removed in FDWS v1.14 — use binding.stateRef instead.)' },
+    { path: 'props.variant', control: 'select', options: [{ value: 'momentary', label: 'Momentary (Push)' }, { value: 'toggle', label: 'Toggle (On / Off)' }, { value: 'swap', label: 'Swap Active / Standby' }], tier: 'simple', guided: true, group: 'Content', default: 'momentary', tooltip: 'Button behavior style. ("preset" was removed in FDWS v1.14 — use binding.stateRef instead.)' },
     { path: 'props.icon', control: 'iconPicker', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Optional icon shown alongside the label.' },
     { path: 'props.hasLed', control: 'checkbox', tier: 'advanced', group: 'Content', default: false, tooltip: 'Shows a small status LED on the button.' }
   ],
   'core.input': [
-    { path: 'props.format', control: 'select', optionsRef: 'VALUE_FORMATS', tier: 'simple', group: 'Content', default: 'RAW_INT', tooltip: 'Input mask/validation applied while typing (e.g. SQUAWK_CODE restricts to 4 octal digits).' },
+    { path: 'props.format', control: 'select', optionsRef: 'VALUE_FORMATS', tier: 'simple', guided: true, group: 'Content', default: 'RAW_INT', tooltip: 'Input mask/validation applied while typing (e.g. SQUAWK_CODE restricts to 4 octal digits).' },
     { path: 'props.placeholder', control: 'text', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Hint text shown when the field is empty.' },
     { path: 'props.defaultValue', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Initial value before the user edits it.' },
     // Wave 1 gap-closing pass (2026-09-04): the hand-coded panel derived a *dynamic*
@@ -390,7 +390,7 @@ export const TYPE_FIELDS = {
     { path: 'props.selectOnFocus', control: 'checkbox', tier: 'advanced', group: 'Content', default: false, tooltip: 'Selects all existing text when the field gains focus, so typing replaces it instead of appending.' }
   ],
   'core.indicator': [
-    { path: 'props.label', control: 'text', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Text shown on/near the indicator.' },
+    { path: 'props.label', control: 'text', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Text shown on/near the indicator.' },
     // Wave 1: optionIcons is a colored-circle-emoji prefix per option value —
     // a native <option> can't hold nested markup (no <span> swatch), so this
     // is the actual mechanism behind Part 1.1's "colour-coded select options
@@ -404,7 +404,7 @@ export const TYPE_FIELDS = {
     // dropped — widgets.css now defines .fd-ind-sev-advisory (cyan) alongside
     // the pre-existing status/caution/warning rules, so all four are real,
     // visibly distinct colors the icons faithfully mirror.
-    { path: 'props.severity', control: 'select', options: [{ value: 'status', label: 'Status (Green)' }, { value: 'advisory', label: 'Advisory (Cyan)' }, { value: 'caution', label: 'Caution (Amber)' }, { value: 'warning', label: 'Warning (Red)' }], tier: 'simple', group: 'Content', default: 'status', optionIcons: { status: '🟢', advisory: '🔵', caution: '🟡', warning: '🔴' }, tooltip: 'Color/urgency treatment.' },
+    { path: 'props.severity', control: 'select', options: [{ value: 'status', label: 'Status (Green)' }, { value: 'advisory', label: 'Advisory (Cyan)' }, { value: 'caution', label: 'Caution (Amber)' }, { value: 'warning', label: 'Warning (Red)' }], tier: 'simple', guided: true, group: 'Content', default: 'status', optionIcons: { status: '🟢', advisory: '🔵', caution: '🟡', warning: '🔴' }, tooltip: 'Color/urgency treatment.' },
     // Step 3 Part A: options/default were 'round'/'square' — IndicatorComponent.js:15
     // actually reads 'tile'/'dot' (default 'tile'); neither old value has any CSS
     // backing at all (widgets.css only defines fd-ind-shape via fd-ind-box/fd-ind-dot).
@@ -434,9 +434,9 @@ export const TYPE_FIELDS = {
     // happens to be the first <option> — a native <select> shows its first option
     // selected by default with nothing marked, coincidentally matching, not because the
     // value was actually right.
-    { path: 'props.transform', control: 'select', options: ['rotate', 'translate', 'arc-fill', 'arc'], tier: 'simple', group: 'Gauge', default: 'rotate', tooltip: 'How the bound value visually drives this gauge — a rotating needle, a sliding bar, a straight filling bar ("Arc Fill", despite the name), or a real curved arc sweep ("Arc", FDWS v1.20).' },
-    { path: 'props.valueRange', control: 'rangeEditor', tier: 'simple', group: 'Gauge', default: undefined, tooltip: 'The raw SimVar value span this gauge reads (e.g. 0–400 for airspeed in knots). For Arc, this is the only range needed — Output Range has no meaning there.' },
-    { path: 'props.outputRange', control: 'rangeEditor', tier: 'simple', group: 'Gauge', default: undefined, tooltip: 'What the value range maps to on screen — degrees of rotation, or px of translation/arc fill. Not used by Arc — its angular span is Arc Start/End Angle instead.', showWhen: { path: 'props.transform', notEquals: 'arc' } },
+    { path: 'props.transform', control: 'select', options: ['rotate', 'translate', 'arc-fill', 'arc'], tier: 'simple', guided: true, group: 'Gauge', default: 'rotate', tooltip: 'How the bound value visually drives this gauge — a rotating needle, a sliding bar, a straight filling bar ("Arc Fill", despite the name), or a real curved arc sweep ("Arc", FDWS v1.20).' },
+    { path: 'props.valueRange', control: 'rangeEditor', tier: 'simple', guided: true, group: 'Gauge', default: undefined, tooltip: 'The raw SimVar value span this gauge reads (e.g. 0–400 for airspeed in knots). For Arc, this is the only range needed — Output Range has no meaning there.' },
+    { path: 'props.outputRange', control: 'rangeEditor', tier: 'simple', guided: true, group: 'Gauge', default: undefined, tooltip: 'What the value range maps to on screen — degrees of rotation, or px of translation/arc fill. Not used by Arc — its angular span is Arc Start/End Angle instead.', showWhen: { path: 'props.transform', notEquals: 'arc' } },
     // Step 3 Part B: default was `undefined` — GaugeComponent.js:207
     // (`cfg.axis === 'x' ? 'X' : 'Y'`) falls back to Y for anything else, matching the
     // hand-coded panel's own default.
@@ -481,7 +481,7 @@ export const TYPE_FIELDS = {
     { path: 'props.compose.outputRange', control: 'rangeEditor', tier: 'advanced', group: 'Compose', default: undefined, tooltip: 'Output range (pixels/degrees/etc.) the input range maps onto.' }
   ],
   'core.container': [
-    { path: 'props.direction', control: 'select', options: ['row', 'column', 'grid'], tier: 'simple', group: 'Layout', default: 'row', tooltip: 'How child components are arranged.' },
+    { path: 'props.direction', control: 'select', options: ['row', 'column', 'grid'], tier: 'simple', guided: true, group: 'Layout', default: 'row', tooltip: 'How child components are arranged.' },
     // Wave 1 gap-closing pass (2026-09-04): default was `undefined`, but
     // ContainerComponent.js:15 falls back to 4 (`props.gap !== undefined ? props.gap : 4`).
     { path: 'props.gap', control: 'number', tier: 'simple', group: 'Layout', default: 4, tooltip: 'Spacing between child components, in pixels.' },
@@ -493,9 +493,9 @@ export const TYPE_FIELDS = {
     // Step 3 Part A (2026-09-04): options were 'horizontal'/'vertical' — SliderComponent.js:17
     // actually checks `props.axis === 'x' ? 'x' : 'y'`; either old value silently fell
     // through to 'y', same bug class as core.pad's already-fixed props.mode.
-    { path: 'props.axis', control: 'select', options: [{ value: 'x', label: 'Horizontal (X)' }, { value: 'y', label: 'Vertical (Y)' }], tier: 'simple', group: 'Content', default: 'y', tooltip: 'Slide direction.' },
-    { path: 'props.min', control: 'number', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Minimum value.' },
-    { path: 'props.max', control: 'number', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Maximum value.' },
+    { path: 'props.axis', control: 'select', options: [{ value: 'x', label: 'Horizontal (X)' }, { value: 'y', label: 'Vertical (Y)' }], tier: 'simple', guided: true, group: 'Content', default: 'y', tooltip: 'Slide direction.' },
+    { path: 'props.min', control: 'number', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Minimum value.' },
+    { path: 'props.max', control: 'number', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Maximum value.' },
     { path: 'props.detents', control: 'detentEditor', tier: 'advanced', group: 'Content', default: undefined,
       rowSpec: { fields: [
         { key: 'value', label: 'Value', type: 'number', default: 0 },
@@ -512,9 +512,9 @@ export const TYPE_FIELDS = {
     // `=== 'x' ? 'x' : 'y'`) is meaningful ONLY in lever mode (old registry options
     // 'horizontal'/'vertical'/'rotary' matched nothing, and the hand-coded panel it's
     // replacing never even rendered an axis control).
-    { path: 'props.mode', control: 'select', options: [{ value: 'rotary', label: 'Rotary' }, { value: 'lever', label: 'Lever' }], tier: 'simple', group: 'Content', default: 'rotary', tooltip: 'Rotary snaps between positions arranged in a circle; Lever snaps along a straight track.' },
+    { path: 'props.mode', control: 'select', options: [{ value: 'rotary', label: 'Rotary' }, { value: 'lever', label: 'Lever' }], tier: 'simple', guided: true, group: 'Content', default: 'rotary', tooltip: 'Rotary snaps between positions arranged in a circle; Lever snaps along a straight track.' },
     { path: 'props.axis', control: 'select', options: [{ value: 'x', label: 'Horizontal (X)' }, { value: 'y', label: 'Vertical (Y)' }], tier: 'advanced', group: 'Content', default: 'y', showWhen: { path: 'props.mode', equals: 'lever' }, tooltip: 'Lever travel direction. Not used by Rotary.' },
-    { path: 'props.positions', control: 'rowListEditor', tier: 'simple', group: 'Content', default: undefined,
+    { path: 'props.positions', control: 'rowListEditor', tier: 'simple', guided: true, group: 'Content', default: undefined,
       rowSpec: { fields: [
         { key: 'value', label: 'Value', type: 'text', default: '' },
         { key: 'label', label: 'Label', type: 'text', default: '' },
@@ -526,7 +526,7 @@ export const TYPE_FIELDS = {
     // Step 3 Part A (2026-09-04): options were 'horizontal'/'vertical' — RockerComponent.js:18
     // actually checks `props.axis === 'x' ? 'row' : 'column'`; same bug class as
     // core.slider's axis above.
-    { path: 'props.axis', control: 'select', options: [{ value: 'x', label: 'Horizontal (X)' }, { value: 'y', label: 'Vertical (Y)' }], tier: 'simple', group: 'Content', default: 'y', tooltip: 'Rocker tilt direction.' },
+    { path: 'props.axis', control: 'select', options: [{ value: 'x', label: 'Horizontal (X)' }, { value: 'y', label: 'Vertical (Y)' }], tier: 'simple', guided: true, group: 'Content', default: 'y', tooltip: 'Rocker tilt direction.' },
     { path: 'props.zones', control: 'rowListEditor', tier: 'advanced', group: 'Content', default: undefined,
       rowSpec: { fields: [
         { key: 'id', label: 'Zone ID', type: 'text', default: '' },
@@ -537,9 +537,9 @@ export const TYPE_FIELDS = {
       tooltip: 'Press zones (e.g. up/down halves) and what each dispatches.' }
   ],
   'core.stepper': [
-    { path: 'props.min', control: 'number', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Minimum value.' },
-    { path: 'props.max', control: 'number', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Maximum value.' },
-    { path: 'props.step', control: 'number', tier: 'simple', group: 'Content', default: 1, tooltip: 'Amount each tap increments/decrements by.' }
+    { path: 'props.min', control: 'number', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Minimum value.' },
+    { path: 'props.max', control: 'number', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Maximum value.' },
+    { path: 'props.step', control: 'number', tier: 'simple', guided: true, group: 'Content', default: 1, tooltip: 'Amount each tap increments/decrements by.' }
   ],
   'core.rotary': [
     // Wave 1 gap-closing pass (2026-09-04): default was `false`, but
@@ -547,12 +547,12 @@ export const TYPE_FIELDS = {
     // (continuous spin) *unless* explicitly set to false, so the effective default is
     // true, not false. Registry had this backwards.
     { path: 'props.circular', control: 'checkbox', tier: 'simple', group: 'Content', default: true, tooltip: 'Allows the knob to spin continuously instead of stopping at endpoints.' },
-    { path: 'props.coarseStep', control: 'number', tier: 'simple', group: 'Content', default: 10, tooltip: 'Value change per full knob detent.' },
+    { path: 'props.coarseStep', control: 'number', tier: 'simple', guided: true, group: 'Content', default: 10, tooltip: 'Value change per full knob detent.' },
     { path: 'props.fineStep', control: 'number', tier: 'advanced', group: 'Content', default: 1, tooltip: 'Value change per small drag increment, for fine adjustment.' },
     { path: 'props.pushLabel', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Label shown for this knob’s push/click action, if it has one.' }
   ],
   'core.image': [
-    { path: 'props.assetId', control: 'assetPicker', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Image from this widget’s Asset Library to display.' },
+    { path: 'props.assetId', control: 'assetPicker', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Image from this widget’s Asset Library to display.' },
     // Step 3 Part A (2026-09-04): 'tile' is not a valid CSS object-fit keyword —
     // ImageComponent.js:49 writes props.fit straight into img.style.objectFit, so the
     // browser silently ignores it. The hand-coded panel's real third option was 'fill'
@@ -569,7 +569,7 @@ export const TYPE_FIELDS = {
     // stateVarPicker, implying a plain string. ListComponent.js:22,33 and the
     // hand-coded panel both treat it as an object wrapping { stateVar } — corrected to
     // the real nested path.
-    { path: 'props.itemsBinding.stateVar', control: 'stateVarPicker', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Array-typed state variable this list renders one row per item from.' },
+    { path: 'props.itemsBinding.stateVar', control: 'stateVarPicker', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Array-typed state variable this list renders one row per item from.' },
     // Step 3 Part A: control changed from 'text' to 'bespoke' — this field needs
     // JSON.parse + validation (updateCompJsonProp) the generic text control doesn't
     // have, so it stays intentionally hand-rendered (see StudioInspector.js's
@@ -588,7 +588,7 @@ export const TYPE_FIELDS = {
     // Step 3 Part A (2026-09-04): control changed from 'widgetLibraryPicker' (never
     // implemented — no such picker exists anywhere) to 'text', matching what the
     // hand-coded panel it's replacing actually was: a plain free-text input.
-    { path: 'props.libraryId', control: 'text', tier: 'simple', group: 'Content', default: undefined, tooltip: 'ID of a shared widget-library component this one embeds.' }
+    { path: 'props.libraryId', control: 'text', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'ID of a shared widget-library component this one embeds.' }
   ],
   'core.pad': [
     // Wave 1 gap-closing pass (2026-09-04): options were ['xy','x','y'] — stale, and not
@@ -596,7 +596,7 @@ export const TYPE_FIELDS = {
     // 'relative'`). Any of the old three values would have silently fallen through to
     // 'relative' at runtime. Corrected to match the runtime and the hand-coded panel's
     // own (correct) labels.
-    { path: 'props.mode', control: 'select', options: [{ value: 'relative', label: 'Relative (Pan)' }, { value: 'absolute', label: 'Absolute (Cursor)' }], tier: 'simple', group: 'Content', default: 'relative', tooltip: 'Relative reports drag deltas for panning; Absolute reports normalized cursor position within the pad.' },
+    { path: 'props.mode', control: 'select', options: [{ value: 'relative', label: 'Relative (Pan)' }, { value: 'absolute', label: 'Absolute (Cursor)' }], tier: 'simple', guided: true, group: 'Content', default: 'relative', tooltip: 'Relative reports drag deltas for panning; Absolute reports normalized cursor position within the pad.' },
     // Same pass: default was `undefined`, but PadComponent.js:33 falls back to 1.0
     // (`props.sensitivity !== undefined ? props.sensitivity : 1.0`).
     { path: 'props.sensitivity', control: 'number', tier: 'advanced', group: 'Content', default: 1.0, tooltip: 'Movement scaling — higher means less physical drag needed for the same output range.' }
@@ -609,7 +609,7 @@ export const TYPE_FIELDS = {
     // Wave 1 gap-closing pass (2026-09-04): default was `undefined`, but
     // DividerComponent.js:67 falls back to 'horizontal'
     // (`this.def.props?.orientation === 'vertical' ? 'vertical' : 'horizontal'`).
-    { path: 'props.orientation', control: 'select', options: ['horizontal', 'vertical'], tier: 'simple', group: 'Content', fdwsMin: '1.17', default: 'horizontal', tooltip: 'Line direction. Horizontal spans this component’s own width; vertical spans its own height — size the grid box accordingly (wide+short for horizontal, narrow+tall for vertical).' }
+    { path: 'props.orientation', control: 'select', options: ['horizontal', 'vertical'], tier: 'simple', guided: true, group: 'Content', fdwsMin: '1.17', default: 'horizontal', tooltip: 'Line direction. Horizontal spans this component’s own width; vertical spans its own height — size the grid box accordingly (wide+short for horizontal, narrow+tall for vertical).' }
   ],
   // FDWS v1.20 §3: a continuously-scrolling ruler/tape (airspeed, altitude) —
   // TapeComponent.js rebuilds the visible window of tick marks/labels from
@@ -618,14 +618,14 @@ export const TYPE_FIELDS = {
   // readout is a separate core.display layered on top at the index line, not
   // part of this component.
   'core.tape': [
-    { path: 'props.axis', control: 'select', options: ['y', 'x'], tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: 'y', tooltip: 'Scroll direction — vertical (airspeed/altitude-style) or horizontal (heading-tape-style).' },
+    { path: 'props.axis', control: 'select', options: ['y', 'x'], tier: 'simple', guided: true, group: 'Tape', fdwsMin: '1.20', default: 'y', tooltip: 'Scroll direction — vertical (airspeed/altitude-style) or horizontal (heading-tape-style).' },
     // Wave 1 gap-closing pass (2026-09-04): the six defaults below were all `undefined`
     // despite clear `||` fallbacks in TapeComponent.js (lines 90-95). labelColor and
     // indexLineColor are deliberately left `undefined` — their real fallbacks are
     // dynamic (labelColor mirrors tickColor) or CSS-var-based, not a plain literal.
-    { path: 'props.tickInterval', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: 10, tooltip: 'Value spacing between minor ticks (e.g. 10 for an altitude tape in feet).' },
+    { path: 'props.tickInterval', control: 'number', tier: 'simple', guided: true, group: 'Tape', fdwsMin: '1.20', default: 10, tooltip: 'Value spacing between minor ticks (e.g. 10 for an altitude tape in feet).' },
     { path: 'props.majorEvery', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: 5, tooltip: 'Every Nth minor tick is drawn longer and labeled with its value.' },
-    { path: 'props.pxPerUnit', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: 2, tooltip: 'Pixels of scroll travel per 1 unit of value — controls how "zoomed in" the tape reads.' },
+    { path: 'props.pxPerUnit', control: 'number', tier: 'simple', guided: true, group: 'Tape', fdwsMin: '1.20', default: 2, tooltip: 'Pixels of scroll travel per 1 unit of value — controls how "zoomed in" the tape reads.' },
     { path: 'props.minorTickLength', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: 8, tooltip: 'Length in px of a minor tick mark.' },
     { path: 'props.majorTickLength', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: 16, tooltip: 'Length in px of a major (labeled) tick mark.' },
     { path: 'props.tickColor', control: 'color', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: '#94a3b8', tooltip: 'Color of the tick marks.' },

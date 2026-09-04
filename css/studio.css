@@ -1828,6 +1828,25 @@ body, html {
   min-width: 0;
 }
 
+/* Part 2: per-section "reveal this section's tier-hidden fields without
+   leaving the tier" — the escape hatch that makes hiding fields by tier
+   acceptable at all (no dead ends). */
+.group-tier-more {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.group-tier-more:hover {
+  text-decoration: underline;
+}
+
 .group-chevron {
   color: var(--text-dim);
   transition: transform 0.2s ease;

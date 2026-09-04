@@ -155,16 +155,32 @@ export class StudioInspector {
     // way expandedGroups does, for the same reason.
     this._bindingAdvancedOpen = false;
 
-    // Widget Studio 2.0, Phase 1: Simple/Advanced mode. Persisted per-browser
-    // (not per-widget, not synced to the widget def) — a user's own
-    // experience-level preference, not something that should change when they
-    // open a different widget or hand a file to someone else. Fields tagged
-    // data-tier="advanced" in the panels below (a small, deliberately
-    // conservative set — power-user-only fields, not "everything past the
-    // first row") are hidden in Simple mode via the existing .hidden utility
-    // class, toggled after each render rather than baked into the HTML
-    // strings, so the same markup serves both modes.
-    this.uiMode = localStorage.getItem('fdws_studio_uiMode') === 'advanced' ? 'advanced' : 'simple';
+    // Widget Studio 2.0, Phase 1 (binary) -> Part 2 (three tiers). Persisted
+    // per-browser (not per-widget, not synced to the widget def) — a user's
+    // own experience-level preference, not something that should change when
+    // they open a different widget or hand a file to someone else. Fields
+    // tagged data-tier="advanced"/"build" in the panels below are hidden per
+    // tier via the existing .hidden utility class, toggled after each render
+    // rather than baked into the HTML strings, so the same markup serves all
+    // three tiers (applyUiMode()).
+    //
+    // Migration (proposal §2.2): the old binary's only ever-written values
+    // were 'simple'/'advanced' — those map onto the new tiers one-for-one
+    // (advanced -> full, simple -> build) rather than collapsing into Guided,
+    // so an existing user's screen doesn't get MORE sparse than what they were
+    // already used to. A genuinely first-run browser (no saved value at all)
+    // defaults to the new, more guided tier — that's the actual point of
+    // adding it.
+    const savedTier = localStorage.getItem('fdws_studio_uiMode');
+    this.uiTier = savedTier === 'advanced' ? 'full'
+      : savedTier === 'simple' ? 'build'
+      : (savedTier === 'guided' || savedTier === 'build' || savedTier === 'full') ? savedTier
+      : 'guided';
+    // Part 2: per-accordion-section "show hidden fields anyway, without
+    // leaving the tier" override — see buildAccordionGroup()'s "N more"
+    // affordance. Keyed by group title, same persists-across-renders pattern
+    // as expandedGroups/knownGroupTitles above.
+    this.tierOverrideGroups = new Set();
 
     this.initDOM();
     this.render();
@@ -226,6 +242,7 @@ export class StudioInspector {
     if (this.state.multiSelectedIds.size > 1) {
       this.renderMultiSelectInspector();
       this.applyUiMode();
+      this.applyTierMoreBadges();
       return;
     }
 
@@ -240,6 +257,7 @@ export class StudioInspector {
     }
 
     this.applyUiMode();
+    this.applyTierMoreBadges();
   }
 
   /**
@@ -377,19 +395,20 @@ export class StudioInspector {
     }));
   }
 
-  /** Always-visible Simple/Advanced switch, independent of what's selected. */
+  /** Always-visible Guided/Build/Full tier switch, independent of what's selected. */
   buildModeToggle() {
     const bar = document.createElement('div');
     bar.className = 'inspector-mode-toggle';
     bar.innerHTML = `
-      <button type="button" class="mode-toggle-btn ${this.uiMode === 'simple' ? 'active' : ''}" data-mode="simple">Simple</button>
-      <button type="button" class="mode-toggle-btn ${this.uiMode === 'advanced' ? 'active' : ''}" data-mode="advanced">Advanced</button>
-      <span class="prop-hint" title="Simple shows the fields most widgets need. Advanced adds power-user fields — compose transforms, poll tuning, custom bindings, and similar. Fields are never removed, only hidden; nothing you've already set is lost by switching.">ⓘ</span>
+      <button type="button" class="mode-toggle-btn ${this.uiTier === 'guided' ? 'active' : ''}" data-mode="guided">Guided</button>
+      <button type="button" class="mode-toggle-btn ${this.uiTier === 'build' ? 'active' : ''}" data-mode="build">Build</button>
+      <button type="button" class="mode-toggle-btn ${this.uiTier === 'full' ? 'active' : ''}" data-mode="full">Full</button>
+      <span class="prop-hint" title="Guided shows only what a first widget needs. Build (the default) adds the rest of what most widgets need. Full shows everything, flat — compose transforms, poll tuning, custom bindings, and similar. Fields are never removed, only hidden; nothing you've already set is lost by switching, and every section's '⋯ N more' link reveals its own hidden fields without leaving the tier.">ⓘ</span>
     `;
     bar.querySelectorAll('.mode-toggle-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        this.uiMode = btn.dataset.mode;
-        localStorage.setItem('fdws_studio_uiMode', this.uiMode);
+        this.uiTier = btn.dataset.mode;
+        localStorage.setItem('fdws_studio_uiMode', this.uiTier);
         this.render();
       });
     });
@@ -397,21 +416,67 @@ export class StudioInspector {
   }
 
   /**
-   * Hides every data-tier="advanced" field when in Simple mode, and every
-   * data-tier="simple-only" field when in Advanced mode (Widget Studio 2.0,
-   * Phase 8 — a small number of fields, like the guided "Connect to
-   * Simulator" category picker, exist only as a friendlier FRONT END onto a
-   * field Advanced mode already exposes directly, so showing both at once
-   * would just be two competing controls for the same value). Call after
-   * any (re-)render.
+   * True if a field/section marked with this data-tier value should be
+   * HIDDEN at the current uiTier. Three data-tier values exist:
+   *  - "advanced": Full only (registry field.tier === 'advanced').
+   *  - "build": Build + Full, hidden only in Guided (registry
+   *    field.tier === 'simple' && !field.guided — Part 2).
+   *  - "simple-only": Guided + Build, hidden only in Full — a small set of
+   *    friendlier FRONT ENDS onto a field Full already exposes directly
+   *    (Widget Studio 2.0, Phase 8), so showing both at once would just be
+   *    two competing controls for the same value.
+   * Anything unmarked (no data-tier attribute at all — most fields) is
+   * always visible, same as before Part 2.
+   */
+  tierHidesField(dataTier) {
+    if (dataTier === 'advanced') return this.uiTier !== 'full';
+    if (dataTier === 'build') return this.uiTier === 'guided';
+    if (dataTier === 'simple-only') return this.uiTier === 'full';
+    return false;
+  }
+
+  /**
+   * Applies tierHidesField() to every data-tier'd element, except inside an
+   * accordion section the user has explicitly expanded via its own "⋯ N
+   * more" link (buildAccordionGroup() marks that section's .inspector-group
+   * with .tier-override) — revealing a section's hidden fields must not
+   * require leaving the tier for the whole panel. Call after any (re-)render.
    */
   applyUiMode() {
-    const isSimple = this.uiMode === 'simple';
-    this.container.querySelectorAll('[data-tier="advanced"]').forEach((el) => {
-      el.classList.toggle('hidden', isSimple);
+    this.container.querySelectorAll('[data-tier]').forEach((el) => {
+      const overridden = el.closest('.inspector-group.tier-override');
+      el.classList.toggle('hidden', !overridden && this.tierHidesField(el.dataset.tier));
     });
-    this.container.querySelectorAll('[data-tier="simple-only"]').forEach((el) => {
-      el.classList.toggle('hidden', !isSimple);
+  }
+
+  /**
+   * Part 2: injects the "⋯ N more" link into every accordion section that
+   * actually has fields hidden by the current tier — the escape hatch that
+   * makes hiding fields by tier acceptable at all (no dead ends). Must run
+   * AFTER the whole panel has finished rendering, same requirement as
+   * applyUiMode() (call it right alongside that, not from inside
+   * buildAccordionGroup() — see the comment there for why).
+   */
+  applyTierMoreBadges() {
+    this.container.querySelectorAll('.inspector-group').forEach((group) => {
+      const title = group.querySelector('.group-title')?.textContent;
+      if (!title || this.tierOverrideGroups.has(title)) return;
+      const body = group.querySelector('.inspector-group-body');
+      const hiddenCount = Array.from(body.querySelectorAll('[data-tier]'))
+        .filter((el) => this.tierHidesField(el.dataset.tier)).length;
+      if (hiddenCount === 0) return;
+      const moreBtn = document.createElement('button');
+      moreBtn.type = 'button';
+      moreBtn.className = 'group-tier-more';
+      moreBtn.textContent = `⋯ ${hiddenCount} more`;
+      moreBtn.title = `Show ${hiddenCount} more field${hiddenCount === 1 ? '' : 's'} in this section without leaving the current tier.`;
+      moreBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // header's own click toggles expand/collapse
+        this.tierOverrideGroups.add(title);
+        this.expandedGroups.add(title); // revealing fields in a collapsed section is a dead end otherwise
+        this.render();
+      });
+      group.querySelector('.group-title-cluster')?.appendChild(moreBtn);
     });
   }
 
@@ -3044,7 +3109,13 @@ export class StudioInspector {
       }
       const wrap = document.createElement('div');
       wrap.className = 'prop-field';
+      // Part 2: 'advanced' fields stay Full-only, unchanged. A 'simple' field
+      // not in the curated Guided allowlist (field.guided) is Build+Full —
+      // hidden only in Guided. A curated Guided field gets no data-tier
+      // attribute at all, same as every field before Part 2 existed: always
+      // visible, at every tier.
       if (field.tier === 'advanced') wrap.setAttribute('data-tier', 'advanced');
+      else if (field.tier === 'simple' && !field.guided) wrap.setAttribute('data-tier', 'build');
       mount.appendChild(wrap);
       renderer(comp, field, wrap);
     });
@@ -3279,7 +3350,9 @@ export class StudioInspector {
       'core.swapLocalState': 'Swap Two Values',
       'core.openWidgetPopover': 'Open a Popup'
     };
-    const isSimpleUi = this.uiMode === 'simple';
+    // Part 2: Guided is a strict subset of Build, so both see the short,
+    // plain-language action list — only Full gets the complete technical one.
+    const isSimpleUi = this.uiTier !== 'full';
     const ACTION_TYPES = REGISTRY_ACTIONS
       .filter((a) => !a.internal)
       .filter((a) => !isSimpleUi || SIMPLE_ACTION_LABELS[a.type])
@@ -4005,9 +4078,10 @@ export class StudioInspector {
       if (isOpenDefault) this.expandedGroups.add(title);
     }
     const isOpen = this.expandedGroups.has(title);
+    const isTierOverridden = this.tierOverrideGroups.has(title);
 
     const group = document.createElement('div');
-    group.className = 'inspector-group';
+    group.className = `inspector-group${isTierOverridden ? ' tier-override' : ''}`;
 
     const header = document.createElement('div');
     header.className = 'inspector-group-header';
@@ -4023,6 +4097,15 @@ export class StudioInspector {
     body.className = `inspector-group-body ${isOpen ? 'open' : 'collapsed'}`;
 
     renderFn(body);
+    // Part 2's "⋯ N more" badge is NOT injected here — see
+    // applyTierMoreBadges(). APPEARANCE and DATA & CONTENT (below, in
+    // renderComponentInspector()) build their accordion shell with an EMPTY
+    // renderFn and populate .inspector-group-body separately afterward, so
+    // counting hidden fields synchronously at this point would see an empty
+    // body for those two sections and always undercount to zero. The badge
+    // pass instead runs once, after the ENTIRE panel (every section, however
+    // it populates itself) has finished rendering — same timing requirement
+    // applyUiMode() already has, and called right alongside it.
 
     header.addEventListener('click', () => {
       const nowOpen = !body.classList.contains('open');
