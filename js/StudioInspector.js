@@ -1140,6 +1140,15 @@ export class StudioInspector {
     ((body) => {
       const style = comp.style || {};
       const stateCfg = resolveStateStyleConfig(comp);
+      // V13: a style.states key that isn't the ONE name this component
+      // type/variant actually reads (e.g. left behind by a Button Variant
+      // change) — same detection StudioValidator.js:731-751 already flags as
+      // a warning; this reuses stateCfg (already computed above) rather than
+      // re-deriving that check, and offers the fix inline instead of just
+      // reporting it.
+      const orphanedStateKeys = style.states && typeof style.states === 'object'
+        ? Object.keys(style.states).filter((k) => k !== stateCfg?.name)
+        : [];
       const themeEdit = this.getThemeEditContext();
       const assets = this.state.widgetDef.assets || [];
       const stateVars = def.state || [];
@@ -1251,6 +1260,21 @@ export class StudioInspector {
           <button type="button" class="mode-toggle-btn ${themeEdit.isOverrideEdit ? 'active' : ''}" id="c-styletab-theme" style="flex:0 1 auto;" ${activeTab !== 'normal' ? `disabled title="Theme overrides apply to the Base style only — states and rules are already conditional."` : `title="Edit this component's ${otherTheme} theme override — Text/Border/Background Color only."`}>${otherTheme.charAt(0).toUpperCase() + otherTheme.slice(1)} Override</button>
           ` : ''}
         </div>
+        ${orphanedStateKeys.map((key) => {
+          const canMigrate = !!stateCfg?.name && style.states[stateCfg.name] === undefined;
+          return `
+          <div class="prop-hint-block" style="font-size:11px;margin-bottom:8px;border-left:2px solid var(--accent-red, #ef4444);padding-left:8px;">
+            <div>⚠ style.states.${escapeHtmlAttr(key)} has no effect — ${stateCfg?.name ? `this component only reads style.states.${escapeHtmlAttr(stateCfg.name)}.` : 'this component type has no interaction-state style support at all.'}</div>
+            <div style="margin-top:4px;display:flex;gap:8px;align-items:center;">
+              ${stateCfg?.name ? (canMigrate
+                ? `<button type="button" class="btn-small" data-orphan-migrate="${escapeHtmlAttr(key)}">Migrate to ${escapeHtmlAttr(stateCfg.name)}</button>`
+                : `<span class="prop-hint" title="style.states.${escapeHtmlAttr(stateCfg.name)} already has its own data — migrating would overwrite it.">Migrate unavailable ⓘ</span>`
+              ) : ''}
+              <button type="button" class="btn-small" data-orphan-delete="${escapeHtmlAttr(key)}">Delete</button>
+            </div>
+          </div>
+          `;
+        }).join('')}
         ${activeTab === 'state' ? `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style while this component is ${stateCfg.tabLabel.toLowerCase()}. Dimmed fields are inherited from the Normal style — edit one to override it just for this state, or (for Outline/Glow/Border Glow) check its own "Clear (don't inherit)" box to turn it off regardless of Base.</div>` : ''}
         ${activeTab === 'rule' ? `
         <div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style whenever this rule's condition is true — first matching rule wins over lower rules and over Normal. Dimmed fields are inherited from the Normal style, same as a state.</div>
@@ -1332,6 +1356,24 @@ export class StudioInspector {
         this._styleTabRuleIndex = nextRules.length - 1;
         this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } });
         this.render();
+      });
+      // V13: migrate/delete an orphaned style.states key.
+      body.querySelectorAll('[data-orphan-migrate]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const key = btn.dataset.orphanMigrate;
+          const states = { ...(style.states || {}) };
+          states[stateCfg.name] = states[key];
+          delete states[key];
+          this.state.updateComponent(comp.id, { style: { ...style, states } });
+        });
+      });
+      body.querySelectorAll('[data-orphan-delete]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const key = btn.dataset.orphanDelete;
+          const states = { ...(style.states || {}) };
+          delete states[key];
+          this.state.updateComponent(comp.id, { style: { ...style, states } });
+        });
       });
       // Wave 2 Part B3: flips the SAME live-preview toggle the canvas header's
       // sun/moon button already drives — PREVIEW_THEME_CHANGED is already in
