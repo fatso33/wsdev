@@ -3102,7 +3102,17 @@ export class StudioInspector {
       // validation this engine's controls don't have). Distinct from null so a future
       // "which fields have no UI at all" check can tell the two apart.
       if (field.control === 'bespoke') return;
-      if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen, fields)) return;
+      // Part 2, §2.1 (Ingrid's guarantee): a showWhen-false field is normally
+      // skipped entirely, but a GENUINELY AUTHORED value (raw, stored, and
+      // different from the field's own default — not just "happens to be
+      // set to its own default") must never silently vanish, at any tier.
+      // Render it anyway, dimmed, with why it's hidden and a one-click clear.
+      let suppressed = false;
+      if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen, fields)) {
+        const raw = this.getFieldValue(comp, field.path);
+        if (raw === undefined || raw === field.default) return; // unchanged: nothing authored, skip as before
+        suppressed = true;
+      }
       const renderer = this.FIELD_RENDERERS[field.control];
       if (!renderer) {
         throw new Error(`[StudioInspector] No FIELD_RENDERERS entry for control "${field.control}" (path "${field.path}") — register one before declaring a field with this control.`);
@@ -3113,12 +3123,45 @@ export class StudioInspector {
       // not in the curated Guided allowlist (field.guided) is Build+Full —
       // hidden only in Guided. A curated Guided field gets no data-tier
       // attribute at all, same as every field before Part 2 existed: always
-      // visible, at every tier.
-      if (field.tier === 'advanced') wrap.setAttribute('data-tier', 'advanced');
-      else if (field.tier === 'simple' && !field.guided) wrap.setAttribute('data-tier', 'build');
+      // visible, at every tier. A suppressed-but-authored field ALSO gets no
+      // data-tier — §2.1 shows "regardless of tier and regardless of
+      // showWhen," the same bypass as the showWhen gate itself just got.
+      if (!suppressed) {
+        if (field.tier === 'advanced') wrap.setAttribute('data-tier', 'advanced');
+        else if (field.tier === 'simple' && !field.guided) wrap.setAttribute('data-tier', 'build');
+      }
       mount.appendChild(wrap);
-      renderer(comp, field, wrap);
+      if (suppressed) {
+        const raw = this.getFieldValue(comp, field.path);
+        const note = document.createElement('div');
+        note.className = 'prop-showwhen-note';
+        note.innerHTML = `
+          <span>${escapeHtmlAttr(this.formatShowWhenReason(field.showWhen))} — still set to "${escapeHtmlAttr(String(raw))}"</span>
+          <button type="button" class="prop-showwhen-clear">Clear</button>
+        `;
+        note.querySelector('.prop-showwhen-clear')?.addEventListener('click', () => this.commitField(comp, field.path, undefined));
+        wrap.appendChild(note);
+        const fieldMount = document.createElement('div');
+        fieldMount.style.opacity = '0.55';
+        wrap.appendChild(fieldMount);
+        renderer(comp, field, fieldMount);
+      } else {
+        renderer(comp, field, wrap);
+      }
     });
+  }
+
+  /**
+   * Part 2, §2.1: human-readable reason a showWhen-gated field is currently
+   * hidden — "<referenced field's label> <op> <value>", matching the exact
+   * wording style the proposal itself uses ("Format ≠ LATLON_DMS").
+   */
+  formatShowWhenReason(showWhen) {
+    const label = this.humanizeFieldLabel(showWhen.path);
+    if ('equals' in showWhen) return `${label} ≠ ${showWhen.equals}`;
+    if ('notEquals' in showWhen) return `${label} = ${showWhen.notEquals}`;
+    if ('equalsAny' in showWhen) return `${label} is not one of: ${showWhen.equalsAny.join(', ')}`;
+    return `a condition on ${label}`;
   }
 
   /**

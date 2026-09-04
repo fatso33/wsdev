@@ -2488,6 +2488,34 @@ body, html {
 
 .btn-mini-close:hover { color: var(--accent-red); }
 
+/* Part 2, §2.1: a showWhen-suppressed field holding a genuinely authored
+   (non-default) value — shown anyway, dimmed, with why and a one-click clear. */
+.prop-showwhen-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-label);
+  opacity: 0.85;
+  margin-bottom: 3px;
+}
+.prop-showwhen-clear {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.prop-showwhen-clear:hover {
+  text-decoration: underline;
+}
+
 .sim-bench-body {
   flex: 1;
   overflow-y: auto;
