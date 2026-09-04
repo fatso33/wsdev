@@ -6,7 +6,6 @@
 
 import { StudioValidator } from './StudioValidator.js';
 import { SecurityValidator } from '../core/SecurityValidator.js';
-import { ValueFormatter } from '../widgets/components/ValueFormatter.js';
 import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_NAMES } from '../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../core/deckEventPacks.js';
@@ -2643,62 +2642,17 @@ export class StudioInspector {
         break;
       }
 
+      // Wave 1 gap-closing pass (2026-09-04): converted onto the registry-driven
+      // engine. props.decimals/odometerDigits now carry their own showWhen gates in
+      // PropertyRegistry.js (matching this panel's old needsDecimals/needsOdometer
+      // conditionals), and props.format gained its own literal ODOMETER-inclusive
+      // options list so converting doesn't silently drop it from the dropdown (the
+      // shared VALUE_FORMATS list core.input also reads deliberately excludes it).
+      // props.coordAxis already had a showWhen (equalsAny LATLON_DMS/COORD_DECIMAL).
       case 'core.display': {
-        const needsDecimals = props.format === 'DECIMAL_N';
-        const needsAxis = props.format === 'LATLON_DMS' || props.format === 'COORD_DECIMAL';
-        const needsOdometer = props.format === 'ODOMETER';
-        // FDWS v1.20 §4: ODOMETER is display-only (a mechanical rolling-digit
-        // readout, not a value string) — appended locally here rather than
-        // added to the shared VALUE_FORMATS list core.input's own Format
-        // dropdown also reads from, since it has no meaning as an input mask.
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Value Format</label>
-            <select id="p-disp-format" class="prop-select">
-              ${StudioValidator.VALUE_FORMATS.map((f) => `<option value="${f}" ${props.format === f ? 'selected' : ''}>${f}</option>`).join('')}
-              <option value="ODOMETER" ${props.format === 'ODOMETER' ? 'selected' : ''}>ODOMETER (rolling digit drums, v1.20)</option>
-            </select>
-          </div>
-          <div class="prop-row-2" style="${needsOdometer ? 'display:none;' : ''}">
-            <div class="prop-field">
-              <label>Prefix (Label)</label>
-              <input type="text" id="p-disp-prefix" class="prop-input" value="${props.prefix || ''}" placeholder="ACT" />
-            </div>
-            <div class="prop-field">
-              <label>Suffix (Unit)</label>
-              <input type="text" id="p-disp-suffix" class="prop-input" value="${props.suffix || ''}" placeholder="MHz" />
-            </div>
-          </div>
-          <div class="prop-field" id="p-disp-decimals-field" style="${needsDecimals ? '' : 'display:none;'}">
-            <label>Decimal Places <span class="prop-hint" title="Only used by the DECIMAL_N format.">ⓘ</span></label>
-            <input type="number" id="p-disp-decimals" class="prop-input" value="${props.decimals ?? 1}" min="0" max="6" />
-          </div>
-          <div class="prop-field" id="p-disp-axis-field" style="${needsAxis ? '' : 'display:none;'}">
-            <label>Coordinate Axis <span class="prop-hint" title="Latitude shows N/S, longitude shows E/W. Only used by LATLON_DMS and COORD_DECIMAL.">ⓘ</span></label>
-            <select id="p-disp-axis" class="prop-select">
-              <option value="lat" ${props.coordAxis !== 'lon' ? 'selected' : ''}>Latitude (N/S)</option>
-              <option value="lon" ${props.coordAxis === 'lon' ? 'selected' : ''}>Longitude (E/W)</option>
-            </select>
-          </div>
-          <div class="prop-field" id="p-disp-odometer-field" style="${needsOdometer ? '' : 'display:none;'}">
-            <label>Digit Count <span class="prop-hint" title="How many whole-number drum positions to show, e.g. 5 for an altimeter up to 99,999. Each drum's position is (value / 10^place) % 10 — all drums move continuously and proportionally, a simplified approximation of true carry-only-at-rollover mechanical odometer motion.">ⓘ</span></label>
-            <input type="number" id="p-disp-odometer-digits" class="prop-input" value="${props.odometerDigits ?? 5}" min="1" max="10" />
-          </div>
-        `;
-        body.querySelector('#p-disp-format')?.addEventListener('change', (e) => {
-          this.updateCompProp(comp, 'format', e.target.value);
-          const isOdometer = e.target.value === 'ODOMETER';
-          const prefixSuffixRow = body.querySelector('#p-disp-prefix')?.closest('.prop-row-2');
-          if (prefixSuffixRow) prefixSuffixRow.style.display = isOdometer ? 'none' : '';
-          body.querySelector('#p-disp-decimals-field').style.display = e.target.value === 'DECIMAL_N' ? '' : 'none';
-          body.querySelector('#p-disp-axis-field').style.display = (e.target.value === 'LATLON_DMS' || e.target.value === 'COORD_DECIMAL') ? '' : 'none';
-          body.querySelector('#p-disp-odometer-field').style.display = isOdometer ? '' : 'none';
-        });
-        body.querySelector('#p-disp-prefix')?.addEventListener('change', (e) => this.updateCompProp(comp, 'prefix', e.target.value));
-        body.querySelector('#p-disp-suffix')?.addEventListener('change', (e) => this.updateCompProp(comp, 'suffix', e.target.value));
-        body.querySelector('#p-disp-decimals')?.addEventListener('change', (e) => this.updateCompProp(comp, 'decimals', parseInt(e.target.value, 10) || 0));
-        body.querySelector('#p-disp-axis')?.addEventListener('change', (e) => this.updateCompProp(comp, 'coordAxis', e.target.value));
-        body.querySelector('#p-disp-odometer-digits')?.addEventListener('change', (e) => this.updateCompProp(comp, 'odometerDigits', parseInt(e.target.value, 10) || 5));
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.display']);
         break;
       }
 
@@ -2719,58 +2673,17 @@ export class StudioInspector {
         break;
       }
 
+      // Wave 1 gap-closing pass (2026-09-04): converted onto the registry-driven
+      // engine. Trade-off accepted (see PropertyRegistry.js's TYPE_FIELDS['core.input']
+      // comment): Min/Max no longer show a *dynamic* per-format placeholder or
+      // auto-populate from the format's catalog entry on Format change — the engine has
+      // no per-format hook for either. They now carry a static illustrative placeholder
+      // instead. Not a functional regression: InputComponent.js:211-212 already falls
+      // back to the format's own min/max at runtime whenever these props are unset.
       case 'core.input': {
-        const formatSpec = ValueFormatter.getFormatSpec(props.format);
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Format <span class="prop-hint" title="FDWS v1.11: formats with a Format Catalog entry (currently FREQ_COM, FREQ_NAV) turn this into a masked, range-enforced numeric field automatically — fixed digit shape, an auto-prefilled leading digit on focus (e.g. '1' for COM/NAV), and an out-of-range entry reverts on blur/Enter instead of committing. Min/Max below default from the format when left blank.">ⓘ</span></label>
-            <select id="p-inp-format" class="prop-select">
-              ${StudioValidator.VALUE_FORMATS.map((f) => `<option value="${f}" ${props.format === f ? 'selected' : ''}>${f}</option>`).join('')}
-            </select>
-          </div>
-          <div class="prop-field">
-            <label>Placeholder</label>
-            <input type="text" id="p-inp-ph" class="prop-input" value="${props.placeholder || ''}" placeholder="113.70" />
-          </div>
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Min <span class="prop-hint" title="Overrides the chosen format's own minimum, if it has one. Leave blank to use the format's default.">ⓘ</span></label>
-              <input type="number" step="any" id="p-inp-min" class="prop-input" value="${props.min ?? ''}" placeholder="${formatSpec?.min ?? ''}" />
-            </div>
-            <div class="prop-field">
-              <label>Max <span class="prop-hint" title="Overrides the chosen format's own maximum, if it has one. Leave blank to use the format's default.">ⓘ</span></label>
-              <input type="number" step="any" id="p-inp-max" class="prop-input" value="${props.max ?? ''}" placeholder="${formatSpec?.max ?? ''}" />
-            </div>
-          </div>
-          <div class="prop-field">
-            <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="p-inp-selectfocus" ${props.selectOnFocus ? 'checked' : ''} /> Select all text on focus</label>
-            <span class="prop-hint" title="FDWS v1.11: when this field already holds a value and the user taps/clicks into it, the existing text is selected so typing immediately replaces it. Has no effect on an empty field (nothing to select), and doesn't interfere with a masked format's auto-prefill.">ⓘ</span>
-          </div>
-        `;
-        body.querySelector('#p-inp-format')?.addEventListener('change', (e) => {
-          const nextFormat = e.target.value;
-          this.updateCompProp(comp, 'format', nextFormat);
-          // Auto-populate Min/Max from the new format's catalog entry, but
-          // only when the author hasn't already set an explicit override —
-          // never clobber a value they typed in on purpose.
-          const nextSpec = ValueFormatter.getFormatSpec(nextFormat);
-          if (nextSpec && props.min === undefined && nextSpec.min !== undefined) {
-            this.updateCompProp(comp, 'min', nextSpec.min);
-          }
-          if (nextSpec && props.max === undefined && nextSpec.max !== undefined) {
-            this.updateCompProp(comp, 'max', nextSpec.max);
-          }
-        });
-        body.querySelector('#p-inp-ph')?.addEventListener('change', (e) => this.updateCompProp(comp, 'placeholder', e.target.value));
-        body.querySelector('#p-inp-min')?.addEventListener('change', (e) => {
-          const v = e.target.value.trim();
-          this.updateCompProp(comp, 'min', v === '' ? undefined : Number(v));
-        });
-        body.querySelector('#p-inp-max')?.addEventListener('change', (e) => {
-          const v = e.target.value.trim();
-          this.updateCompProp(comp, 'max', v === '' ? undefined : Number(v));
-        });
-        body.querySelector('#p-inp-selectfocus')?.addEventListener('change', (e) => this.updateCompProp(comp, 'selectOnFocus', e.target.checked || undefined));
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.input']);
         break;
       }
 
@@ -3204,191 +3117,72 @@ export class StudioInspector {
         body.querySelector('#p-ref-libraryid')?.addEventListener('change', (e) => this.updateCompProp(comp, 'libraryId', e.target.value));
         break;
 
-      case 'core.divider':
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Orientation</label>
-            <select id="p-div-orientation" class="prop-select">
-              <option value="horizontal" ${(!props.orientation || props.orientation === 'horizontal') ? 'selected' : ''}>Horizontal</option>
-              <option value="vertical" ${props.orientation === 'vertical' ? 'selected' : ''}>Vertical</option>
-            </select>
-          </div>
-          <div class="empty-tree-notice">Thickness, color, and dash style are set on the "VISUAL STYLING & TYPOGRAPHY" panel's Border section below — this line reuses those same fields.</div>
-        `;
-        body.querySelector('#p-div-orientation')?.addEventListener('change', (e) => this.updateCompProp(comp, 'orientation', e.target.value));
+      // Wave 1 gap-closing pass (2026-09-04): core.divider/core.tape/core.pad/
+      // core.container/core.stepper/core.rotary all converted onto the registry-driven
+      // engine (StudioInspector.js's FIELD_RENDERERS/renderRegistryFields — see that
+      // section's header comment). Two of these fixed real registry data bugs found
+      // while verifying the conversion against each component's runtime source, not
+      // just display gaps — see PropertyRegistry.js's per-field "gap-closing pass"
+      // comments for the details:
+      //   - core.pad's props.mode had stale options (['xy','x','y']) that didn't match
+      //     what PadComponent.js actually reads ('relative'/'absolute') — every value in
+      //     the old registry silently fell through to 'relative' at runtime. Fixed.
+      //   - core.rotary's props.circular had its default backwards (registry said
+      //     false; RotaryComponent.js's actual default is true).
+      // core.tape's two data-tier="advanced" row-of-2 groupings (tick lengths, tick
+      // colors) become individual fields in a single column — renderRegistryFields tags
+      // data-tier per field from the registry's own tier (all four already 'advanced'),
+      // so Simple/Advanced visibility is unchanged; only the 2-column grouping is lost,
+      // same as the earlier core.button/core.label conversions.
+      case 'core.divider': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.divider']);
+        const notice = document.createElement('div');
+        notice.className = 'empty-tree-notice';
+        notice.textContent = 'Thickness, color, and dash style are set on the "VISUAL STYLING & TYPOGRAPHY" panel\'s Border section below — this line reuses those same fields.';
+        body.appendChild(notice);
         break;
+      }
 
-      case 'core.tape':
-        body.innerHTML = `
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Axis</label>
-              <select id="p-tape-axis" class="prop-select">
-                <option value="y" ${(!props.axis || props.axis === 'y') ? 'selected' : ''}>Vertical (airspeed/altitude)</option>
-                <option value="x" ${props.axis === 'x' ? 'selected' : ''}>Horizontal (heading)</option>
-              </select>
-            </div>
-            <div class="prop-field">
-              <label style="display:flex;align-items:center;gap:6px;height:28px;"><input type="checkbox" id="p-tape-reverse" ${props.reverse ? 'checked' : ''} /> Reverse</label>
-            </div>
-          </div>
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Tick Interval <span class="prop-hint" title="Value spacing between minor ticks, e.g. 10 for an altitude tape in feet.">ⓘ</span></label>
-              <input type="number" id="p-tape-tickinterval" class="prop-input" value="${props.tickInterval ?? 10}" />
-            </div>
-            <div class="prop-field">
-              <label>Major Every</label>
-              <input type="number" id="p-tape-majorevery" class="prop-input" value="${props.majorEvery ?? 5}" />
-            </div>
-          </div>
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Px Per Unit <span class="prop-hint" title="Pixels of scroll travel per 1 unit of value — controls how zoomed-in the tape reads.">ⓘ</span></label>
-              <input type="number" id="p-tape-pxperunit" class="prop-input" value="${props.pxPerUnit ?? 2}" />
-            </div>
-            <div class="prop-field">
-              <label>Label Decimals</label>
-              <input type="number" id="p-tape-decimals" class="prop-input" value="${props.decimals ?? 0}" />
-            </div>
-          </div>
-          <div class="prop-row-2" data-tier="advanced">
-            <div class="prop-field">
-              <label>Minor Tick Length (px)</label>
-              <input type="number" id="p-tape-minorlen" class="prop-input" value="${props.minorTickLength ?? 8}" />
-            </div>
-            <div class="prop-field">
-              <label>Major Tick Length (px)</label>
-              <input type="number" id="p-tape-majorlen" class="prop-input" value="${props.majorTickLength ?? 16}" />
-            </div>
-          </div>
-          <div class="prop-row-2" data-tier="advanced">
-            <div class="prop-field">
-              <label>Tick Color</label>
-              <input type="color" id="p-tape-tickcolor" class="prop-input" value="${/^#/.test(props.tickColor || '') ? props.tickColor : '#94a3b8'}" />
-            </div>
-            <div class="prop-field">
-              <label>Index Line Color</label>
-              <input type="color" id="p-tape-indexcolor" class="prop-input" value="${/^#/.test(props.indexLineColor || '') ? props.indexLineColor : '#22d3ee'}" />
-            </div>
-          </div>
-          <div class="empty-tree-notice">The current value's own numeric readout isn't part of this component — layer a separate core.display on top at the index line, same as a needle over a dial.</div>
-        `;
-        body.querySelector('#p-tape-axis')?.addEventListener('change', (e) => this.updateCompProp(comp, 'axis', e.target.value));
-        body.querySelector('#p-tape-reverse')?.addEventListener('change', (e) => this.updateCompProp(comp, 'reverse', e.target.checked));
-        body.querySelector('#p-tape-tickinterval')?.addEventListener('change', (e) => this.updateCompProp(comp, 'tickInterval', Number(e.target.value) || 10));
-        body.querySelector('#p-tape-majorevery')?.addEventListener('change', (e) => this.updateCompProp(comp, 'majorEvery', Number(e.target.value) || 5));
-        body.querySelector('#p-tape-pxperunit')?.addEventListener('change', (e) => this.updateCompProp(comp, 'pxPerUnit', Number(e.target.value) || 2));
-        body.querySelector('#p-tape-decimals')?.addEventListener('change', (e) => this.updateCompProp(comp, 'decimals', Number(e.target.value) || 0));
-        body.querySelector('#p-tape-minorlen')?.addEventListener('change', (e) => this.updateCompProp(comp, 'minorTickLength', Number(e.target.value) || 8));
-        body.querySelector('#p-tape-majorlen')?.addEventListener('change', (e) => this.updateCompProp(comp, 'majorTickLength', Number(e.target.value) || 16));
-        body.querySelector('#p-tape-tickcolor')?.addEventListener('change', (e) => this.updateCompProp(comp, 'tickColor', e.target.value));
-        body.querySelector('#p-tape-indexcolor')?.addEventListener('change', (e) => this.updateCompProp(comp, 'indexLineColor', e.target.value));
+      case 'core.tape': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.tape']);
+        const notice = document.createElement('div');
+        notice.className = 'empty-tree-notice';
+        notice.textContent = "The current value's own numeric readout isn't part of this component — layer a separate core.display on top at the index line, same as a needle over a dial.";
+        body.appendChild(notice);
         break;
+      }
 
-      case 'core.pad':
-        body.innerHTML = `
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Mode</label>
-              <select id="p-pad-mode" class="prop-select">
-                <option value="relative" ${(!props.mode || props.mode === 'relative') ? 'selected' : ''}>Relative (Pan)</option>
-                <option value="absolute" ${props.mode === 'absolute' ? 'selected' : ''}>Absolute (Cursor)</option>
-              </select>
-            </div>
-            <div class="prop-field">
-              <label>Sensitivity</label>
-              <input type="number" step="0.1" id="p-pad-sensitivity" class="prop-input" value="${props.sensitivity ?? 1.0}" />
-            </div>
-          </div>
-        `;
-        body.querySelector('#p-pad-mode')?.addEventListener('change', (e) => this.updateCompProp(comp, 'mode', e.target.value));
-        body.querySelector('#p-pad-sensitivity')?.addEventListener('change', (e) => this.updateCompProp(comp, 'sensitivity', Number(e.target.value)));
+      case 'core.pad': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.pad']);
         break;
+      }
 
-      // Widget Studio 2.0, Phase 1: core.container/core.stepper/core.rotary
-      // previously fell straight to the empty default case below — a real,
-      // silent gap (all three are live ContainerComponent.js/
-      // StepperComponent.js/RotaryComponent.js props, confirmed against the
-      // runtime via scripts/check-registry-drift.mjs), not something the
-      // original per-type audit had caught yet.
-      case 'core.container':
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Direction</label>
-            <select id="p-cont-direction" class="prop-select">
-              <option value="row" ${(!props.direction || props.direction === 'row') ? 'selected' : ''}>Row</option>
-              <option value="column" ${props.direction === 'column' ? 'selected' : ''}>Column</option>
-              <option value="grid" ${props.direction === 'grid' ? 'selected' : ''}>Grid</option>
-            </select>
-          </div>
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Gap (px)</label>
-              <input type="number" id="p-cont-gap" class="prop-input" value="${props.gap ?? 4}" min="0" />
-            </div>
-            <div class="prop-field" style="${props.direction === 'grid' ? '' : 'display:none;'}" id="p-cont-columns-field">
-              <label>Columns</label>
-              <input type="number" id="p-cont-columns" class="prop-input" value="${props.columns ?? 2}" min="1" />
-            </div>
-          </div>
-        `;
-        body.querySelector('#p-cont-direction')?.addEventListener('change', (e) => {
-          this.updateCompProp(comp, 'direction', e.target.value);
-          const colField = body.querySelector('#p-cont-columns-field');
-          if (colField) colField.style.display = e.target.value === 'grid' ? '' : 'none';
-        });
-        body.querySelector('#p-cont-gap')?.addEventListener('change', (e) => this.updateCompProp(comp, 'gap', Number(e.target.value) || 0));
-        body.querySelector('#p-cont-columns')?.addEventListener('change', (e) => this.updateCompProp(comp, 'columns', parseInt(e.target.value, 10) || 2));
+      case 'core.container': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.container']);
         break;
+      }
 
-      case 'core.stepper':
-        body.innerHTML = `
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Min</label>
-              <input type="number" id="p-step-min" class="prop-input" value="${props.min ?? 0}" />
-            </div>
-            <div class="prop-field">
-              <label>Max</label>
-              <input type="number" id="p-step-max" class="prop-input" value="${props.max ?? 100}" />
-            </div>
-          </div>
-          <div class="prop-field">
-            <label>Step Amount</label>
-            <input type="number" id="p-step-step" class="prop-input" value="${props.step ?? 1}" step="any" />
-          </div>
-        `;
-        body.querySelector('#p-step-min')?.addEventListener('change', (e) => this.updateCompProp(comp, 'min', Number(e.target.value) || 0));
-        body.querySelector('#p-step-max')?.addEventListener('change', (e) => this.updateCompProp(comp, 'max', Number(e.target.value) || 0));
-        body.querySelector('#p-step-step')?.addEventListener('change', (e) => this.updateCompProp(comp, 'step', Number(e.target.value) || 1));
+      case 'core.stepper': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.stepper']);
         break;
+      }
 
-      case 'core.rotary':
-        body.innerHTML = `
-          <div class="prop-field">
-            <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="p-rot-circular" ${props.circular ? 'checked' : ''} /> Spins continuously (no hard stops)</label>
-          </div>
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Coarse Step <span class="prop-hint" title="Value change per full knob detent.">ⓘ</span></label>
-              <input type="number" id="p-rot-coarse" class="prop-input" value="${props.coarseStep ?? 1}" step="any" />
-            </div>
-            <div class="prop-field">
-              <label>Fine Step <span class="prop-hint" title="Value change per small drag increment, for fine adjustment.">ⓘ</span></label>
-              <input type="number" id="p-rot-fine" class="prop-input" value="${props.fineStep ?? 0.1}" step="any" />
-            </div>
-          </div>
-          <div class="prop-field">
-            <label>Push Label (optional)</label>
-            <input type="text" id="p-rot-push" class="prop-input" value="${props.pushLabel || ''}" placeholder="e.g. DIRECT-TO" />
-          </div>
-        `;
-        body.querySelector('#p-rot-circular')?.addEventListener('change', (e) => this.updateCompProp(comp, 'circular', e.target.checked));
-        body.querySelector('#p-rot-coarse')?.addEventListener('change', (e) => this.updateCompProp(comp, 'coarseStep', Number(e.target.value) || 1));
-        body.querySelector('#p-rot-fine')?.addEventListener('change', (e) => this.updateCompProp(comp, 'fineStep', Number(e.target.value) || 0));
-        body.querySelector('#p-rot-push')?.addEventListener('change', (e) => this.updateCompProp(comp, 'pushLabel', e.target.value));
+      case 'core.rotary': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.rotary']);
         break;
+      }
 
       default:
         body.innerHTML = `<div class="caps-empty">Standard properties active for ${comp.type}</div>`;
@@ -3709,10 +3503,16 @@ export class StudioInspector {
   renderPlainField(comp, field, mount, inputType) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
-    const value = this.getFieldValue(comp, field.path);
+    // Wave 1 gap-closing pass (2026-09-04): fall back to field.default when unset,
+    // mirroring the `??`/`||` fallback every hand-coded panel this engine replaces
+    // already showed — without this, any previously-defaulted field goes visually
+    // blank the moment it's converted, even though the runtime component still applies
+    // its own fallback. commitField() is unaffected: still only ever writes what the
+    // user actually types, never silently backfills the default into the widget def.
+    const value = this.getFieldValue(comp, field.path) ?? field.default;
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" />
+      <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}" />
     `;
     mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
       const raw = e.target.value;
@@ -3724,7 +3524,9 @@ export class StudioInspector {
   renderCheckboxField(comp, field, mount) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
-    const value = !!this.getFieldValue(comp, field.path);
+    // See renderPlainField's comment above on the same default-fallback fix.
+    const raw = this.getFieldValue(comp, field.path);
+    const value = !!(raw === undefined ? field.default : raw);
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}" style="display:flex;align-items:center;gap:6px;">
         <input type="checkbox" id="${id}" ${value ? 'checked' : ''} /> ${escapeHtmlAttr(label)}
@@ -3736,7 +3538,8 @@ export class StudioInspector {
   renderSelectField(comp, field, mount) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
-    const value = this.getFieldValue(comp, field.path);
+    // See renderPlainField's comment above on the same default-fallback fix.
+    const value = this.getFieldValue(comp, field.path) ?? field.default;
     const rawOptions = field.optionsRef === 'VALUE_FORMATS' ? REGISTRY_VALUE_FORMATS : (field.options || []);
     const optionHtml = rawOptions.map((opt) => {
       const optVal = (opt && typeof opt === 'object') ? opt.value : opt;

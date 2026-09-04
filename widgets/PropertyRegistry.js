@@ -335,13 +335,28 @@ export const TYPE_FIELDS = {
     { path: 'props.align', control: null, deprecated: true, default: undefined, tooltip: 'Legacy horizontal-align fallback, superseded by style.align.h (FDWS v1.8). Auto-migrated on open, not user-editable.' }
   ],
   'core.display': [
-    { path: 'props.format', control: 'select', optionsRef: 'VALUE_FORMATS', tier: 'simple', group: 'Content', default: 'RAW_INT', tooltip: 'How the raw value is formatted for display (e.g. FREQUENCY_COM shows "118.000"). "ODOMETER" (FDWS v1.20) is display-only — appended in Widget Studio\'s own core.display panel rather than the shared VALUE_FORMATS list, since it has no meaning as a core.input mask.' },
+    // Wave 1 gap-closing pass (2026-09-04): this field previously used
+    // optionsRef:'VALUE_FORMATS', which resolves to the *shared* list — one that
+    // deliberately excludes 'ODOMETER' (see the tooltip: core.input also reads
+    // VALUE_FORMATS via the same optionsRef, and ODOMETER has no meaning as an input
+    // mask). Converting this type onto the registry engine with the shared list as-is
+    // would have silently dropped ODOMETER from the dropdown — a real regression, not
+    // just a display gap. Fixed with a display-only literal `options:` array instead of
+    // `optionsRef`, so core.input's own dropdown (which still uses optionsRef) is unaffected.
+    { path: 'props.format', control: 'select', options: [...VALUE_FORMATS, 'ODOMETER'], tier: 'simple', group: 'Content', default: 'RAW_INT', tooltip: 'How the raw value is formatted for display (e.g. FREQUENCY_COM shows "118.000"). "ODOMETER" (FDWS v1.20) is display-only — appended here rather than to the shared VALUE_FORMATS list, since it has no meaning as a core.input mask.' },
     // FDWS v1.20 §4: mechanical rolling-digit-drum readout — DisplayComponent.js
     // branches its whole render()/update() to renderOdometer()/setOdometerValue()
     // when props.format === 'ODOMETER', bypassing ValueFormatter entirely (a
     // digit-drum readout isn't a formatted string, it's a set of DOM elements).
-    { path: 'props.odometerDigits', control: 'number', tier: 'simple', group: 'Content', fdwsMin: '1.20', default: 5, tooltip: 'How many whole-number drum positions to show (e.g. 5 for an altimeter up to 99,999). Only used when Value Format is ODOMETER. Default 5.' },
-    { path: 'props.decimals', control: 'number', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Decimal places to show, for numeric formats.' },
+    // Wave 1 gap-closing pass (2026-09-04): added showWhen to both fields below,
+    // matching the hand-coded panel's own conditionals (StudioInspector.js:2647-2649)
+    // — without it, a registry-driven render would show both for every format.
+    { path: 'props.odometerDigits', control: 'number', tier: 'simple', group: 'Content', fdwsMin: '1.20', default: 5, tooltip: 'How many whole-number drum positions to show (e.g. 5 for an altimeter up to 99,999). Only used when Value Format is ODOMETER. Default 5.', showWhen: { path: 'props.format', equals: 'ODOMETER' } },
+    // Found during live verification of this pass: default was `undefined`, but
+    // ValueFormatter.js:313 falls back to 1 for DECIMAL_N
+    // (`Number.isInteger(opts.decimals) ? opts.decimals : 1`) — same gap class as the
+    // others in this pass, just missed in the original registry entry.
+    { path: 'props.decimals', control: 'number', tier: 'simple', group: 'Content', default: 1, tooltip: 'Decimal places to show, for numeric formats.', showWhen: { path: 'props.format', equals: 'DECIMAL_N' } },
     { path: 'props.prefix', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Text prepended before the value (e.g. "ALT ").' },
     { path: 'props.suffix', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Text appended after the value (e.g. " ft").' },
     { path: 'props.defaultValue', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Shown before the first real value arrives from the sim.' },
@@ -362,8 +377,15 @@ export const TYPE_FIELDS = {
     { path: 'props.format', control: 'select', optionsRef: 'VALUE_FORMATS', tier: 'simple', group: 'Content', default: 'RAW_INT', tooltip: 'Input mask/validation applied while typing (e.g. SQUAWK_CODE restricts to 4 octal digits).' },
     { path: 'props.placeholder', control: 'text', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Hint text shown when the field is empty.' },
     { path: 'props.defaultValue', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Initial value before the user edits it.' },
-    { path: 'props.min', control: 'number', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Minimum allowed value.' },
-    { path: 'props.max', control: 'number', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Maximum allowed value.' },
+    // Wave 1 gap-closing pass (2026-09-04): the hand-coded panel derived a *dynamic*
+    // placeholder from ValueFormatter.getFormatSpec(props.format) and auto-populated
+    // these fields from it on format change. The generic engine has no per-format hook
+    // for either — added a static illustrative placeholder instead (a real, if smaller,
+    // improvement over the registry's previous total absence of one) and noted the loss
+    // in the tooltip. Not a functional regression: InputComponent.js:211-212 already
+    // falls back to the format's own min/max at runtime whenever these are unset.
+    { path: 'props.min', control: 'number', tier: 'advanced', group: 'Content', default: undefined, placeholder: 'format default, if any', tooltip: 'Overrides the chosen format\'s own minimum, if it has one. Leave blank to use the format\'s default.' },
+    { path: 'props.max', control: 'number', tier: 'advanced', group: 'Content', default: undefined, placeholder: 'format default, if any', tooltip: 'Overrides the chosen format\'s own maximum, if it has one. Leave blank to use the format\'s default.' },
     { path: 'props.value', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Forces this exact current value, overriding what the user typed — for testing layouts, same idea as core.display’s Literal Override.' },
     { path: 'props.selectOnFocus', control: 'checkbox', tier: 'advanced', group: 'Content', default: false, tooltip: 'Selects all existing text when the field gains focus, so typing replaces it instead of appending.' }
   ],
@@ -422,8 +444,12 @@ export const TYPE_FIELDS = {
   ],
   'core.container': [
     { path: 'props.direction', control: 'select', options: ['row', 'column', 'grid'], tier: 'simple', group: 'Layout', default: 'row', tooltip: 'How child components are arranged.' },
-    { path: 'props.gap', control: 'number', tier: 'simple', group: 'Layout', default: undefined, tooltip: 'Spacing between child components, in pixels.' },
-    { path: 'props.columns', control: 'number', tier: 'simple', group: 'Layout', default: undefined, tooltip: 'Number of columns, when Direction is "grid".', showWhen: { path: 'props.direction', equals: 'grid' } }
+    // Wave 1 gap-closing pass (2026-09-04): default was `undefined`, but
+    // ContainerComponent.js:15 falls back to 4 (`props.gap !== undefined ? props.gap : 4`).
+    { path: 'props.gap', control: 'number', tier: 'simple', group: 'Layout', default: 4, tooltip: 'Spacing between child components, in pixels.' },
+    // Same pass: default was `undefined`, but ContainerComponent.js:18 falls back to 2
+    // (`props.columns || 2`).
+    { path: 'props.columns', control: 'number', tier: 'simple', group: 'Layout', default: 2, tooltip: 'Number of columns, when Direction is "grid".', showWhen: { path: 'props.direction', equals: 'grid' } }
   ],
   'core.slider': [
     { path: 'props.axis', control: 'select', options: ['horizontal', 'vertical'], tier: 'simple', group: 'Content', default: undefined, tooltip: 'Slide direction.' },
@@ -446,7 +472,11 @@ export const TYPE_FIELDS = {
     { path: 'props.step', control: 'number', tier: 'simple', group: 'Content', default: 1, tooltip: 'Amount each tap increments/decrements by.' }
   ],
   'core.rotary': [
-    { path: 'props.circular', control: 'checkbox', tier: 'simple', group: 'Content', default: false, tooltip: 'Allows the knob to spin continuously instead of stopping at endpoints.' },
+    // Wave 1 gap-closing pass (2026-09-04): default was `false`, but
+    // RotaryComponent.js:19 computes `props.circular !== false` — the knob is circular
+    // (continuous spin) *unless* explicitly set to false, so the effective default is
+    // true, not false. Registry had this backwards.
+    { path: 'props.circular', control: 'checkbox', tier: 'simple', group: 'Content', default: true, tooltip: 'Allows the knob to spin continuously instead of stopping at endpoints.' },
     { path: 'props.coarseStep', control: 'number', tier: 'simple', group: 'Content', default: 10, tooltip: 'Value change per full knob detent.' },
     { path: 'props.fineStep', control: 'number', tier: 'advanced', group: 'Content', default: 1, tooltip: 'Value change per small drag increment, for fine adjustment.' },
     { path: 'props.pushLabel', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Label shown for this knob’s push/click action, if it has one.' }
@@ -471,15 +501,25 @@ export const TYPE_FIELDS = {
     { path: 'props.libraryId', control: 'widgetLibraryPicker', tier: 'simple', group: 'Content', default: undefined, tooltip: 'ID of a shared widget-library component this one embeds.' }
   ],
   'core.pad': [
-    { path: 'props.mode', control: 'select', options: ['xy', 'x', 'y'], tier: 'simple', group: 'Content', default: undefined, tooltip: 'Which axes this touchpad reports.' },
-    { path: 'props.sensitivity', control: 'number', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Movement scaling — higher means less physical drag needed for the same output range.' }
+    // Wave 1 gap-closing pass (2026-09-04): options were ['xy','x','y'] — stale, and not
+    // what PadComponent.js:32 actually reads (`props.mode === 'absolute' ? 'absolute' :
+    // 'relative'`). Any of the old three values would have silently fallen through to
+    // 'relative' at runtime. Corrected to match the runtime and the hand-coded panel's
+    // own (correct) labels.
+    { path: 'props.mode', control: 'select', options: [{ value: 'relative', label: 'Relative (Pan)' }, { value: 'absolute', label: 'Absolute (Cursor)' }], tier: 'simple', group: 'Content', default: 'relative', tooltip: 'Relative reports drag deltas for panning; Absolute reports normalized cursor position within the pad.' },
+    // Same pass: default was `undefined`, but PadComponent.js:33 falls back to 1.0
+    // (`props.sensitivity !== undefined ? props.sensitivity : 1.0`).
+    { path: 'props.sensitivity', control: 'number', tier: 'advanced', group: 'Content', default: 1.0, tooltip: 'Movement scaling — higher means less physical drag needed for the same output range.' }
   ],
   // FDWS v1.17: a plain grid-snapped separator line — reuses style.border.
   // width/color/style as the line's thickness/color/dash-style instead of a
   // parallel schema, so it's theme-aware for free and shares the Border
   // group's existing controls.
   'core.divider': [
-    { path: 'props.orientation', control: 'select', options: ['horizontal', 'vertical'], tier: 'simple', group: 'Content', fdwsMin: '1.17', default: undefined, tooltip: 'Line direction. Horizontal spans this component’s own width; vertical spans its own height — size the grid box accordingly (wide+short for horizontal, narrow+tall for vertical).' }
+    // Wave 1 gap-closing pass (2026-09-04): default was `undefined`, but
+    // DividerComponent.js:67 falls back to 'horizontal'
+    // (`this.def.props?.orientation === 'vertical' ? 'vertical' : 'horizontal'`).
+    { path: 'props.orientation', control: 'select', options: ['horizontal', 'vertical'], tier: 'simple', group: 'Content', fdwsMin: '1.17', default: 'horizontal', tooltip: 'Line direction. Horizontal spans this component’s own width; vertical spans its own height — size the grid box accordingly (wide+short for horizontal, narrow+tall for vertical).' }
   ],
   // FDWS v1.20 §3: a continuously-scrolling ruler/tape (airspeed, altitude) —
   // TapeComponent.js rebuilds the visible window of tick marks/labels from
@@ -488,13 +528,17 @@ export const TYPE_FIELDS = {
   // readout is a separate core.display layered on top at the index line, not
   // part of this component.
   'core.tape': [
-    { path: 'props.axis', control: 'select', options: ['y', 'x'], tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: undefined, tooltip: 'Scroll direction — vertical (airspeed/altitude-style) or horizontal (heading-tape-style).' },
-    { path: 'props.tickInterval', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: undefined, tooltip: 'Value spacing between minor ticks (e.g. 10 for an altitude tape in feet).' },
-    { path: 'props.majorEvery', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: undefined, tooltip: 'Every Nth minor tick is drawn longer and labeled with its value.' },
-    { path: 'props.pxPerUnit', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: undefined, tooltip: 'Pixels of scroll travel per 1 unit of value — controls how "zoomed in" the tape reads.' },
-    { path: 'props.minorTickLength', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: undefined, tooltip: 'Length in px of a minor tick mark.' },
-    { path: 'props.majorTickLength', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: undefined, tooltip: 'Length in px of a major (labeled) tick mark.' },
-    { path: 'props.tickColor', control: 'color', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: undefined, tooltip: 'Color of the tick marks.' },
+    { path: 'props.axis', control: 'select', options: ['y', 'x'], tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: 'y', tooltip: 'Scroll direction — vertical (airspeed/altitude-style) or horizontal (heading-tape-style).' },
+    // Wave 1 gap-closing pass (2026-09-04): the six defaults below were all `undefined`
+    // despite clear `||` fallbacks in TapeComponent.js (lines 90-95). labelColor and
+    // indexLineColor are deliberately left `undefined` — their real fallbacks are
+    // dynamic (labelColor mirrors tickColor) or CSS-var-based, not a plain literal.
+    { path: 'props.tickInterval', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: 10, tooltip: 'Value spacing between minor ticks (e.g. 10 for an altitude tape in feet).' },
+    { path: 'props.majorEvery', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: 5, tooltip: 'Every Nth minor tick is drawn longer and labeled with its value.' },
+    { path: 'props.pxPerUnit', control: 'number', tier: 'simple', group: 'Tape', fdwsMin: '1.20', default: 2, tooltip: 'Pixels of scroll travel per 1 unit of value — controls how "zoomed in" the tape reads.' },
+    { path: 'props.minorTickLength', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: 8, tooltip: 'Length in px of a minor tick mark.' },
+    { path: 'props.majorTickLength', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: 16, tooltip: 'Length in px of a major (labeled) tick mark.' },
+    { path: 'props.tickColor', control: 'color', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: '#94a3b8', tooltip: 'Color of the tick marks.' },
     { path: 'props.labelColor', control: 'color', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: undefined, tooltip: 'Color of the tick labels. Defaults to Tick Color if unset.' },
     { path: 'props.indexLineColor', control: 'color', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: undefined, tooltip: 'Color of the fixed line marking the current reading, at the component\'s center.' },
     { path: 'props.decimals', control: 'number', tier: 'advanced', group: 'Tape', fdwsMin: '1.20', default: 0, tooltip: 'Decimal places shown on major tick labels. Default 0.' },
