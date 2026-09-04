@@ -28,6 +28,25 @@ import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/The
 
 const CUSTOM_OPTION_VALUE = '__custom__';
 
+// V14 ("Use This Component's Own Value"): a fourth option shared by every
+// condition-source dropdown (visibleWhen row, style.rules condition, an
+// interaction's "Only Run If"), alongside declared state[] vars and the
+// existing Custom/nested-path escape hatch. Picking it declares (or reuses)
+// a syncFrom state var mirroring the CURRENTLY SELECTED component's own
+// binding.readSimVar — the "hop nothing in the UI points at" the proposal's
+// V14/G8 finding describes. One shared fragment so the three editors can't
+// drift in wording/ordering; each editor still wires its own commit timing.
+const OWN_VALUE_OPTION = '__own_value__';
+function conditionStateOptionsHtml(stateVars, currentValue, ownValueSelected, ownValueSimVar) {
+  const isCustom = !ownValueSelected && !!currentValue && !stateVars.some((s) => s.name === currentValue);
+  return `
+    <option value="">— state var —</option>
+    ${ownValueSimVar ? `<option value="${OWN_VALUE_OPTION}" ${ownValueSelected ? 'selected' : ''} title="Declares (or reuses) a state variable that mirrors this component's own binding, so its live value can drive this condition.">Use This Component's Own Value</option>` : ''}
+    ${stateVars.map((s) => `<option value="${escapeHtmlAttr(s.name)}" ${!ownValueSelected && currentValue === s.name ? 'selected' : ''}>${escapeHtmlAttr(s.name)}</option>`).join('')}
+    <option value="${CUSTOM_OPTION_VALUE}" ${isCustom ? 'selected' : ''}>Custom / nested path…</option>
+  `;
+}
+
 
 // FDWS v1.25: style.states.<name> (border/background/typography overrides
 // merged over the base style while a component is in a named interaction
@@ -1164,9 +1183,7 @@ export class StudioInspector {
           <div class="prop-field">
             <label>State Var</label>
             <select id="c-rule-cond-state" class="prop-select">
-              <option value="">— state var —</option>
-              ${stateVars.map((s) => `<option value="${s.name}" ${ruleCond.state === s.name ? 'selected' : ''}>${s.name}</option>`).join('')}
-              <option value="${CUSTOM_OPTION_VALUE}" ${ruleCondIsCustom ? 'selected' : ''}>Custom / nested path…</option>
+              ${conditionStateOptionsHtml(stateVars, ruleCond.state, false, comp.binding?.readSimVar)}
             </select>
             <input type="text" id="c-rule-cond-state-custom" class="prop-input ${ruleCondIsCustom ? '' : 'hidden'}" value="${ruleCondIsCustom ? escapeHtmlAttr(ruleCond.state) : ''}" placeholder="e.g. presets[0].label" style="margin-top:4px;" />
           </div>
@@ -1253,10 +1270,15 @@ export class StudioInspector {
       });
 
       if (activeTab === 'rule' && activeRule) {
-        const commitRuleCondition = () => {
+        // V14: `stateOverride` lets the "Use This Component's Own Value" branch
+        // below reuse this same op/value-reading logic instead of duplicating
+        // it, supplying the resolved syncFrom var name in place of whatever
+        // the (sentinel-valued) select currently reads.
+        const commitRuleCondition = (recordHistory = true, stateOverride = undefined) => {
           const stateSelect = body.querySelector('#c-rule-cond-state');
           const stateCustom = body.querySelector('#c-rule-cond-state-custom');
-          const state = stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustom.value.trim() : stateSelect.value;
+          const state = stateOverride !== undefined ? stateOverride
+            : stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustom.value.trim() : stateSelect.value;
           const op = body.querySelector('#c-rule-cond-op').value;
           const rawVal = body.querySelector('#c-rule-cond-val').value;
           const when = { state };
@@ -1276,10 +1298,18 @@ export class StudioInspector {
           // sub-field, because nothing here ever touches style at all.
           const nextRules = [...rules];
           nextRules[activeRuleIndex] = { ...nextRules[activeRuleIndex], when };
-          this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } });
+          this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, recordHistory);
         };
         body.querySelector('#c-rule-cond-state')?.addEventListener('change', (e) => {
-          if (e.target.value === CUSTOM_OPTION_VALUE) {
+          if (e.target.value === OWN_VALUE_OPTION) {
+            const simVar = comp.binding?.readSimVar;
+            if (!simVar) return;
+            const name = this.state.resolveSyncFromVarName(simVar);
+            body.querySelector('#c-rule-cond-state-custom')?.classList.add('hidden');
+            this.state.saveHistory("Use This Component's Own Value");
+            this.state.ensureSyncFromVar(simVar);
+            commitRuleCondition(false, name);
+          } else if (e.target.value === CUSTOM_OPTION_VALUE) {
             body.querySelector('#c-rule-cond-state-custom')?.classList.remove('hidden');
           } else {
             body.querySelector('#c-rule-cond-state-custom')?.classList.add('hidden');
@@ -1884,9 +1914,7 @@ export class StudioInspector {
       <div class="row-list-item" data-idx="${idx}">
         <div class="vw-state-wrap" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;">
           <select class="row-field vw-state prop-select" data-field="state">
-            <option value="">— state var —</option>
-            ${stateVars.map((s) => `<option value="${s.name}" ${cond.state === s.name ? 'selected' : ''}>${s.name}</option>`).join('')}
-            <option value="${CUSTOM_OPTION_VALUE}" ${isCustom ? 'selected' : ''}>Custom / nested path…</option>
+            ${conditionStateOptionsHtml(stateVars, cond.state, false, comp.binding?.readSimVar)}
           </select>
           <input type="text" class="row-field vw-state-custom prop-input ${isCustom ? '' : 'hidden'}" value="${isCustom ? cond.state : ''}" placeholder="e.g. presets[0].label" title="FDWS v1.13: 'name[index].field' path into an array/object state var — same grammar as a component's Bind to Local State Path." />
         </div>
@@ -1947,9 +1975,9 @@ export class StudioInspector {
     `;
 
     // --- visibleWhen wiring ---
-    const commitVisibleWhen = (nextConditions, nextCombinator) => {
+    const commitVisibleWhen = (nextConditions, nextCombinator, recordHistory = true) => {
       const value = nextConditions.length === 0 ? undefined : { [nextCombinator]: nextConditions };
-      this.state.updateComponent(comp.id, { visibleWhen: value });
+      this.state.updateComponent(comp.id, { visibleWhen: value }, recordHistory);
     };
 
     body.querySelector('#vw-combinator')?.addEventListener('change', (e) => commitVisibleWhen(conditions, e.target.value));
@@ -1959,8 +1987,11 @@ export class StudioInspector {
       const stateSelect = rowEl.querySelector('.vw-state');
       const stateCustomInput = rowEl.querySelector('.vw-state-custom');
 
-      const applyRowChange = () => {
-        const state = stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustomInput.value.trim() : stateSelect.value;
+      // V14: `stateOverride` lets the "Use This Component's Own Value" branch
+      // below reuse this same op/value-reading logic rather than duplicating it.
+      const applyRowChange = (recordHistory = true, stateOverride = undefined) => {
+        const state = stateOverride !== undefined ? stateOverride
+          : stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustomInput.value.trim() : stateSelect.value;
         const op = rowEl.querySelector('.vw-op').value;
         const rawVal = rowEl.querySelector('.vw-val').value;
         const next = [...conditions];
@@ -1974,10 +2005,18 @@ export class StudioInspector {
           cond[op] = rawVal;
         }
         next[idx] = cond;
-        commitVisibleWhen(next, combinator);
+        commitVisibleWhen(next, combinator, recordHistory);
       };
       stateSelect?.addEventListener('change', () => {
-        if (stateSelect.value === CUSTOM_OPTION_VALUE) {
+        if (stateSelect.value === OWN_VALUE_OPTION) {
+          const simVar = comp.binding?.readSimVar;
+          if (!simVar) return;
+          const name = this.state.resolveSyncFromVarName(simVar);
+          stateCustomInput?.classList.add('hidden');
+          this.state.saveHistory("Use This Component's Own Value");
+          this.state.ensureSyncFromVar(simVar);
+          applyRowChange(false, name);
+        } else if (stateSelect.value === CUSTOM_OPTION_VALUE) {
           // Just reveal the text field — don't commit yet. Committing here
           // with the still-empty custom input would trigger a synchronous
           // re-render (no debounce) that rebuilds this row from that empty
@@ -3270,6 +3309,11 @@ export class StudioInspector {
     const condition = seedCond
       ? { state: seedCond.state || '', op: CONDITION_OPS.find((o) => seedCond[o] !== undefined) || 'notEquals', value: (() => { const op = CONDITION_OPS.find((o) => seedCond[o] !== undefined); return op ? (op === 'between' ? (seedCond.between || []).join(',') : seedCond[op]) : ''; })() }
       : { state: '', op: 'notEquals', value: '' };
+    // V14: set when "Use This Component's Own Value" is picked for the
+    // condition's state — the syncFrom var isn't created until Submit (this
+    // modal's commit is deferred), unlike the two condition editors that
+    // commit immediately on every change.
+    let ownValueSimVar = null;
 
     let contextRows = (existingAction?.type === 'core.openWidgetPopover' && existingAction.context)
       ? Object.entries(existingAction.context).map(([key, v]) => ({
@@ -3463,18 +3507,17 @@ export class StudioInspector {
         const conditionToggle = card.querySelector('#im-condition-on');
         const conditionMount = card.querySelector('#im-condition-row');
         const stateVars = this.state.widgetDef.state || [];
-        const condStateIsCustom = !!condition.state && !stateVars.some((s) => s.name === condition.state);
 
         const renderConditionRow = () => {
+          const isCustomState = !ownValueSimVar && !!condition.state && !stateVars.some((s) => s.name === condition.state);
           conditionMount.innerHTML = `
             <div class="row-field-grid">
               <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
                 <select class="prop-select cond-state">
-                  <option value="">— state var —</option>
-                  ${stateVars.map((s) => `<option value="${s.name}" ${condition.state === s.name ? 'selected' : ''}>${s.name}</option>`).join('')}
-                  <option value="${CUSTOM_OPTION_VALUE}" ${condStateIsCustom ? 'selected' : ''}>Custom / nested path…</option>
+                  ${conditionStateOptionsHtml(stateVars, condition.state, !!ownValueSimVar, comp.binding?.readSimVar)}
                 </select>
-                <input type="text" class="prop-input cond-state-custom ${condStateIsCustom ? '' : 'hidden'}" value="${condStateIsCustom ? condition.state : ''}" placeholder="e.g. presets[0].freq" />
+                <input type="text" class="prop-input cond-state-custom ${isCustomState ? '' : 'hidden'}" value="${isCustomState ? condition.state : ''}" placeholder="e.g. presets[0].freq" />
+                ${ownValueSimVar ? `<div class="prop-hint-block" style="font-size:10px;opacity:0.7;">Will create/reuse state var "${escapeHtmlAttr(condition.state)}" on Save.</div>` : ''}
               </div>
               <select class="prop-select cond-op">
                 ${CONDITION_OPS.map((op) => `<option value="${op}" ${condition.op === op ? 'selected' : ''}>${op}</option>`).join('')}
@@ -3483,10 +3526,19 @@ export class StudioInspector {
             </div>
           `;
           conditionMount.querySelector('.cond-state')?.addEventListener('change', (e) => {
+            if (e.target.value === OWN_VALUE_OPTION) {
+              const simVar = comp.binding?.readSimVar;
+              if (!simVar) return;
+              ownValueSimVar = simVar;
+              condition.state = this.state.resolveSyncFromVarName(simVar);
+              renderConditionRow();
+              return;
+            }
+            ownValueSimVar = null;
             condition.state = e.target.value === CUSTOM_OPTION_VALUE ? '' : e.target.value;
             conditionMount.querySelector('.cond-state-custom')?.classList.toggle('hidden', e.target.value !== CUSTOM_OPTION_VALUE);
           });
-          conditionMount.querySelector('.cond-state-custom')?.addEventListener('change', (e) => { condition.state = e.target.value.trim(); });
+          conditionMount.querySelector('.cond-state-custom')?.addEventListener('change', (e) => { condition.state = e.target.value.trim(); ownValueSimVar = null; });
           conditionMount.querySelector('.cond-op')?.addEventListener('change', (e) => { condition.op = e.target.value; renderConditionRow(); });
           conditionMount.querySelector('.cond-val')?.addEventListener('change', (e) => { condition.value = e.target.value; });
         };
@@ -3599,7 +3651,18 @@ export class StudioInspector {
     } else {
       nextInteractions.push(result);
     }
-    this.state.updateComponent(comp.id, { interactions: nextInteractions });
+    // V14: the syncFrom var behind "Use This Component's Own Value" is only
+    // created now, at the real commit — cancelling the modal must leave
+    // nothing behind. One undo step for both, same pasteStyleToSelection-style
+    // inline saveHistory + direct mutation the two immediate-commit condition
+    // editors already use.
+    if (ownValueSimVar) {
+      this.state.saveHistory(editIdx !== null ? 'Edit Interaction' : 'Add Interaction');
+      this.state.ensureSyncFromVar(ownValueSimVar);
+      this.state.updateComponent(comp.id, { interactions: nextInteractions }, false);
+    } else {
+      this.state.updateComponent(comp.id, { interactions: nextInteractions });
+    }
   }
 
   /**

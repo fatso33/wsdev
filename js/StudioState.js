@@ -802,6 +802,47 @@ export class StudioState {
     this.notify('STATE_VARS_UPDATED', { state: this.widgetDef.state });
   }
 
+  /**
+   * V14: read-only — the name of a state[] var already `syncFrom`-ing this
+   * simVar, or the name one WOULD get if created now (camelCased from the
+   * simVar, de-duped against existing names). No mutation — safe to call on
+   * every render, e.g. to preview "Use This Component's Own Value" before
+   * it's picked.
+   * @param {string} simVar
+   * @returns {string}
+   */
+  resolveSyncFromVarName(simVar) {
+    const existing = (this.widgetDef.state || []).find((s) => s.syncFrom === simVar);
+    if (existing) return existing.name;
+    const bare = simVar.replace(/^[ALHK]:/i, '').trim();
+    const camel = bare.split(/[^a-zA-Z0-9]+/).filter(Boolean)
+      .map((w, i) => (i === 0 ? w[0].toLowerCase() + w.slice(1) : w[0].toUpperCase() + w.slice(1).toLowerCase()))
+      .join('') || 'ownValue';
+    const taken = new Set((this.widgetDef.state || []).map((s) => s.name));
+    let name = camel;
+    let n = 2;
+    while (taken.has(name)) name = `${camel}${n++}`;
+    return name;
+  }
+
+  /**
+   * V14: idempotently ensures a state[] var `syncFrom`-ing this simVar
+   * exists — no-op if one already does. Deliberately does NOT call
+   * saveHistory: callers bundle this with their own component update into
+   * one undo step (same inline-saveHistory-then-direct-mutation pattern as
+   * pasteStyleToSelection()). Defaults to a numeric var — the common case
+   * for the threshold/gt/lt conditions this exists for; a wrong type is a
+   * one-field fix in the State panel afterward, not something to infer here.
+   * @param {string} simVar
+   */
+  ensureSyncFromVar(simVar) {
+    if (!this.widgetDef.state) this.widgetDef.state = [];
+    if (this.widgetDef.state.some((s) => s.syncFrom === simVar)) return;
+    const name = this.resolveSyncFromVarName(simVar);
+    this.widgetDef.state.push({ name, type: 'number', default: 0, syncFrom: simVar });
+    this.notify('STATE_VARS_UPDATED', { state: this.widgetDef.state });
+  }
+
   updateStateVar(name, updates) {
     const st = this.widgetDef.state?.find((s) => s.name === name);
     if (!st) return;
