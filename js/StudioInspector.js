@@ -2718,248 +2718,58 @@ export class StudioInspector {
         break;
       }
 
+      // Step 3 Part B (2026-09-04): converted onto the registry-driven engine — the
+      // last of the 18 TYPE_FIELDS types to convert, closing Step 3. Arc's visibility
+      // was already a plain, correct showWhen (transform === 'arc') the engine already
+      // handles; Axis's showWhen (transform === 'translate') is a deliberate fix over
+      // the old panel, which showed it unconditionally even though 'arc-fill' never
+      // reads it (GaugeComponent.js's resolveTransformFn). Fixed props.pivot's control
+      // type (was 'text', but it's an {x,y} object) with a new pivotEditor control.
+      // Compose stays a small hand-coded toggle — it's not a field, it's a whole
+      // optional sub-object created-with-defaults on enable and deleted on disable,
+      // which commitField's write-only semantics can't express generically.
       case 'core.gauge': {
         const stateVars = this.state.widgetDef.state || [];
-        const composeCfg = props.compose || null;
+        const composeFields = REGISTRY_TYPE_FIELDS['core.gauge'].filter((f) => f.path.startsWith('props.compose'));
+        const mainFields = REGISTRY_TYPE_FIELDS['core.gauge'].filter((f) => !f.path.startsWith('props.compose'));
 
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Transform</label>
-            <select id="p-gauge-transform" class="prop-select">
-              <option value="rotate" ${(!props.transform || props.transform === 'rotate') ? 'selected' : ''}>Rotate (needle)</option>
-              <option value="translate" ${props.transform === 'translate' ? 'selected' : ''}>Translate (bar)</option>
-              <option value="arc-fill" ${props.transform === 'arc-fill' ? 'selected' : ''}>Arc Fill (straight bar, despite the name)</option>
-              <option value="arc" ${props.transform === 'arc' ? 'selected' : ''}>Arc (real curved sweep — FDWS v1.20)</option>
-            </select>
-          </div>
-          <div id="p-gauge-valuerange-mount"></div>
-          <div id="p-gauge-outputrange-mount" class="${props.transform === 'arc' ? 'hidden' : ''}"></div>
-          <div class="prop-row-2" data-tier="advanced">
-            <div class="prop-field">
-              <label>Axis <span class="prop-hint" title="Which axis 'Translate' moves along, or which side 'Arc Fill' sweeps from. Ignored by 'Rotate'/'Arc'.">ⓘ</span></label>
-              <select id="p-gauge-axis" class="prop-select">
-                <option value="y" ${(!props.axis || props.axis === 'y') ? 'selected' : ''}>Vertical (Y)</option>
-                <option value="x" ${props.axis === 'x' ? 'selected' : ''}>Horizontal (X)</option>
-              </select>
-            </div>
-            <div class="prop-field">
-              <label>&nbsp;</label>
-              <label style="display:flex;align-items:center;gap:6px;height:28px;"><input type="checkbox" id="p-gauge-clamp" ${props.clamp !== false ? 'checked' : ''} /> Clamp to range</label>
-            </div>
-          </div>
-          <div class="prop-field" data-tier="advanced">
-            <label>Pivot (Rotate only) <span class="prop-hint" title="CSS transform-origin for the rotate transform, e.g. 50% / 50% to rotate around dead-center.">ⓘ</span></label>
-            <div class="prop-row-2">
-              <input type="text" id="p-gauge-pivot-x" class="prop-input" value="${props.pivot?.x ?? '50%'}" placeholder="X e.g. 50%" />
-              <input type="text" id="p-gauge-pivot-y" class="prop-input" value="${props.pivot?.y ?? '50%'}" placeholder="Y e.g. 50%" />
-            </div>
-          </div>
-          <div id="p-gauge-arc-fields" class="${props.transform === 'arc' ? '' : 'hidden'}"></div>
-          <div class="prop-field" data-tier="advanced">
-            <label style="display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" id="p-gauge-compose-toggle" ${composeCfg ? 'checked' : ''} />
-              Composed Secondary Transform <span class="prop-hint" title="FDWS v1.5: a SECOND transform, sourced from a local state[] variable (not a live binding), composed after the primary one on this same gauge — e.g. an attitude horizon that rotates for bank AND translates for pitch as one rigid body. FDWS v1.6 adds an optional 'Relative To' for a target indicator (like a flight-director bar) that needs to render relative to a reference value a sibling gauge already uses for its own current-reading motion. Not meaningful for 'Arc' (it's an SVG stroke sweep, not a CSS transform) — ignored there.">ⓘ</span>
-            </label>
-          </div>
-          <div id="p-gauge-compose-fields" class="${composeCfg ? '' : 'hidden'}" data-tier="advanced"></div>
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, mainFields);
+
+        const composeToggleWrap = document.createElement('div');
+        composeToggleWrap.className = 'prop-field';
+        composeToggleWrap.setAttribute('data-tier', 'advanced');
+        composeToggleWrap.innerHTML = `
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" id="p-gauge-compose-toggle" ${props.compose ? 'checked' : ''} />
+            Composed Secondary Transform <span class="prop-hint" title="FDWS v1.5: a SECOND transform, sourced from a local state[] variable (not a live binding), composed after the primary one on this same gauge — e.g. an attitude horizon that rotates for bank AND translates for pitch as one rigid body. FDWS v1.6 adds an optional 'Relative To' for a target indicator (like a flight-director bar) that needs to render relative to a reference value a sibling gauge already uses for its own current-reading motion. Not meaningful for 'Arc' (it's an SVG stroke sweep, not a CSS transform) — ignored there.">ⓘ</span>
+          </label>
         `;
+        body.appendChild(composeToggleWrap);
 
-        body.querySelector('#p-gauge-transform')?.addEventListener('change', (e) => {
-          this.updateCompProp(comp, 'transform', e.target.value);
-          body.querySelector('#p-gauge-arc-fields')?.classList.toggle('hidden', e.target.value !== 'arc');
-          body.querySelector('#p-gauge-outputrange-mount')?.classList.toggle('hidden', e.target.value === 'arc');
-          if (e.target.value === 'arc') renderArcFields();
-        });
-        body.querySelector('#p-gauge-axis')?.addEventListener('change', (e) => this.updateCompProp(comp, 'axis', e.target.value));
-        body.querySelector('#p-gauge-clamp')?.addEventListener('change', (e) => this.updateCompProp(comp, 'clamp', e.target.checked));
+        const composeMount = document.createElement('div');
+        composeMount.className = props.compose ? '' : 'hidden';
+        composeMount.setAttribute('data-tier', 'advanced');
+        body.appendChild(composeMount);
+        if (props.compose) this.renderRegistryFields(comp, composeMount, composeFields);
 
-        const updateArc = (updates) => {
-          const nextArc = { ...(comp.props?.arc || {}), ...updates };
-          this.updateCompProp(comp, 'arc', nextArc);
-        };
-
-        const renderArcFields = () => {
-          const mount = body.querySelector('#p-gauge-arc-fields');
-          if (!mount) return;
-          const a = comp.props?.arc || {};
-          mount.innerHTML = `
-            <div class="prop-row-2">
-              <div class="prop-field">
-                <label>Radius <span class="prop-hint" title="Units of a 0–100 viewBox — the gauge scales to fit its own box regardless of these numbers' scale.">ⓘ</span></label>
-                <input type="number" id="p-arc-radius" class="prop-input" value="${a.radius ?? 40}" />
-              </div>
-              <div class="prop-field">
-                <label>Stroke Width</label>
-                <input type="number" id="p-arc-strokewidth" class="prop-input" value="${a.strokeWidth ?? 6}" />
-              </div>
-            </div>
-            <div class="prop-row-2">
-              <div class="prop-field">
-                <label>Start Angle° <span class="prop-hint" title="Degrees clockwise from straight up (12 o'clock) — same convention as core.selector's rotary Angle°.">ⓘ</span></label>
-                <input type="number" id="p-arc-start" class="prop-input" value="${a.startAngle ?? -120}" />
-              </div>
-              <div class="prop-field">
-                <label>End Angle°</label>
-                <input type="number" id="p-arc-end" class="prop-input" value="${a.endAngle ?? 120}" />
-              </div>
-            </div>
-            <div class="prop-row-2">
-              <div class="prop-field">
-                <label>Track Color</label>
-                <input type="color" id="p-arc-trackcolor" class="prop-input" value="${/^#/.test(a.trackColor || '') ? a.trackColor : '#334155'}" />
-              </div>
-              <div class="prop-field">
-                <label>Fill Color</label>
-                <input type="color" id="p-arc-color" class="prop-input" value="${/^#/.test(a.color || '') ? a.color : '#22d3ee'}" />
-              </div>
-            </div>
-            <div class="prop-row-2" data-tier="advanced">
-              <div class="prop-field">
-                <label style="display:flex;align-items:center;gap:6px;height:28px;"><input type="checkbox" id="p-arc-showfill" ${a.showFill !== false ? 'checked' : ''} /> Show value fill</label>
-              </div>
-              <div class="prop-field">
-                <label>Line Cap</label>
-                <select id="p-arc-linecap" class="prop-select">
-                  <option value="round" ${(!a.lineCap || a.lineCap === 'round') ? 'selected' : ''}>Round</option>
-                  <option value="butt" ${a.lineCap === 'butt' ? 'selected' : ''}>Flat (butt)</option>
-                </select>
-              </div>
-            </div>
-            <div id="p-arc-bands-mount"></div>
-          `;
-          mount.querySelector('#p-arc-radius')?.addEventListener('change', (e) => updateArc({ radius: Number(e.target.value) || 40 }));
-          mount.querySelector('#p-arc-strokewidth')?.addEventListener('change', (e) => updateArc({ strokeWidth: Number(e.target.value) || 6 }));
-          mount.querySelector('#p-arc-start')?.addEventListener('change', (e) => updateArc({ startAngle: Number(e.target.value) || 0 }));
-          mount.querySelector('#p-arc-end')?.addEventListener('change', (e) => updateArc({ endAngle: Number(e.target.value) || 0 }));
-          mount.querySelector('#p-arc-trackcolor')?.addEventListener('change', (e) => updateArc({ trackColor: e.target.value }));
-          mount.querySelector('#p-arc-color')?.addEventListener('change', (e) => updateArc({ color: e.target.value }));
-          mount.querySelector('#p-arc-showfill')?.addEventListener('change', (e) => updateArc({ showFill: e.target.checked }));
-          mount.querySelector('#p-arc-linecap')?.addEventListener('change', (e) => updateArc({ lineCap: e.target.value }));
-
-          this.renderRowListEditor(mount.querySelector('#p-arc-bands-mount'), comp, 'arc', a.bands || [], {
-            title: 'Zone Bands',
-            hint: 'Colored zone segments (caution/redline) — From/To are a 0–1 ratio of the whole Value Range, not a raw value or an angle.',
-            fields: [
-              { key: 'from', label: 'From (0–1)', type: 'number', default: 0.8 },
-              { key: 'to', label: 'To (0–1)', type: 'number', default: 1 },
-              { key: 'color', label: 'Color', type: 'color', default: '#ef4444' }
-            ],
-            // arc.bands lives one level deeper than a normal top-level props
-            // field — renderRowListEditor's default commit(nextList) would
-            // otherwise overwrite props.arc entirely with just the bands
-            // array. Override how the edited list is committed instead.
-            commitOverride: (nextBands) => updateArc({ bands: nextBands })
-          });
-        };
-
-        if (props.transform === 'arc') renderArcFields();
-
-        const applyPivot = () => {
-          const x = body.querySelector('#p-gauge-pivot-x')?.value.trim() || '50%';
-          const y = body.querySelector('#p-gauge-pivot-y')?.value.trim() || '50%';
-          this.updateCompProp(comp, 'pivot', { x, y });
-        };
-        body.querySelector('#p-gauge-pivot-x')?.addEventListener('change', applyPivot);
-        body.querySelector('#p-gauge-pivot-y')?.addEventListener('change', applyPivot);
-
-        this.renderRangeEditor(body.querySelector('#p-gauge-valuerange-mount'), comp, 'valueRange', props.valueRange || [0, 1], 'Value Range', 'The raw SimVar value span this gauge reads (e.g. 0–400 kts).');
-        this.renderRangeEditor(body.querySelector('#p-gauge-outputrange-mount'), comp, 'outputRange', props.outputRange || [0, 1], 'Output Range', 'What the value range maps to on screen — degrees of needle rotation, or px/percent of translation.');
-
-        const updateCompose = (updates) => {
-          const nextCompose = { ...(comp.props?.compose || {}), ...updates };
-          this.updateCompProp(comp, 'compose', nextCompose);
-        };
-
-        const renderComposeRange = (mountEl, key, currentRange, title, hint) => {
-          if (!mountEl) return;
-          const [lo, hi] = Array.isArray(currentRange) ? currentRange : [0, 1];
-          mountEl.innerHTML = `
-            <div class="prop-field">
-              <label>${title}${hint ? `<span class="prop-hint" title="${hint}"> ⓘ</span>` : ''}</label>
-              <div class="prop-row-2">
-                <input type="number" step="any" class="prop-input range-lo" value="${lo}" />
-                <input type="number" step="any" class="prop-input range-hi" value="${hi}" />
-              </div>
-            </div>
-          `;
-          const apply = () => {
-            const nextLo = Number(mountEl.querySelector('.range-lo').value) || 0;
-            const nextHi = Number(mountEl.querySelector('.range-hi').value) || 0;
-            updateCompose({ [key]: [nextLo, nextHi] });
-          };
-          mountEl.querySelector('.range-lo')?.addEventListener('change', apply);
-          mountEl.querySelector('.range-hi')?.addEventListener('change', apply);
-        };
-
-        const renderComposeFields = () => {
-          const mount = body.querySelector('#p-gauge-compose-fields');
-          if (!mount) return;
-          const c = comp.props?.compose || { transform: 'translate', axis: 'y', stateVar: '', valueRange: [0, 1], outputRange: [0, 1], clamp: true };
-          mount.innerHTML = `
-            <div class="prop-field">
-              <label>Secondary Transform</label>
-              <select id="p-compose-transform" class="prop-select">
-                <option value="rotate" ${c.transform === 'rotate' ? 'selected' : ''}>Rotate</option>
-                <option value="translate" ${(!c.transform || c.transform === 'translate') ? 'selected' : ''}>Translate</option>
-                <option value="arc-fill" ${c.transform === 'arc-fill' ? 'selected' : ''}>Arc Fill</option>
-              </select>
-            </div>
-            <div class="prop-field">
-              <label>Secondary Axis</label>
-              <select id="p-compose-axis" class="prop-select">
-                <option value="y" ${(!c.axis || c.axis === 'y') ? 'selected' : ''}>Vertical (Y)</option>
-                <option value="x" ${c.axis === 'x' ? 'selected' : ''}>Horizontal (X)</option>
-              </select>
-            </div>
-            <div class="prop-field">
-              <label>Source State Var <span class="prop-hint" title="A local state[] variable (populated via its own syncFrom), read fresh on every update — not a second live SimVar subscription.">ⓘ</span></label>
-              <select id="p-compose-statevar" class="prop-select">
-                <option value="">— choose a state var —</option>
-                ${stateVars.map((s) => `<option value="${s.name}" ${c.stateVar === s.name ? 'selected' : ''}>${s.name} (${s.type})</option>`).join('')}
-              </select>
-            </div>
-            <div class="prop-field">
-              <label>Relative To (optional) <span class="prop-hint" title="FDWS v1.6 relativeToStateVar: when set, the secondary transform reads (Source − Relative To) instead of Source alone — for a target indicator rendered relative to a reference value a sibling gauge already moves for. Mirror (don't copy) the reference gauge's own Output Range when using this — see the FDWS v1.6 spec's worked example.">ⓘ</span></label>
-              <select id="p-compose-relativeto" class="prop-select">
-                <option value="">— none (absolute value) —</option>
-                ${stateVars.map((s) => `<option value="${s.name}" ${c.relativeToStateVar === s.name ? 'selected' : ''}>${s.name} (${s.type})</option>`).join('')}
-              </select>
-            </div>
-            <div id="p-compose-valuerange-mount"></div>
-            <div id="p-compose-outputrange-mount"></div>
-            <div class="prop-field">
-              <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="p-compose-clamp" ${c.clamp !== false ? 'checked' : ''} /> Clamp secondary transform to range</label>
-            </div>
-          `;
-
-          mount.querySelector('#p-compose-transform')?.addEventListener('change', (e) => updateCompose({ transform: e.target.value }));
-          mount.querySelector('#p-compose-axis')?.addEventListener('change', (e) => updateCompose({ axis: e.target.value }));
-          mount.querySelector('#p-compose-statevar')?.addEventListener('change', (e) => updateCompose({ stateVar: e.target.value || undefined }));
-          mount.querySelector('#p-compose-relativeto')?.addEventListener('change', (e) => updateCompose({ relativeToStateVar: e.target.value || undefined }));
-          mount.querySelector('#p-compose-clamp')?.addEventListener('change', (e) => updateCompose({ clamp: e.target.checked }));
-
-          renderComposeRange(mount.querySelector('#p-compose-valuerange-mount'), 'valueRange', c.valueRange || [0, 1], 'Secondary Value Range', 'The state var’s own value span (e.g. -30 to 30 for pitch degrees).');
-          renderComposeRange(mount.querySelector('#p-compose-outputrange-mount'), 'outputRange', c.outputRange || [0, 1], 'Secondary Output Range', 'What the secondary value range maps to (px, degrees). Mirror a reference gauge’s own Output Range when using Relative To, per FDWS v1.6.');
-        };
-
-        body.querySelector('#p-gauge-compose-toggle')?.addEventListener('change', (e) => {
+        composeToggleWrap.querySelector('#p-gauge-compose-toggle')?.addEventListener('change', (e) => {
           if (e.target.checked) {
             const nextProps = {
-              ...props,
-              compose: props.compose || { transform: 'translate', axis: 'y', stateVar: stateVars[0]?.name || '', valueRange: [0, 1], outputRange: [0, 1], clamp: true }
+              ...comp.props,
+              compose: comp.props.compose || { transform: 'translate', axis: 'y', stateVar: stateVars[0]?.name || '', valueRange: [0, 1], outputRange: [0, 1], clamp: true }
             };
             this.state.updateComponent(comp.id, { props: nextProps });
-            body.querySelector('#p-gauge-compose-fields')?.classList.remove('hidden');
-            renderComposeFields();
+            composeMount.classList.remove('hidden');
+            this.renderRegistryFields(comp, composeMount, composeFields);
           } else {
-            const nextProps = { ...props };
+            const nextProps = { ...comp.props };
             delete nextProps.compose;
             this.state.updateComponent(comp.id, { props: nextProps });
-            body.querySelector('#p-gauge-compose-fields')?.classList.add('hidden');
+            composeMount.classList.add('hidden');
           }
         });
-
-        if (composeCfg) renderComposeFields();
         break;
       }
 
@@ -3131,7 +2941,13 @@ export class StudioInspector {
   }
 
   /** A compact two-number range editor (min/max pair) replacing a raw JSON [a,b] text field. */
-  renderRangeEditor(mount, comp, propKey, currentRange, title, hint) {
+  // Step 3 Part B (2026-09-04): gained an optional trailing commitOverride, mirroring
+  // renderRowListEditor's existing spec.commitOverride pattern — lets a nested path
+  // (props.compose.valueRange) commit through commitField instead of always writing a
+  // top-level prop via updateCompProp. This is what let renderComposeRange (a
+  // byte-for-byte duplicate that existed only because this had no override mechanism)
+  // be deleted — see renderRangeField below.
+  renderRangeEditor(mount, comp, propKey, currentRange, title, hint, commitOverride) {
     if (!mount) return;
     const [lo, hi] = Array.isArray(currentRange) ? currentRange : [0, 1];
     mount.innerHTML = `
@@ -3143,10 +2959,11 @@ export class StudioInspector {
         </div>
       </div>
     `;
+    const commit = commitOverride || ((v) => this.updateCompProp(comp, propKey, v));
     const apply = () => {
       const nextLo = Number(mount.querySelector('.range-lo').value) || 0;
       const nextHi = Number(mount.querySelector('.range-hi').value) || 0;
-      this.updateCompProp(comp, propKey, [nextLo, nextHi]);
+      commit([nextLo, nextHi]);
     };
     mount.querySelector('.range-lo')?.addEventListener('change', apply);
     mount.querySelector('.range-hi')?.addEventListener('change', apply);
@@ -3349,8 +3166,13 @@ export class StudioInspector {
     // implementation here, same as the registry already did before this engine existed.
     rowListEditor: (comp, field, mount) => this.renderRowListField(comp, field, mount),
     detentEditor: (comp, field, mount) => this.renderRowListField(comp, field, mount),
+    // Step 3 Part B (2026-09-04): arc.bands is just another row-list field once it
+    // declares a rowSpec — same renderer as rowListEditor/detentEditor, no new function.
+    arcBandsEditor: (comp, field, mount) => this.renderRowListField(comp, field, mount),
     stateVarPicker: (comp, field, mount) => this.renderStateVarField(comp, field, mount),
-    assetPicker: (comp, field, mount) => this.renderAssetField(comp, field, mount)
+    assetPicker: (comp, field, mount) => this.renderAssetField(comp, field, mount),
+    rangeEditor: (comp, field, mount) => this.renderRangeField(comp, field, mount),
+    pivotEditor: (comp, field, mount) => this.renderPivotField(comp, field, mount)
   };
 
   /** path.split('.') get, tolerant of missing intermediate objects. */
@@ -3380,9 +3202,29 @@ export class StudioInspector {
     this.state.updateComponent(comp.id, { [topKey]: topVal });
   }
 
-  /** The registry's existing {path, equals|equalsAny|notEquals} showWhen grammar — real for the first time. */
-  evaluateShowWhen(comp, showWhen) {
-    const val = this.getFieldValue(comp, showWhen.path);
+  /**
+   * The registry's existing {path, equals|equalsAny|notEquals} showWhen grammar.
+   *
+   * Step 3 Part B (2026-09-04): gained an optional `siblingFields` parameter — found
+   * live while converting core.gauge. getFieldValue() reads the RAW stored value; if
+   * the referenced field is genuinely unset, that's `undefined`, not its registered
+   * `default`. An `equals` gate against a field whose true default is non-obvious
+   * (e.g. Pivot's `{path:'props.transform', equals:'rotate'}`, when transform's own
+   * default is 'rotate') silently never matched until the user touched that field once
+   * — every prior showWhen in this codebase happened to use `notEquals`/a default that
+   * coincidentally didn't match its gate, so this never surfaced before now. When
+   * `siblingFields` is passed (renderRegistryFields already has the full field list in
+   * scope), an undefined raw value falls back to the referenced field's own `default`.
+   * Row-list rowSpec per-column showWhen (renderRowListField) intentionally omits this
+   * — none of its current uses need it, and doing so would need threading the full
+   * type's field list through every FIELD_RENDERERS signature for no live benefit yet.
+   */
+  evaluateShowWhen(comp, showWhen, siblingFields) {
+    let val = this.getFieldValue(comp, showWhen.path);
+    if (val === undefined && siblingFields) {
+      const referenced = siblingFields.find((f) => f.path === showWhen.path);
+      if (referenced && 'default' in referenced) val = referenced.default;
+    }
     if ('equals' in showWhen) return val === showWhen.equals;
     if ('notEquals' in showWhen) return val !== showWhen.notEquals;
     if ('equalsAny' in showWhen) return showWhen.equalsAny.includes(val);
@@ -3420,7 +3262,7 @@ export class StudioInspector {
       // validation this engine's controls don't have). Distinct from null so a future
       // "which fields have no UI at all" check can tell the two apart.
       if (field.control === 'bespoke') return;
-      if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen)) return;
+      if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen, fields)) return;
       const renderer = this.FIELD_RENDERERS[field.control];
       if (!renderer) {
         throw new Error(`[StudioInspector] No FIELD_RENDERERS entry for control "${field.control}" (path "${field.path}") — register one before declaring a field with this control.`);
@@ -3562,6 +3404,51 @@ export class StudioInspector {
       </select>
     `;
     mount.querySelector(`#${id}`)?.addEventListener('change', (e) => this.commitField(comp, field.path, e.target.value || undefined));
+  }
+
+  /**
+   * Step 3 Part B (2026-09-04): registry-driven wrapper around the existing,
+   * unmodified-in-shape renderRangeEditor() (extended above with an optional
+   * commitOverride). Serves both top-level ranges (props.valueRange) and nested ones
+   * (props.compose.valueRange) identically via commitField — the same "commitField
+   * already handles nested paths generically" pattern renderRowListField already uses,
+   * which is what let renderComposeRange's byte-for-byte duplicate be deleted.
+   */
+  renderRangeField(comp, field, mount) {
+    const currentRange = this.getFieldValue(comp, field.path) || [0, 1];
+    this.renderRangeEditor(
+      mount, comp, field.path, currentRange,
+      this.humanizeFieldLabel(field.path), field.tooltip,
+      (next) => this.commitField(comp, field.path, next)
+    );
+  }
+
+  /**
+   * Step 3 Part B: props.pivot is an {x, y} object (GaugeComponent.js:91's
+   * `${pivot.x} ${pivot.y}` transform-origin), not a plain string — the one field shape
+   * in the registry that needs its own dedicated two-input renderer rather than fitting
+   * an existing primitive.
+   */
+  renderPivotField(comp, field, mount) {
+    const label = this.humanizeFieldLabel(field.path);
+    const id = this.fieldDomId(field.path);
+    const pivot = this.getFieldValue(comp, field.path) || {};
+    const x = pivot.x ?? '50%';
+    const y = pivot.y ?? '50%';
+    mount.innerHTML = `
+      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
+      <div class="prop-row-2">
+        <input type="text" id="${id}-x" class="prop-input" value="${escapeHtmlAttr(x)}" placeholder="X e.g. 50%" />
+        <input type="text" id="${id}-y" class="prop-input" value="${escapeHtmlAttr(y)}" placeholder="Y e.g. 50%" />
+      </div>
+    `;
+    const apply = () => {
+      const nx = mount.querySelector(`#${id}-x`)?.value.trim() || '50%';
+      const ny = mount.querySelector(`#${id}-y`)?.value.trim() || '50%';
+      this.commitField(comp, field.path, { x: nx, y: ny });
+    };
+    mount.querySelector(`#${id}-x`)?.addEventListener('change', apply);
+    mount.querySelector(`#${id}-y`)?.addEventListener('change', apply);
   }
 
   updateCompProp(comp, propKey, value) {

@@ -423,12 +423,30 @@ export const TYPE_FIELDS = {
     // wrong; corrected after reading GaugeComponent.js's actual call sites.
     // compose, below, is a SEPARATE secondary transform with its own
     // independent axis/clamp/valueRange/outputRange — both sets are real.)
-    { path: 'props.transform', control: 'select', options: ['rotate', 'translate', 'arc-fill', 'arc'], tier: 'simple', group: 'Gauge', default: undefined, tooltip: 'How the bound value visually drives this gauge — a rotating needle, a sliding bar, a straight filling bar ("Arc Fill", despite the name), or a real curved arc sweep ("Arc", FDWS v1.20).' },
-    { path: 'props.pivot', control: 'text', tier: 'advanced', group: 'Gauge', default: undefined, tooltip: 'CSS transform-origin for the rotate transform, e.g. "50% 50%" to rotate around dead-center. Ignored by Translate/Arc Fill/Arc.', showWhen: { path: 'props.transform', equals: 'rotate' } },
-    { path: 'props.axis', control: 'select', options: ['x', 'y'], tier: 'advanced', group: 'Gauge', default: undefined, tooltip: 'Which axis Translate moves along, or which side Arc Fill sweeps from. Ignored by Rotate/Arc.', showWhen: { path: 'props.transform', equals: 'translate' } },
-    { path: 'props.clamp', control: 'checkbox', tier: 'advanced', group: 'Gauge', default: true, tooltip: 'Clamps the output to its declared range instead of overshooting past it. On by default. Applies to Arc too (clamps the fill ratio).' },
+    // Step 3 Part B (2026-09-04): reordered the first six entries (transform,
+    // valueRange, outputRange, axis, clamp, pivot) to match the hand-coded panel's
+    // visual order this replaces — pure reorder, no content change, on the app's
+    // largest panel.
+    // Step 3 Part B (2026-09-04): default was `undefined` — GaugeComponent.js's
+    // resolveTransformFn's switch falls through `case 'rotate': default:` (:214-216),
+    // so the real runtime default is 'rotate', not "no transform". Only "looked" correct
+    // in the old hand-coded panel (and briefly in this pass, pre-fix) because 'rotate'
+    // happens to be the first <option> — a native <select> shows its first option
+    // selected by default with nothing marked, coincidentally matching, not because the
+    // value was actually right.
+    { path: 'props.transform', control: 'select', options: ['rotate', 'translate', 'arc-fill', 'arc'], tier: 'simple', group: 'Gauge', default: 'rotate', tooltip: 'How the bound value visually drives this gauge — a rotating needle, a sliding bar, a straight filling bar ("Arc Fill", despite the name), or a real curved arc sweep ("Arc", FDWS v1.20).' },
     { path: 'props.valueRange', control: 'rangeEditor', tier: 'simple', group: 'Gauge', default: undefined, tooltip: 'The raw SimVar value span this gauge reads (e.g. 0–400 for airspeed in knots). For Arc, this is the only range needed — Output Range has no meaning there.' },
     { path: 'props.outputRange', control: 'rangeEditor', tier: 'simple', group: 'Gauge', default: undefined, tooltip: 'What the value range maps to on screen — degrees of rotation, or px of translation/arc fill. Not used by Arc — its angular span is Arc Start/End Angle instead.', showWhen: { path: 'props.transform', notEquals: 'arc' } },
+    // Step 3 Part B: default was `undefined` — GaugeComponent.js:207
+    // (`cfg.axis === 'x' ? 'X' : 'Y'`) falls back to Y for anything else, matching the
+    // hand-coded panel's own default.
+    { path: 'props.axis', control: 'select', options: ['x', 'y'], tier: 'advanced', group: 'Gauge', default: 'y', tooltip: 'Which axis Translate moves along, or which side Arc Fill sweeps from. Ignored by Rotate/Arc.', showWhen: { path: 'props.transform', equals: 'translate' } },
+    { path: 'props.clamp', control: 'checkbox', tier: 'advanced', group: 'Gauge', default: true, tooltip: 'Clamps the output to its declared range instead of overshooting past it. On by default. Applies to Arc too (clamps the fill ratio).' },
+    // Step 3 Part B: control was 'text' — GaugeComponent.js:91
+    // (`${pivot.x} ${pivot.y}`) and the hand-coded panel it's replacing both treat this
+    // as an object {x, y}, not a single CSS-string field. Fixed with a dedicated
+    // pivotEditor control (two X/Y text inputs).
+    { path: 'props.pivot', control: 'pivotEditor', tier: 'advanced', group: 'Gauge', default: undefined, tooltip: 'Rotation center for the Rotate transform, e.g. X=50% Y=50% for dead-center. Ignored by Translate/Arc Fill/Arc.', showWhen: { path: 'props.transform', equals: 'rotate' } },
 
     // FDWS v1.20 — a real curved SVG arc (stroke-dashoffset sweep), replacing
     // the "arc-fill" scaleX rectangle hack for anything actually circular.
@@ -441,13 +459,21 @@ export const TYPE_FIELDS = {
     { path: 'props.arc.color', control: 'color', tier: 'simple', group: 'Arc', default: undefined, tooltip: 'Fill color for the value-driven progress sweep.', showWhen: { path: 'props.transform', equals: 'arc' } },
     { path: 'props.arc.showFill', control: 'checkbox', tier: 'advanced', group: 'Arc', default: true, tooltip: 'Shows the value-progress sweep on top of the track/bands. Turn off for a pure zone-marker ring with a separate rotating needle (another core.gauge) on top, instead of a fill-wipe style. On by default.', showWhen: { path: 'props.transform', equals: 'arc' } },
     { path: 'props.arc.lineCap', control: 'select', options: ['round', 'butt'], tier: 'advanced', group: 'Arc', default: 'round', tooltip: 'End-cap style for the track and fill strokes (bands always use a flat "butt" cap so adjacent zones meet cleanly). Default round.', showWhen: { path: 'props.transform', equals: 'arc' } },
-    { path: 'props.arc.bands', control: 'arcBandsEditor', tier: 'advanced', group: 'Arc', default: undefined, tooltip: 'Static colored zone segments (caution/redline) — each {from, to} is a 0–1 ratio of the whole Value Range, not a raw value or an angle.', showWhen: { path: 'props.transform', equals: 'arc' } },
+    { path: 'props.arc.bands', control: 'arcBandsEditor', tier: 'advanced', group: 'Arc', default: undefined,
+      rowSpec: { fields: [
+        { key: 'from', label: 'From (0–1)', type: 'number', default: 0.8 },
+        { key: 'to', label: 'To (0–1)', type: 'number', default: 1 },
+        { key: 'color', label: 'Color', type: 'color', default: '#ef4444' }
+      ] },
+      tooltip: 'Static colored zone segments (caution/redline) — each {from, to} is a 0–1 ratio of the whole Value Range, not a raw value or an angle.', showWhen: { path: 'props.transform', equals: 'arc' } },
 
     // FDWS v1.5/v1.6 — a SECOND, independent transform layer, composed after
     // the primary one, with its own axis/clamp/ranges nested under it
     // (resolveTransformFn(props.compose, …), a separate call).
     { path: 'props.compose.transform', control: 'select', options: ['rotate', 'translate', 'arc-fill'], tier: 'advanced', group: 'Compose', default: undefined, tooltip: 'FDWS v1.5: transform mode for the secondary composed layer — independent of the primary Transform above.' },
-    { path: 'props.compose.axis', control: 'select', options: ['x', 'y'], tier: 'advanced', group: 'Compose', default: undefined, tooltip: 'Which axis the secondary layer’s translate moves along, when its Transform is "translate".', showWhen: { path: 'props.compose.transform', equals: 'translate' } },
+    // Step 3 Part B: default was `undefined` — same resolveTransformFn code path as the
+    // primary props.axis above (GaugeComponent.js:207), so the same 'y' fallback applies.
+    { path: 'props.compose.axis', control: 'select', options: ['x', 'y'], tier: 'advanced', group: 'Compose', default: 'y', tooltip: 'Which axis the secondary layer’s translate moves along, when its Transform is "translate".', showWhen: { path: 'props.compose.transform', equals: 'translate' } },
     { path: 'props.compose.clamp', control: 'checkbox', tier: 'advanced', group: 'Compose', default: true, tooltip: 'Clamps the secondary layer’s output to its declared range instead of overshooting past it. On by default.' },
     { path: 'props.compose.stateVar', control: 'stateVarPicker', tier: 'advanced', group: 'Compose', default: undefined, tooltip: 'FDWS v1.5: local state variable this gauge layer composes from, instead of its own SimVar binding.' },
     { path: 'props.compose.relativeToStateVar', control: 'stateVarPicker', tier: 'advanced', group: 'Compose', default: undefined, tooltip: 'FDWS v1.6: a second state variable this layer’s value is computed relative to (e.g. an attitude indicator’s bank line relative to horizon).' },
