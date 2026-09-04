@@ -1121,6 +1121,13 @@ export class StudioInspector {
       const ruleCondOp = RULE_OPS.find((o) => ruleCond[o] !== undefined) || 'equals';
       const ruleCondVal = ruleCondOp === 'between' ? (ruleCond.between || []).join(',') : (ruleCond[ruleCondOp] ?? '');
       const ruleJsonOpen = activeRuleIndex !== null && !!this._conditionalStyleJsonOpen?.[activeRuleIndex];
+      // Wave 2 Part B3: the Theme chip toggles StudioState.previewTheme itself
+      // (the canvas header's own sun/moon control) rather than introducing a
+      // new target.kind — see getThemeEditContext()'s doc comment. It's a
+      // modifier of the Base tab, not a fifth peer target: no state/rule
+      // field path ever consults themeEdit, since the runtime has nowhere to
+      // put a themed variant of a state or rule.
+      const otherTheme = themeEdit.baseTheme === 'light' ? 'dark' : 'light';
 
       body.innerHTML = `
         ${themeEdit.isOverrideEdit ? `<div class="theme-override-banner">Editing ${this.state.previewTheme.toUpperCase()} theme override — Text/Border/Background Color apply only to this theme; other properties stay shared with the base ${themeEdit.baseTheme} style.</div>` : ''}
@@ -1144,6 +1151,10 @@ export class StudioInspector {
           ${stateCfg ? `<button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="c-styletab-state" style="flex:0 1 auto;">${stateCfg.tabLabel}</button>` : ''}
           ${rules.map((r, i) => `<button type="button" class="mode-toggle-btn ${activeRuleIndex === i ? 'active' : ''}" data-rule-chip="${i}" style="flex:0 1 auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtmlAttr(summarizeRuleCondition(r.when))}">${escapeHtmlAttr(summarizeRuleCondition(r.when))}</button>`).join('')}
           <button type="button" class="mode-toggle-btn" id="c-styletab-addrule" style="flex:0 1 auto;" title="Add a conditional style rule">+ Rule</button>
+          ${themeEdit.themeMode === 'manual' ? `
+          <span style="width:1px;align-self:stretch;background:var(--studio-panel-border);margin:0 2px;"></span>
+          <button type="button" class="mode-toggle-btn ${themeEdit.isOverrideEdit ? 'active' : ''}" id="c-styletab-theme" style="flex:0 1 auto;" ${activeTab !== 'normal' ? `disabled title="Theme overrides apply to the Base style only — states and rules are already conditional."` : `title="Edit this component's ${otherTheme} theme override — Text/Border/Background Color only."`}>${otherTheme.charAt(0).toUpperCase() + otherTheme.slice(1)} Override</button>
+          ` : ''}
         </div>
         ${activeTab === 'state' ? `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style while this component is ${stateCfg.tabLabel.toLowerCase()}. Dimmed fields are inherited from the Normal style — edit one to override it just for this state, or (for Outline/Glow/Border Glow) check its own "Clear (don't inherit)" box to turn it off regardless of Base.</div>` : ''}
         ${activeTab === 'rule' ? `
@@ -1228,6 +1239,17 @@ export class StudioInspector {
         this._styleTabRuleIndex = nextRules.length - 1;
         this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } });
         this.render();
+      });
+      // Wave 2 Part B3: flips the SAME live-preview toggle the canvas header's
+      // sun/moon button already drives — PREVIEW_THEME_CHANGED is already in
+      // this class's subscribed change-type list, so the panel (and the
+      // banner/redirect logic inside renderBaseThemeAwareAppearanceFields,
+      // gated on themeEdit.isOverrideEdit) reacts automatically; no
+      // this.render() call needed here. Native `disabled` (set in the
+      // template above whenever a State/Rule tab is active) already blocks
+      // this handler from firing when the chip isn't clickable.
+      body.querySelector('#c-styletab-theme')?.addEventListener('click', () => {
+        this.state.setPreviewTheme(themeEdit.isOverrideEdit ? themeEdit.baseTheme : otherTheme);
       });
 
       if (activeTab === 'rule' && activeRule) {
