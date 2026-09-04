@@ -7,6 +7,29 @@ import { SecurityValidator } from '../../core/SecurityValidator.js';
 import { evaluateConditionExpr, resolveActiveRuleStyle } from './ConditionEvaluator.js';
 import { resolveThemedColors, resolveThemedBackground } from './ThemeColor.js';
 
+// FDWS v1.28: applyStyles()'s typography/border merge below is a one-level
+// property spread — correct for scalar keys (color, width, ...), but
+// typography.glow/typography.stroke/border.glow are themselves objects, and a
+// one-level spread treats each as atomic: a state or rule layer supplying
+// e.g. `glow: { blur: 20 }` (meaning "just widen the blur") used to REPLACE
+// the whole glow object, losing a lower layer's `color` and silently
+// disabling the glow (the CSS-building guards below key off `.color`/
+// `.width`). This merges one level deeper for exactly those three
+// sub-objects, keyed by keys within them across layers. `null` at any layer
+// is an explicit "clear inherited value" sentinel (distinct from
+// `undefined`/absent, which inherits normally) — it resets the accumulator
+// so a lower-priority layer's data can't leak through, replacing the old
+// (accidental) behavior where ANY colorless sub-object at a higher layer
+// happened to disable inheritance.
+function mergeStyleSubObject(...layers) {
+  let acc;
+  for (const layer of layers) {
+    if (layer === null) acc = undefined;
+    else if (layer !== undefined) acc = { ...(acc || {}), ...layer };
+  }
+  return acc;
+}
+
 export class BaseComponent {
   /**
    * @param {object} def - Component envelope definition
@@ -189,6 +212,11 @@ export class BaseComponent {
     // each independently would otherwise break.
     const typography = { ...(style.typography || {}), ...(stateStyle.typography || {}), ...(ruleStyle.typography || {}) };
     const border = { ...(style.border || {}), ...(stateStyle.border || {}), ...(ruleStyle.border || {}) };
+    // FDWS v1.28: glow/stroke are nested objects and need a level-deeper
+    // merge than the shallow spreads above — see mergeStyleSubObject().
+    typography.glow = mergeStyleSubObject(style.typography?.glow, stateStyle.typography?.glow, ruleStyle.typography?.glow);
+    typography.stroke = mergeStyleSubObject(style.typography?.stroke, stateStyle.typography?.stroke, ruleStyle.typography?.stroke);
+    border.glow = mergeStyleSubObject(style.border?.glow, stateStyle.border?.glow, ruleStyle.border?.glow);
     const bg = ruleStyle.background || stateStyle.background || style.background;
     const adjustedColors = resolveThemedColors(
       {

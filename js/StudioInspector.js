@@ -1024,6 +1024,12 @@ export class StudioInspector {
       const stateGlow = stateTypo.glow || {};
       const stateBorder = stateStyle.border || {};
       const stateBorderGlow = stateBorder.glow || {};
+      // FDWS v1.28: `null` (as opposed to absent/undefined) is the explicit
+      // "clear inherited value" sentinel BaseComponent.js's deep merge now
+      // understands for these three sub-objects — see mergeStyleSubObject().
+      const stateStrokeCleared = stateTypo.stroke === null;
+      const stateGlowCleared = stateTypo.glow === null;
+      const stateBorderGlowCleared = stateBorder.glow === null;
       const stateBg = stateStyle.background || {};
       const themeEdit = this.getThemeEditContext();
       // FDWS v1.18: see the widget-root Canvas Appearance block above for the
@@ -1086,16 +1092,20 @@ export class StudioInspector {
       const stWeight = eff(stateTypo.weight, typo.weight || 700);
       const stColor = eff(stateTypo.color, effTypoColor || '#f8fafc');
       const stSize = eff(stateTypo.size, typo.size ?? 13);
-      const stStrokeColor = eff(stateStroke.color, stroke.color || '');
-      const stStrokeWidth = eff(stateStroke.width, stroke.width ?? '');
-      const stGlowColor = eff(stateGlow.color, glow.color || '');
-      const stGlowBlur = eff(stateGlow.blur, glow.blur ?? '');
+      // Cleared (null) shows blank rather than the inherited value it's
+      // deliberately NOT taking on, and the fields below are disabled while
+      // it's active — same reasoning eff() already uses for "dim to show
+      // it's not this layer's own value," one notch further.
+      const stStrokeColor = stateStrokeCleared ? { v: '', dim: 'opacity:0.4;' } : eff(stateStroke.color, stroke.color || '');
+      const stStrokeWidth = stateStrokeCleared ? { v: '', dim: 'opacity:0.4;' } : eff(stateStroke.width, stroke.width ?? '');
+      const stGlowColor = stateGlowCleared ? { v: '', dim: 'opacity:0.4;' } : eff(stateGlow.color, glow.color || '');
+      const stGlowBlur = stateGlowCleared ? { v: '', dim: 'opacity:0.4;' } : eff(stateGlow.blur, glow.blur ?? '');
       const stBorderStyle = eff(stateBorder.style, border.style || 'solid');
       const stBorderW = eff(stateBorder.width, border.width ?? 1);
       const stBorderRad = eff(stateBorder.radius, border.radius ?? 4);
       const stBorderColor = eff(stateBorder.color, effBorderColor || '#273344');
-      const stBorderGlowColor = eff(stateBorderGlow.color, borderGlow.color || '');
-      const stBorderGlowBlur = eff(stateBorderGlow.blur, borderGlow.blur ?? '');
+      const stBorderGlowColor = stateBorderGlowCleared ? { v: '', dim: 'opacity:0.4;' } : eff(stateBorderGlow.color, borderGlow.color || '');
+      const stBorderGlowBlur = stateBorderGlowCleared ? { v: '', dim: 'opacity:0.4;' } : eff(stateBorderGlow.blur, borderGlow.blur ?? '');
       const stBorderGlowInset = eff(stateBorderGlow.inset, borderGlow.inset || false);
       const stBgType = eff(stateBg.type, effBg.type || 'color');
       const stBgColor = eff(stateBg.color, effBg.color || '#131b26');
@@ -1361,30 +1371,40 @@ export class StudioInspector {
         </div>
 
         <div class="prop-section-subtitle" style="margin-top:10px;">Text Outline & Glow</div>
+        <div class="prop-field">
+          <label style="display:flex;align-items:center;gap:6px;" title="Turns outline off for this state regardless of what Base sets — different from leaving these blank, which inherits Base's outline.">
+            <input type="checkbox" id="c-state-typo-stroke-clear" ${stateStrokeCleared ? 'checked' : ''} /> Outline: Clear (don't inherit)
+          </label>
+        </div>
         <div class="prop-row-2">
           <div class="prop-field">
             <label>Outline Color</label>
             <div class="color-picker-wrap">
-              <input type="color" id="c-state-typo-stroke-color-pick" value="${this.toHexColor(stStrokeColor.v) || '#000000'}" />
-              <input type="text" id="c-state-typo-stroke-color" class="prop-input" style="${stStrokeColor.dim}" value="${stStrokeColor.v || ''}" placeholder="none" />
+              <input type="color" id="c-state-typo-stroke-color-pick" value="${this.toHexColor(stStrokeColor.v) || '#000000'}" ${stateStrokeCleared ? 'disabled' : ''} />
+              <input type="text" id="c-state-typo-stroke-color" class="prop-input" style="${stStrokeColor.dim}" value="${stStrokeColor.v || ''}" placeholder="none" ${stateStrokeCleared ? 'disabled' : ''} />
             </div>
           </div>
           <div class="prop-field">
             <label>Outline Width (px)</label>
-            <input type="number" id="c-state-typo-stroke-width" class="prop-input" style="${stStrokeWidth.dim}" value="${stStrokeWidth.v ?? ''}" min="0" step="1" placeholder="none" />
+            <input type="number" id="c-state-typo-stroke-width" class="prop-input" style="${stStrokeWidth.dim}" value="${stStrokeWidth.v ?? ''}" min="0" step="1" placeholder="none" ${stateStrokeCleared ? 'disabled' : ''} />
           </div>
+        </div>
+        <div class="prop-field">
+          <label style="display:flex;align-items:center;gap:6px;" title="Turns glow off for this state regardless of what Base sets — different from leaving these blank, which inherits Base's glow.">
+            <input type="checkbox" id="c-state-typo-glow-clear" ${stateGlowCleared ? 'checked' : ''} /> Glow: Clear (don't inherit)
+          </label>
         </div>
         <div class="prop-row-2">
           <div class="prop-field">
             <label>Text Glow Color</label>
             <div class="color-picker-wrap">
-              <input type="color" id="c-state-typo-glow-color-pick" value="${this.toHexColor(stGlowColor.v) || '#38bdf8'}" />
-              <input type="text" id="c-state-typo-glow-color" class="prop-input" style="${stGlowColor.dim}" value="${stGlowColor.v || ''}" placeholder="none" />
+              <input type="color" id="c-state-typo-glow-color-pick" value="${this.toHexColor(stGlowColor.v) || '#38bdf8'}" ${stateGlowCleared ? 'disabled' : ''} />
+              <input type="text" id="c-state-typo-glow-color" class="prop-input" style="${stGlowColor.dim}" value="${stGlowColor.v || ''}" placeholder="none" ${stateGlowCleared ? 'disabled' : ''} />
             </div>
           </div>
           <div class="prop-field">
             <label>Glow Spread (px)</label>
-            <input type="number" id="c-state-typo-glow-blur" class="prop-input" style="${stGlowBlur.dim}" value="${stGlowBlur.v ?? ''}" min="0" step="1" placeholder="6" />
+            <input type="number" id="c-state-typo-glow-blur" class="prop-input" style="${stGlowBlur.dim}" value="${stGlowBlur.v ?? ''}" min="0" step="1" placeholder="6" ${stateGlowCleared ? 'disabled' : ''} />
           </div>
         </div>
 
@@ -1415,21 +1435,26 @@ export class StudioInspector {
             <input type="text" id="c-state-border-color" class="prop-input" style="${stBorderColor.dim}" value="${stBorderColor.v || ''}" placeholder="inherit" />
           </div>
         </div>
+        <div class="prop-field">
+          <label style="display:flex;align-items:center;gap:6px;" title="Turns border glow off for this state regardless of what Base sets — different from leaving these blank, which inherits Base's border glow.">
+            <input type="checkbox" id="c-state-border-glow-clear" ${stateBorderGlowCleared ? 'checked' : ''} /> Border Glow: Clear (don't inherit)
+          </label>
+        </div>
         <div class="prop-row-2">
           <div class="prop-field">
             <label>Border Glow Color</label>
             <div class="color-picker-wrap">
-              <input type="color" id="c-state-border-glow-color-pick" value="${this.toHexColor(stBorderGlowColor.v) || '#38bdf8'}" />
-              <input type="text" id="c-state-border-glow-color" class="prop-input" style="${stBorderGlowColor.dim}" value="${stBorderGlowColor.v || ''}" placeholder="none" />
+              <input type="color" id="c-state-border-glow-color-pick" value="${this.toHexColor(stBorderGlowColor.v) || '#38bdf8'}" ${stateBorderGlowCleared ? 'disabled' : ''} />
+              <input type="text" id="c-state-border-glow-color" class="prop-input" style="${stBorderGlowColor.dim}" value="${stBorderGlowColor.v || ''}" placeholder="none" ${stateBorderGlowCleared ? 'disabled' : ''} />
             </div>
           </div>
           <div class="prop-field">
             <label>Glow Spread (px)</label>
-            <input type="number" id="c-state-border-glow-blur" class="prop-input" style="${stBorderGlowBlur.dim}" value="${stBorderGlowBlur.v ?? ''}" min="0" step="1" placeholder="6" />
+            <input type="number" id="c-state-border-glow-blur" class="prop-input" style="${stBorderGlowBlur.dim}" value="${stBorderGlowBlur.v ?? ''}" min="0" step="1" placeholder="6" ${stateBorderGlowCleared ? 'disabled' : ''} />
           </div>
         </div>
         <div class="prop-field">
-          <label style="display:flex;align-items:center;gap:6px;${stBorderGlowInset.dim}"><input type="checkbox" id="c-state-border-glow-inset" ${stBorderGlowInset.v ? 'checked' : ''} /> Glow inward instead of outward</label>
+          <label style="display:flex;align-items:center;gap:6px;${stBorderGlowInset.dim}"><input type="checkbox" id="c-state-border-glow-inset" ${stBorderGlowInset.v ? 'checked' : ''} ${stateBorderGlowCleared ? 'disabled' : ''} /> Glow inward instead of outward</label>
         </div>
 
         <div class="prop-section-subtitle" style="margin-top:10px;">Background Fill</div>
@@ -1639,6 +1664,11 @@ export class StudioInspector {
         const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
         updateStateStroke({ width: val });
       });
+      // FDWS v1.28: `null` explicitly clears (regardless of Base's stroke);
+      // unchecking removes the key entirely, back to "inherit normally."
+      body.querySelector('#c-state-typo-stroke-clear')?.addEventListener('change', (e) => {
+        updateStateStyle({ typography: { ...stateTypo, stroke: e.target.checked ? null : undefined } });
+      });
 
       body.querySelector('#c-state-border-style')?.addEventListener('change', (e) => updateStateStyle({ border: { ...stateBorder, style: e.target.value || undefined } }));
       body.querySelector('#c-state-border-w')?.addEventListener('change', (e) => {
@@ -1661,6 +1691,11 @@ export class StudioInspector {
         updateStateBorderGlow({ blur: val });
       });
       body.querySelector('#c-state-border-glow-inset')?.addEventListener('change', (e) => updateStateBorderGlow({ inset: e.target.checked || undefined }));
+      // FDWS v1.28: `null` explicitly clears (regardless of Base's border
+      // glow); unchecking removes the key entirely, back to "inherit normally."
+      body.querySelector('#c-state-border-glow-clear')?.addEventListener('change', (e) => {
+        updateStateStyle({ border: { ...stateBorder, glow: e.target.checked ? null : undefined } });
+      });
 
       body.querySelector('#c-state-bg-type')?.addEventListener('change', (e) => {
         const type = e.target.value;
@@ -1684,6 +1719,11 @@ export class StudioInspector {
       body.querySelector('#c-state-typo-glow-blur')?.addEventListener('change', (e) => {
         const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
         updateStateTypoGlow({ blur: val });
+      });
+      // FDWS v1.28: `null` explicitly clears (regardless of Base's glow);
+      // unchecking removes the key entirely, back to "inherit normally."
+      body.querySelector('#c-state-typo-glow-clear')?.addEventListener('change', (e) => {
+        updateStateStyle({ typography: { ...stateTypo, glow: e.target.checked ? null : undefined } });
       });
     })(appearanceBody.appendChild(document.createElement('div')));
 
