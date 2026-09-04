@@ -5,7 +5,7 @@
 
 import { SecurityValidator } from '../../core/SecurityValidator.js';
 import { evaluateConditionExpr, resolveActiveRuleStyle } from './ConditionEvaluator.js';
-import { resolveThemedColors, resolveThemedBackground } from './ThemeColor.js';
+import { resolveThemedColors, resolveThemedBackground, resolveThemedColor } from './ThemeColor.js';
 
 // FDWS v1.28: applyStyles()'s typography/border merge below is a one-level
 // property spread — correct for scalar keys (color, width, ...), but
@@ -231,6 +231,15 @@ export class BaseComponent {
       themeConfig.themeMode
     );
     const resolvedBg = resolveThemedBackground(bg, themeOverride.background, colorCtx, theme, themeConfig.baseTheme, themeConfig.themeMode);
+    // FDWS v1.29: widens theme derivation/override coverage from
+    // typography.color/border.color/background (v1.18's original set) to the
+    // other three color-valued style fields — text outline, text glow, and
+    // border glow all rendered as raw literals until now. font/size/weight,
+    // border width/style/radius, align, offset, orientation are NOT
+    // color-valued and stay literal always; no theming applies to them.
+    const resolvedStrokeColor = resolveThemedColor(typography.stroke?.color, themeOverride.typography?.stroke?.color, { ...colorCtx, colorKind: 'typography' }, theme, themeConfig.baseTheme, themeConfig.themeMode);
+    const resolvedGlowColor = resolveThemedColor(typography.glow?.color, themeOverride.typography?.glow?.color, { ...colorCtx, colorKind: 'typography' }, theme, themeConfig.baseTheme, themeConfig.themeMode);
+    const resolvedBorderGlowColor = resolveThemedColor(border.glow?.color, themeOverride.border?.glow?.color, { ...colorCtx, colorKind: 'border' }, theme, themeConfig.baseTheme, themeConfig.themeMode);
 
     // Inner nodes registered by subclasses (btnNode, inputNode, labelNode, valueNode,
     // dotNode, ...) sit between this.element and the visible text/surface the user
@@ -303,13 +312,13 @@ export class BaseComponent {
     // (not skipped) when unset, so switching styles/rules away from a
     // stroke actually clears a previously-applied one.
     const strokeVal = (typography.stroke && typography.stroke.width)
-      ? `${typography.stroke.width}px ${typography.stroke.color || '#000000'}`
+      ? `${typography.stroke.width}px ${resolvedStrokeColor || '#000000'}`
       : '';
     this.element.style.webkitTextStroke = strokeVal;
     textNodes.forEach((n) => { n.style.webkitTextStroke = strokeVal; });
     // FDWS v1.15: soft glow/bloom — LCD backlight glow, annunciator bloom.
     const glowVal = (typography.glow && typography.glow.color)
-      ? `0 0 ${typography.glow.blur ?? 6}px ${typography.glow.color}`
+      ? `0 0 ${typography.glow.blur ?? 6}px ${resolvedGlowColor}`
       : '';
     this.element.style.textShadow = glowVal;
     textNodes.forEach((n) => { n.style.textShadow = glowVal; });
@@ -337,7 +346,7 @@ export class BaseComponent {
     // isn't used anywhere else on this node, so nothing else to preserve.
     const glowColor = border.glow && border.glow.color;
     surfaceTarget.style.boxShadow = glowColor
-      ? `${border.glow.inset ? 'inset ' : ''}0 0 ${border.glow.blur ?? 6}px ${glowColor}`
+      ? `${border.glow.inset ? 'inset ' : ''}0 0 ${border.glow.blur ?? 6}px ${resolvedBorderGlowColor}`
       : '';
 
     // 3. Background (none, color, gradient, image) — a rule's background (if
@@ -667,6 +676,11 @@ export class BaseComponent {
       themeConfig.themeMode
     );
     const resolvedBg = resolveThemedBackground(bg, themeOverride.background, colorCtx, theme, themeConfig.baseTheme, themeConfig.themeMode);
+    // FDWS v1.29: same widening as applyStyles() above — this method never
+    // rendered typography.stroke at all (pre-existing, unrelated to theming),
+    // so only glow/border.glow need a themed resolve here.
+    const resolvedGlowColor = resolveThemedColor(typography.glow?.color, themeOverride.typography?.glow?.color, { ...colorCtx, colorKind: 'typography' }, theme, themeConfig.baseTheme, themeConfig.themeMode);
+    const resolvedBorderGlowColor = resolveThemedColor(border.glow?.color, themeOverride.border?.glow?.color, { ...colorCtx, colorKind: 'border' }, theme, themeConfig.baseTheme, themeConfig.themeMode);
 
     if (border.width !== undefined) {
       node.style.borderWidth = `${border.width}px`;
@@ -676,12 +690,12 @@ export class BaseComponent {
     if (border.radius !== undefined) node.style.borderRadius = `${border.radius}px`;
     const glowColor = border.glow && border.glow.color;
     node.style.boxShadow = glowColor
-      ? `${border.glow.inset ? 'inset ' : ''}0 0 ${border.glow.blur ?? 6}px ${glowColor}`
+      ? `${border.glow.inset ? 'inset ' : ''}0 0 ${border.glow.blur ?? 6}px ${resolvedBorderGlowColor}`
       : '';
 
     if (typography.color) node.style.color = adjustedColors.typographyColor;
     const glowVal = (typography.glow && typography.glow.color)
-      ? `0 0 ${typography.glow.blur ?? 6}px ${typography.glow.color}`
+      ? `0 0 ${typography.glow.blur ?? 6}px ${resolvedGlowColor}`
       : '';
     node.style.textShadow = glowVal;
 

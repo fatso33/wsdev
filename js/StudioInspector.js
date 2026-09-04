@@ -756,7 +756,7 @@ export class StudioInspector {
         </div>
         ${themeMode === 'manual' ? `
           <div class="empty-tree-notice" style="margin-top:8px;" data-tier="advanced">
-            Switch the canvas's Live Theme Preview (sun/moon button) to <strong>${otherTheme}</strong> to edit that theme's colors — every component's Text/Border/Background Color fields will target the ${otherTheme} override instead of the base ${baseTheme} style. New components start from an auto-derived ${otherTheme} color you can then adjust.
+            Switch the canvas's Live Theme Preview (sun/moon button) to <strong>${otherTheme}</strong> to edit that theme's colors — every component's Text/Stroke/Glow/Border/Border Glow/Background Color fields will target the ${otherTheme} override instead of the base ${baseTheme} style. New components start from an auto-derived ${otherTheme} color you can then adjust.
           </div>
         ` : ''}
       `;
@@ -1192,6 +1192,18 @@ export class StudioInspector {
                 : bg
           ))
         : bg;
+      // FDWS v1.29: same isOverrideEdit-redirect pattern as effTypoColor/
+      // effBorderColor above, widened to the other three color-valued style
+      // fields (text outline, text glow, border glow).
+      const effStrokeColor = themeEdit.isOverrideEdit
+        ? (override.typography?.stroke?.color ?? themeAdjustColor(typo.stroke?.color, { ...themeColorCtx, colorKind: 'typography' }, this.state.previewTheme, themeEdit.baseTheme))
+        : typo.stroke?.color;
+      const effGlowColor = themeEdit.isOverrideEdit
+        ? (override.typography?.glow?.color ?? themeAdjustColor(typo.glow?.color, { ...themeColorCtx, colorKind: 'typography' }, this.state.previewTheme, themeEdit.baseTheme))
+        : typo.glow?.color;
+      const effBorderGlowColor = themeEdit.isOverrideEdit
+        ? (override.border?.glow?.color ?? themeAdjustColor(border.glow?.color, { ...themeColorCtx, colorKind: 'border' }, this.state.previewTheme, themeEdit.baseTheme))
+        : border.glow?.color;
 
       // FDWS v1.8 §1.1: core.label's pre-v1.8 props.align (horizontal-only) is
       // superseded by the generic style.align.h below. The moment a label with the
@@ -1234,7 +1246,7 @@ export class StudioInspector {
       const otherTheme = themeEdit.baseTheme === 'light' ? 'dark' : 'light';
 
       body.innerHTML = `
-        ${themeEdit.isOverrideEdit ? `<div class="theme-override-banner">Editing ${this.state.previewTheme.toUpperCase()} theme override — Text/Border/Background Color apply only to this theme; other properties stay shared with the base ${themeEdit.baseTheme} style.</div>` : ''}
+        ${themeEdit.isOverrideEdit ? `<div class="theme-override-banner">Editing ${this.state.previewTheme.toUpperCase()} theme override — Text/Stroke/Glow/Border/Border Glow/Background Color apply only to this theme; other properties stay shared with the base ${themeEdit.baseTheme} style.</div>` : ''}
         <div class="prop-row-2" style="margin-bottom:4px;">
           <button type="button" id="c-style-copy" class="bar-btn">Copy Style</button>
           <button type="button" id="c-style-paste" class="bar-btn" ${this.state.copiedStyle ? '' : 'disabled'}>Paste Style</button>
@@ -1257,7 +1269,7 @@ export class StudioInspector {
           <button type="button" class="mode-toggle-btn" id="c-styletab-addrule" style="flex:0 1 auto;" title="Add a conditional style rule">+ Rule</button>
           ${themeEdit.themeMode === 'manual' ? `
           <span style="width:1px;align-self:stretch;background:var(--studio-panel-border);margin:0 2px;"></span>
-          <button type="button" class="mode-toggle-btn ${themeEdit.isOverrideEdit ? 'active' : ''}" id="c-styletab-theme" style="flex:0 1 auto;" ${activeTab !== 'normal' ? `disabled title="Theme overrides apply to the Base style only — states and rules are already conditional."` : `title="Edit this component's ${otherTheme} theme override — Text/Border/Background Color only."`}>${otherTheme.charAt(0).toUpperCase() + otherTheme.slice(1)} Override</button>
+          <button type="button" class="mode-toggle-btn ${themeEdit.isOverrideEdit ? 'active' : ''}" id="c-styletab-theme" style="flex:0 1 auto;" ${activeTab !== 'normal' ? `disabled title="Theme overrides apply to the Base style only — states and rules are already conditional."` : `title="Edit this component's ${otherTheme} theme override — Text/Stroke/Glow/Border/Border Glow/Background Color only."`}>${otherTheme.charAt(0).toUpperCase() + otherTheme.slice(1)} Override</button>
           ` : ''}
         </div>
         ${orphanedStateKeys.map((key) => {
@@ -1472,7 +1484,7 @@ export class StudioInspector {
       const target = activeTab === 'rule' ? { kind: 'rule', index: activeRuleIndex }
         : activeTab === 'state' ? { kind: 'state', name: stateCfg.name }
         : { kind: 'base' };
-      this.renderAppearanceSection(comp, body.querySelector('#c-appearance-fields'), target, { themeEdit, effTypoColor, effBorderColor, effBg, assets });
+      this.renderAppearanceSection(comp, body.querySelector('#c-appearance-fields'), target, { themeEdit, effTypoColor, effBorderColor, effBg, effStrokeColor, effGlowColor, effBorderGlowColor, assets });
     })(appearanceBody.appendChild(document.createElement('div')));
 
     const bindDivider = document.createElement('div');
@@ -2889,18 +2901,20 @@ export class StudioInspector {
    * Alignment & Position"), Border (was "Border & Radius"), Background (was
    * "Background Fill").
    *
-   * Text Color, Border Color, and the whole Background section stay
-   * HAND-CODED on the Base target only (rendered by
-   * renderBaseThemeAwareAppearanceFields(), called from here) — Manual theme
-   * mode (FDWS v1.18) redirects THEIR writes to style.themeOverride.* while
-   * every other Appearance field always writes straight to style.*
-   * regardless of theme-edit mode. The generic engine's commitField() has no
-   * per-field write-redirect concept, and style.themeOverride only ever
-   * applies to Base (never state/rule — BaseComponent.js only ever reads it
-   * off the base style object), so this split only matters here, never on
-   * the state tab, and is deliberately not generalized in this slice — the
-   * Theme chip (Wave 2 Part B3) is where that gets solved properly, by
-   * making Theme a real retarget target instead of a conditional inside Base.
+   * Text Color, Stroke Color, Glow Color, Border Color, Border Glow Color,
+   * and the whole Background section stay HAND-CODED on the Base target only
+   * (rendered by renderBaseThemeAwareAppearanceFields(), called from here) —
+   * Manual theme mode (FDWS v1.18, widened v1.29 to cover stroke/glow/border
+   * glow alongside the original three) redirects THEIR writes to
+   * style.themeOverride.* while every other Appearance field always writes
+   * straight to style.* regardless of theme-edit mode. The generic engine's
+   * commitField() has no per-field write-redirect concept, and
+   * style.themeOverride only ever applies to Base (never state/rule —
+   * BaseComponent.js only ever reads it off the base style object), so this
+   * split only matters here, never on the state tab, and is deliberately not
+   * generalized in this slice — the Theme chip (Wave 2 Part B3) is where
+   * that gets solved properly, by making Theme a real retarget target
+   * instead of a conditional inside Base.
    */
   renderAppearanceSection(comp, mount, target, baseThemeCtx) {
     mount.innerHTML = '';
@@ -2922,8 +2936,13 @@ export class StudioInspector {
     groupOrder.forEach((groupName) => {
       let groupFields = allFields.filter((f) => f.group === groupName);
       if (target.kind === 'base') {
-        if (groupName === 'Typography') groupFields = groupFields.filter((f) => f.path !== 'style.typography.color');
-        if (groupName === 'Border') groupFields = groupFields.filter((f) => f.path !== 'style.border.color');
+        // FDWS v1.29: stroke.color/glow.color/border.glow.color join
+        // typography.color/border.color as Base-only hand-coded fields (see
+        // renderBaseThemeAwareAppearanceFields()) so Manual theme mode can
+        // redirect their writes to style.themeOverride.* — stroke.width/
+        // glow.blur/border.glow.inset aren't colors and stay generic here.
+        if (groupName === 'Typography') groupFields = groupFields.filter((f) => f.path !== 'style.typography.color' && f.path !== 'style.typography.stroke.color' && f.path !== 'style.typography.glow.color');
+        if (groupName === 'Border') groupFields = groupFields.filter((f) => f.path !== 'style.border.color' && f.path !== 'style.border.glow.color');
         if (groupName === 'Background') groupFields = [];
       }
       if (!groupFields.length && !(target.kind === 'base' && groupName === 'Background')) return;
@@ -2991,14 +3010,15 @@ export class StudioInspector {
   }
 
   /**
-   * Wave 2 Part B1: the three Base-tab fields kept out of the generic engine
-   * (see renderAppearanceSection's doc comment) — verbatim ports of the
-   * pre-existing hand-coded Text Color / Border Color / Background markup
-   * and handlers, unchanged in behavior, just relocated to be called once
-   * per relevant group instead of inline in one giant template.
+   * Wave 2 Part B1 (widened FDWS v1.29): the Base-tab color fields kept out
+   * of the generic engine (see renderAppearanceSection's doc comment) — Text
+   * Color / Border Color / Background started as verbatim ports of the
+   * pre-existing hand-coded markup and handlers; Stroke Color / Glow Color /
+   * Border Glow Color joined them in v1.29, same pattern (an eff*Color read
+   * from ctx, a themeEdit.isOverrideEdit-gated writer).
    */
   renderBaseThemeAwareAppearanceFields(comp, groupName, mount, ctx) {
-    const { themeEdit, effTypoColor, effBorderColor, effBg, assets } = ctx;
+    const { themeEdit, effTypoColor, effBorderColor, effBg, effStrokeColor, effGlowColor, effBorderGlowColor, assets } = ctx;
     const updateStyle = (updates) => {
       this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), ...updates } });
     };
@@ -3014,6 +3034,20 @@ export class StudioInspector {
         style: { ...(comp.style || {}), themeOverride: { ...curOverride, background: nextBg } }
       });
     };
+    // FDWS v1.29: the stroke/glow siblings of updateOverride() above, one
+    // level deeper — themeOverride.typography.stroke.color/
+    // themeOverride.typography.glow.color/themeOverride.border.glow.color,
+    // vs. updateOverride's themeOverride.typography.color/
+    // themeOverride.border.color. Kept separate rather than widening
+    // updateOverride's own signature, since its other two callers (Text
+    // Color/Border Color) don't need a third path segment.
+    const updateOverrideNested = (field, subKey, updates) => {
+      const curOverride = comp.style?.themeOverride || {};
+      const curField = curOverride[field] || {};
+      this.state.updateComponent(comp.id, {
+        style: { ...(comp.style || {}), themeOverride: { ...curOverride, [field]: { ...curField, [subKey]: { ...(curField[subKey] || {}), ...updates } } } }
+      });
+    };
 
     if (groupName === 'Typography') {
       mount.innerHTML = `
@@ -3024,11 +3058,33 @@ export class StudioInspector {
             <input type="text" id="c-typo-color" class="prop-input" value="${effTypoColor || '#f8fafc'}" />
           </div>
         </div>
+        <div class="prop-field">
+          <label title="Text outline color. Leave unset for none.">Stroke Color</label>
+          <div class="color-picker-wrap">
+            <input type="color" id="c-typo-stroke-color-pick" value="${this.toHexColor(effStrokeColor) || '#000000'}" />
+            <input type="text" id="c-typo-stroke-color" class="prop-input" value="${escapeHtmlAttr(effStrokeColor || '')}" placeholder="none" />
+          </div>
+        </div>
+        <div class="prop-field">
+          <label title="Text glow/bloom color. Leave unset for none.">Glow Color</label>
+          <div class="color-picker-wrap">
+            <input type="color" id="c-typo-glow-color-pick" value="${this.toHexColor(effGlowColor) || '#000000'}" />
+            <input type="text" id="c-typo-glow-color" class="prop-input" value="${escapeHtmlAttr(effGlowColor || '')}" placeholder="none" />
+          </div>
+        </div>
       `;
       const setTypoColor = (color) => themeEdit.isOverrideEdit
         ? updateOverride('typography', { color })
         : updateStyle({ typography: { ...(comp.style?.typography || {}), color } });
       this.wireColorPair(mount, 'c-typo-color-pick', 'c-typo-color', setTypoColor);
+      const setStrokeColor = (color) => themeEdit.isOverrideEdit
+        ? updateOverrideNested('typography', 'stroke', { color })
+        : updateStyle({ typography: { ...(comp.style?.typography || {}), stroke: { ...(comp.style?.typography?.stroke || {}), color } } });
+      this.wireColorPair(mount, 'c-typo-stroke-color-pick', 'c-typo-stroke-color', setStrokeColor);
+      const setGlowColor = (color) => themeEdit.isOverrideEdit
+        ? updateOverrideNested('typography', 'glow', { color })
+        : updateStyle({ typography: { ...(comp.style?.typography || {}), glow: { ...(comp.style?.typography?.glow || {}), color } } });
+      this.wireColorPair(mount, 'c-typo-glow-color-pick', 'c-typo-glow-color', setGlowColor);
       return;
     }
 
@@ -3041,11 +3097,22 @@ export class StudioInspector {
             <input type="text" id="c-border-color" class="prop-input" value="${effBorderColor || '#273344'}" />
           </div>
         </div>
+        <div class="prop-field">
+          <label title="Soft glow around the border. Leave unset for none.">Border Glow Color</label>
+          <div class="color-picker-wrap">
+            <input type="color" id="c-border-glow-color-pick" value="${this.toHexColor(effBorderGlowColor) || '#000000'}" />
+            <input type="text" id="c-border-glow-color" class="prop-input" value="${escapeHtmlAttr(effBorderGlowColor || '')}" placeholder="none" />
+          </div>
+        </div>
       `;
       const setBorderColor = (color) => themeEdit.isOverrideEdit
         ? updateOverride('border', { color })
         : updateStyle({ border: { ...(comp.style?.border || {}), color } });
       this.wireColorPair(mount, 'c-border-color-pick', 'c-border-color', setBorderColor);
+      const setBorderGlowColor = (color) => themeEdit.isOverrideEdit
+        ? updateOverrideNested('border', 'glow', { color })
+        : updateStyle({ border: { ...(comp.style?.border || {}), glow: { ...(comp.style?.border?.glow || {}), color } } });
+      this.wireColorPair(mount, 'c-border-glow-color-pick', 'c-border-glow-color', setBorderGlowColor);
       return;
     }
 

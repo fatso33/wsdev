@@ -38,7 +38,7 @@
 export const FDWS_VERSIONS = [
   '1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9', '1.10',
   '1.11', '1.12', '1.13', '1.14', '1.15', '1.16', '1.17', '1.18', '1.19', '1.20',
-  '1.21', '1.22', '1.23', '1.24', '1.25', '1.26', '1.27', '1.28'
+  '1.21', '1.22', '1.23', '1.24', '1.25', '1.26', '1.27', '1.28', '1.29'
 ];
 
 // ---------------------------------------------------------------------------
@@ -282,6 +282,12 @@ export const COMMON_FIELDS = [
   { path: 'style.themeOverride.border.color', control: 'color', tier: 'advanced', group: 'Theme Override', fdwsMin: '1.18', default: undefined, tooltip: 'Manual border color for the non-base theme. Leave unset to keep auto-deriving it.' },
   { path: 'style.themeOverride.background.color', control: 'color', tier: 'advanced', group: 'Theme Override', fdwsMin: '1.18', default: undefined, tooltip: 'Manual fill color for the non-base theme, when Background Type is Color. Leave unset to keep auto-deriving it.' },
   { path: 'style.themeOverride.background.gradient', control: 'text', tier: 'advanced', group: 'Theme Override', fdwsMin: '1.18', default: undefined, tooltip: 'Manual CSS gradient for the non-base theme, when Background Type is Gradient. Leave unset to keep auto-deriving it.' },
+  // FDWS v1.29: widens Theme Override coverage from the original 4 fields
+  // above to the other three color-valued style fields that also get
+  // auto-derived in the other direction (BaseComponent.js's applyStyles()).
+  { path: 'style.themeOverride.typography.stroke.color', control: 'color', tier: 'advanced', group: 'Theme Override', fdwsMin: '1.29', default: undefined, tooltip: 'Manual text outline color for the non-base theme. Leave unset to keep auto-deriving it.' },
+  { path: 'style.themeOverride.typography.glow.color', control: 'color', tier: 'advanced', group: 'Theme Override', fdwsMin: '1.29', default: undefined, tooltip: 'Manual text glow color for the non-base theme. Leave unset to keep auto-deriving it.' },
+  { path: 'style.themeOverride.border.glow.color', control: 'color', tier: 'advanced', group: 'Theme Override', fdwsMin: '1.29', default: undefined, tooltip: 'Manual border glow color for the non-base theme. Leave unset to keep auto-deriving it.' },
   { path: 'style.background.image.fit', control: 'select', options: ['cover', 'contain', 'tile'], tier: 'advanced', group: 'Background', default: undefined, tooltip: 'How the image fills the surface: Cover crops to fill, Contain fits without cropping, Tile repeats it.', showWhen: { path: 'style.background.type', equals: 'image' } },
   { path: 'style.background.image.position', control: 'text', tier: 'advanced', group: 'Background', default: undefined, tooltip: 'CSS background-position (e.g. "center", "top left").', showWhen: { path: 'style.background.type', equals: 'image' } },
 
