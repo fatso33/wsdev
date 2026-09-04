@@ -121,7 +121,40 @@ export class StudioInspector {
     this.container.classList.add('studio-inspector-root');
   }
 
+  /**
+   * Wave 0b (V6): renderInner() unconditionally does `innerHTML = ''` and
+   * rebuilds — every prop edit, including every 'input' frame while dragging
+   * a color swatch, destroys and recreates the whole panel. expandedGroups
+   * (a class-instance Set, not DOM state) already survives that; the actual
+   * focused element does not — document.activeElement drops to <body> mid-
+   * edit. This wrapper captures which element (by id) had focus and its text
+   * selection range before the rebuild, then restores both after, so typing
+   * or dragging is never interrupted. Deliberately NOT a rewrite of the
+   * render architecture itself (no debounce/patch-in-place infra exists
+   * anywhere in this codebase to build on — see Wave 0b plan) — this fixes
+   * the actual user-visible symptom at a fraction of that risk.
+   */
   render() {
+    const active = this.container.contains(document.activeElement) ? document.activeElement : null;
+    const focusId = active?.id || null;
+    const selRange = (focusId && 'selectionStart' in active && typeof active.selectionStart === 'number')
+      ? [active.selectionStart, active.selectionEnd]
+      : null;
+
+    this.renderInner();
+
+    if (focusId) {
+      const el = this.container.querySelector(`#${CSS.escape(focusId)}`);
+      if (el) {
+        el.focus({ preventScroll: true });
+        if (selRange && 'setSelectionRange' in el) {
+          try { el.setSelectionRange(selRange[0], selRange[1]); } catch { /* not a text-selectable input type */ }
+        }
+      }
+    }
+  }
+
+  renderInner() {
     this.container.innerHTML = '';
     this.container.appendChild(this.buildModeToggle());
 
@@ -255,24 +288,11 @@ export class StudioInspector {
         showToast(`Pasted style onto ${comps.length} components.`);
       });
 
-      // Text inputs commit on blur/Enter (change), color pickers additionally
-      // mirror into their paired text field live so the two stay in sync —
-      // same pattern used throughout the single-component style panels.
-      const wireColorPair = (pickId, txtId, applyFn) => {
-        const pick = body.querySelector(`#${pickId}`);
-        const txt = body.querySelector(`#${txtId}`);
-        txt?.addEventListener('change', () => { if (txt.value.trim()) applyFn(txt.value.trim()); });
-        pick?.addEventListener('input', () => {
-          if (txt) txt.value = pick.value;
-          applyFn(pick.value);
-        });
-      };
-
       body.querySelector('#bulk-typo-size')?.addEventListener('change', (e) => {
         if (e.target.value === '') return;
         this.state.applyStyleToSelection({ typography: { size: parseInt(e.target.value, 10) || 12 } });
       });
-      wireColorPair('bulk-typo-color-pick', 'bulk-typo-color', (color) => this.state.applyStyleToSelection({ typography: { color } }));
+      this.wireColorPair(body, 'bulk-typo-color-pick', 'bulk-typo-color', (color) => this.state.applyStyleToSelection({ typography: { color } }), { skipEmpty: true });
 
       body.querySelector('#bulk-border-w')?.addEventListener('change', (e) => {
         if (e.target.value === '') return;
@@ -282,9 +302,9 @@ export class StudioInspector {
         if (e.target.value === '') return;
         this.state.applyStyleToSelection({ border: { radius: parseInt(e.target.value, 10) || 0 } });
       });
-      wireColorPair('bulk-border-color-pick', 'bulk-border-color', (color) => this.state.applyStyleToSelection({ border: { color } }));
+      this.wireColorPair(body, 'bulk-border-color-pick', 'bulk-border-color', (color) => this.state.applyStyleToSelection({ border: { color } }), { skipEmpty: true });
 
-      wireColorPair('bulk-bg-color-pick', 'bulk-bg-color', (color) => this.state.applyStyleToSelection({ background: { type: 'color', color } }));
+      this.wireColorPair(body, 'bulk-bg-color-pick', 'bulk-bg-color', (color) => this.state.applyStyleToSelection({ background: { type: 'color', color } }), { skipEmpty: true });
 
       body.querySelector('#bulk-align-h')?.addEventListener('change', (e) => {
         if (!e.target.value) return;
@@ -554,13 +574,7 @@ export class StudioInspector {
 
       body.querySelector('#w-border-w')?.addEventListener('change', (e) => updateBorder({ width: parseInt(e.target.value, 10) || 0 }));
       body.querySelector('#w-border-rad')?.addEventListener('change', (e) => updateBorder({ radius: parseInt(e.target.value, 10) || 0 }));
-      body.querySelector('#w-border-clr-pick')?.addEventListener('input', (e) => {
-        body.querySelector('#w-border-clr-txt').value = e.target.value;
-        updateBorderColor(e.target.value);
-      });
-      body.querySelector('#w-border-clr-txt')?.addEventListener('change', (e) => {
-        updateBorderColor(e.target.value);
-      });
+      this.wireColorPair(body, 'w-border-clr-pick', 'w-border-clr-txt', updateBorderColor);
 
       body.querySelector('#w-bg-type')?.addEventListener('change', (e) => {
         const type = e.target.value;
@@ -569,23 +583,27 @@ export class StudioInspector {
         if (type === 'image') updateBg({ type: 'image', image: { assetId: this.state.widgetDef.assets?.[0]?.id || '' } });
       });
 
-      body.querySelector('#w-bg-val')?.addEventListener('change', (e) => {
+      // #w-bg-val doubles as the color/gradient/asset-id value field depending
+      // on Background Type — only the "color" case has a paired swatch
+      // (#w-bg-val-pick), so only that case goes through wireColorPair (V22);
+      // gradient/image stay a single plain text field on 'change', unchanged.
+      const bgValApplyFn = (value) => {
         const bgType = body.querySelector('#w-bg-type').value;
-        if (bgType === 'color' && GRADIENT_VALUE_RE.test(e.target.value.trim())) {
-          updateBg({ type: 'gradient', gradient: e.target.value.trim() });
+        if (bgType === 'color' && GRADIENT_VALUE_RE.test(value.trim())) {
+          updateBg({ type: 'gradient', gradient: value.trim() });
           showToast('That looks like a CSS gradient, not a color — switched Background Type to "CSS Gradient" so it stays theme-aware.');
           this.render();
           return;
         }
-        if (bgType === 'color') updateBg({ type: 'color', color: e.target.value });
-        if (bgType === 'gradient') updateBg({ type: 'gradient', gradient: e.target.value });
-        if (bgType === 'image') updateBg({ type: 'image', image: { assetId: e.target.value } });
-      });
-      body.querySelector('#w-bg-val-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#w-bg-val');
-        if (txt) txt.value = e.target.value;
-        updateBg({ type: 'color', color: e.target.value });
-      });
+        if (bgType === 'color') updateBg({ type: 'color', color: value });
+        if (bgType === 'gradient') updateBg({ type: 'gradient', gradient: value });
+        if (bgType === 'image') updateBg({ type: 'image', image: { assetId: value } });
+      };
+      if (effBg.type === 'color') {
+        this.wireColorPair(body, 'w-bg-val-pick', 'w-bg-val', bgValApplyFn, { allowGradient: true });
+      } else {
+        body.querySelector('#w-bg-val')?.addEventListener('change', (e) => bgValApplyFn(e.target.value));
+      }
     }));
 
     // Group 3.5: Theme (FDWS v1.18) — which theme style.* was authored for,
@@ -1494,12 +1512,7 @@ export class StudioInspector {
       const setTypoColor = (color) => themeEdit.isOverrideEdit
         ? updateOverride('typography', { color })
         : updateStyle({ typography: { ...(comp.style?.typography || {}), color } });
-      body.querySelector('#c-typo-color')?.addEventListener('change', (e) => setTypoColor(e.target.value));
-      body.querySelector('#c-typo-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-typo-color');
-        if (txt) txt.value = e.target.value;
-        setTypoColor(e.target.value);
-      });
+      this.wireColorPair(body, 'c-typo-color-pick', 'c-typo-color', setTypoColor);
 
       const updateStroke = (updates) => {
         const nextStroke = { ...(comp.style?.typography?.stroke || {}), ...updates };
@@ -1509,23 +1522,13 @@ export class StudioInspector {
         const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10) || 0;
         updateStroke({ width: val });
       });
-      body.querySelector('#c-typo-stroke-color')?.addEventListener('change', (e) => updateStroke({ color: e.target.value || undefined }));
-      body.querySelector('#c-typo-stroke-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-typo-stroke-color');
-        if (txt) txt.value = e.target.value;
-        updateStroke({ color: e.target.value });
-      });
+      this.wireColorPair(body, 'c-typo-stroke-color-pick', 'c-typo-stroke-color', (color) => updateStroke({ color: color || undefined }));
 
       const updateGlow = (updates) => {
         const nextGlow = { ...(comp.style?.typography?.glow || {}), ...updates };
         updateStyle({ typography: { ...(comp.style?.typography || {}), glow: nextGlow } });
       };
-      body.querySelector('#c-typo-glow-color')?.addEventListener('change', (e) => updateGlow({ color: e.target.value || undefined }));
-      body.querySelector('#c-typo-glow-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-typo-glow-color');
-        if (txt) txt.value = e.target.value;
-        updateGlow({ color: e.target.value });
-      });
+      this.wireColorPair(body, 'c-typo-glow-color-pick', 'c-typo-glow-color', (color) => updateGlow({ color: color || undefined }));
       body.querySelector('#c-typo-glow-blur')?.addEventListener('change', (e) => {
         const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10) || 0;
         updateGlow({ blur: val });
@@ -1558,24 +1561,14 @@ export class StudioInspector {
       const setBorderColor = (color) => themeEdit.isOverrideEdit
         ? updateOverride('border', { color })
         : updateStyle({ border: { ...(comp.style?.border || {}), color } });
-      body.querySelector('#c-border-color')?.addEventListener('change', (e) => setBorderColor(e.target.value));
-      body.querySelector('#c-border-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-border-color');
-        if (txt) txt.value = e.target.value;
-        setBorderColor(e.target.value);
-      });
+      this.wireColorPair(body, 'c-border-color-pick', 'c-border-color', setBorderColor);
       body.querySelector('#c-border-style')?.addEventListener('change', (e) => updateStyle({ border: { ...(comp.style?.border || {}), style: e.target.value } }));
 
       const updateBorderGlow = (updates) => {
         const nextGlow = { ...(comp.style?.border?.glow || {}), ...updates };
         updateStyle({ border: { ...(comp.style?.border || {}), glow: nextGlow } });
       };
-      body.querySelector('#c-border-glow-color')?.addEventListener('change', (e) => updateBorderGlow({ color: e.target.value || undefined }));
-      body.querySelector('#c-border-glow-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-border-glow-color');
-        if (txt) txt.value = e.target.value;
-        updateBorderGlow({ color: e.target.value });
-      });
+      this.wireColorPair(body, 'c-border-glow-color-pick', 'c-border-glow-color', (color) => updateBorderGlow({ color: color || undefined }));
       body.querySelector('#c-border-glow-blur')?.addEventListener('change', (e) => {
         const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
         updateBorderGlow({ blur: val });
@@ -1595,20 +1588,15 @@ export class StudioInspector {
         else if (type === 'gradient') setBg({ type: 'gradient', gradient: curBg.gradient || 'linear-gradient(180deg, #1a2332, #0b0f17)' });
         else if (type === 'image') setBg({ type: 'image', image: { assetId: curBg.image?.assetId || assets[0]?.id || '' } });
       });
-      body.querySelector('#c-bg-color')?.addEventListener('change', (e) => {
-        if (GRADIENT_VALUE_RE.test(e.target.value.trim())) {
-          setBg({ type: 'gradient', gradient: e.target.value.trim() });
+      this.wireColorPair(body, 'c-bg-color-pick', 'c-bg-color', (value) => {
+        if (GRADIENT_VALUE_RE.test(value.trim())) {
+          setBg({ type: 'gradient', gradient: value.trim() });
           showToast('That looks like a CSS gradient, not a color — switched Background Type to "CSS Gradient" so it stays theme-aware.');
           this.render();
           return;
         }
-        setBg({ type: 'color', color: e.target.value });
-      });
-      body.querySelector('#c-bg-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-bg-color');
-        if (txt) txt.value = e.target.value;
-        setBg({ type: 'color', color: e.target.value });
-      });
+        setBg({ type: 'color', color: value });
+      }, { allowGradient: true });
       body.querySelector('#c-bg-gradient')?.addEventListener('change', (e) => setBg({ type: 'gradient', gradient: e.target.value }));
 
       const updateBgImage = (updates) => {
@@ -1635,12 +1623,7 @@ export class StudioInspector {
       const updateStateStroke = (updates) => {
         updateStateStyle({ typography: { ...stateTypo, stroke: { ...stateStroke, ...updates } } });
       };
-      body.querySelector('#c-state-typo-stroke-color')?.addEventListener('change', (e) => updateStateStroke({ color: e.target.value || undefined }));
-      body.querySelector('#c-state-typo-stroke-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-state-typo-stroke-color');
-        if (txt) txt.value = e.target.value;
-        updateStateStroke({ color: e.target.value });
-      });
+      this.wireColorPair(body, 'c-state-typo-stroke-color-pick', 'c-state-typo-stroke-color', (color) => updateStateStroke({ color: color || undefined }));
       body.querySelector('#c-state-typo-stroke-width')?.addEventListener('change', (e) => {
         const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
         updateStateStroke({ width: val });
@@ -1656,22 +1639,12 @@ export class StudioInspector {
         updateStateStyle({ border: { ...stateBorder, radius: val } });
       });
       const setStateBorderColor = (color) => updateStateStyle({ border: { ...stateBorder, color: color || undefined } });
-      body.querySelector('#c-state-border-color')?.addEventListener('change', (e) => setStateBorderColor(e.target.value));
-      body.querySelector('#c-state-border-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-state-border-color');
-        if (txt) txt.value = e.target.value;
-        setStateBorderColor(e.target.value);
-      });
+      this.wireColorPair(body, 'c-state-border-color-pick', 'c-state-border-color', setStateBorderColor);
 
       const updateStateBorderGlow = (updates) => {
         updateStateStyle({ border: { ...stateBorder, glow: { ...stateBorderGlow, ...updates } } });
       };
-      body.querySelector('#c-state-border-glow-color')?.addEventListener('change', (e) => updateStateBorderGlow({ color: e.target.value || undefined }));
-      body.querySelector('#c-state-border-glow-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-state-border-glow-color');
-        if (txt) txt.value = e.target.value;
-        updateStateBorderGlow({ color: e.target.value });
-      });
+      this.wireColorPair(body, 'c-state-border-glow-color-pick', 'c-state-border-glow-color', (color) => updateStateBorderGlow({ color: color || undefined }));
       body.querySelector('#c-state-border-glow-blur')?.addEventListener('change', (e) => {
         const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
         updateStateBorderGlow({ blur: val });
@@ -1687,31 +1660,16 @@ export class StudioInspector {
         else if (type === 'color') updateStateStyle({ background: { type: 'color', color: stateBg.color || '#131b26' } });
         else if (type === 'gradient') updateStateStyle({ background: { type: 'gradient', gradient: stateBg.gradient || 'linear-gradient(180deg, #1a2332, #0b0f17)' } });
       });
-      body.querySelector('#c-state-bg-color')?.addEventListener('change', (e) => updateStateStyle({ background: { type: 'color', color: e.target.value } }));
-      body.querySelector('#c-state-bg-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-state-bg-color');
-        if (txt) txt.value = e.target.value;
-        updateStateStyle({ background: { type: 'color', color: e.target.value } });
-      });
+      this.wireColorPair(body, 'c-state-bg-color-pick', 'c-state-bg-color', (color) => updateStateStyle({ background: { type: 'color', color } }));
       body.querySelector('#c-state-bg-gradient')?.addEventListener('change', (e) => updateStateStyle({ background: { type: 'gradient', gradient: e.target.value } }));
 
       const setStateTypoColor = (color) => updateStateStyle({ typography: { ...stateTypo, color: color || undefined } });
-      body.querySelector('#c-state-typo-color')?.addEventListener('change', (e) => setStateTypoColor(e.target.value));
-      body.querySelector('#c-state-typo-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-state-typo-color');
-        if (txt) txt.value = e.target.value;
-        setStateTypoColor(e.target.value);
-      });
+      this.wireColorPair(body, 'c-state-typo-color-pick', 'c-state-typo-color', setStateTypoColor);
 
       const updateStateTypoGlow = (updates) => {
         updateStateStyle({ typography: { ...stateTypo, glow: { ...stateGlow, ...updates } } });
       };
-      body.querySelector('#c-state-typo-glow-color')?.addEventListener('change', (e) => updateStateTypoGlow({ color: e.target.value || undefined }));
-      body.querySelector('#c-state-typo-glow-color-pick')?.addEventListener('input', (e) => {
-        const txt = body.querySelector('#c-state-typo-glow-color');
-        if (txt) txt.value = e.target.value;
-        updateStateTypoGlow({ color: e.target.value });
-      });
+      this.wireColorPair(body, 'c-state-typo-glow-color-pick', 'c-state-typo-glow-color', (color) => updateStateTypoGlow({ color: color || undefined }));
       body.querySelector('#c-state-typo-glow-blur')?.addEventListener('change', (e) => {
         const val = e.target.value === '' ? undefined : (parseInt(e.target.value, 10) || 0);
         updateStateTypoGlow({ blur: val });
@@ -3598,6 +3556,49 @@ export class StudioInspector {
     return match ? match[0] : null;
   }
 
+  /**
+   * Wave 0b (V22): every color field is a swatch+text pair. The two halves
+   * used to listen to different events (swatch on 'input' only, text on
+   * 'change' only) — a value delivered via the "wrong" channel for a given
+   * half (set programmatically, pasted, or delivered by an automation tool)
+   * silently never committed. Both halves now listen to both events, deduped
+   * through one commit path so a single user gesture (e.g. dragging, which
+   * fires many 'input' events then one 'change') doesn't push duplicate
+   * undo-history entries or re-render more than once per distinct value. The
+   * text field's own 'input' listener only live-commits once its value is a
+   * complete, valid color (or, for background fields, a gradient() string) —
+   * never on a partial "#f8" mid-type.
+   * @param {Element} root - queried for #pickId/#txtId (usually `body` or `this.container`)
+   * @param {string} pickId
+   * @param {string} txtId
+   * @param {(value: string) => void} applyFn
+   * @param {{allowGradient?: boolean, skipEmpty?: boolean}} [opts] - skipEmpty:
+   *   true for the bulk multi-select editor, where a blank field means "leave
+   *   this property unchanged on every selected component," not "clear it."
+   */
+  wireColorPair(root, pickId, txtId, applyFn, { allowGradient = false, skipEmpty = false } = {}) {
+    const pick = root.querySelector(`#${pickId}`);
+    const txt = root.querySelector(`#${txtId}`);
+    let lastCommitted;
+    const commit = (rawVal) => {
+      const val = rawVal.trim();
+      if (skipEmpty && !val) return;
+      if (val === lastCommitted) return;
+      lastCommitted = val;
+      if (txt) txt.value = val;
+      const hex = this.toHexColor(val);
+      if (pick && hex) pick.value = hex;
+      applyFn(val);
+    };
+    pick?.addEventListener('input', (e) => commit(e.target.value));
+    pick?.addEventListener('change', (e) => commit(e.target.value));
+    txt?.addEventListener('change', (e) => commit(e.target.value));
+    txt?.addEventListener('input', (e) => {
+      const v = e.target.value.trim();
+      if (/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v) || (allowGradient && GRADIENT_VALUE_RE.test(v))) commit(v);
+    });
+  }
+
   updateCompProp(comp, propKey, value) {
     const nextProps = { ...(comp.props || {}), [propKey]: value };
     this.state.updateComponent(comp.id, { props: nextProps });
@@ -3647,7 +3648,13 @@ export class StudioInspector {
         type: a.type,
         label: isSimpleUi ? (SIMPLE_ACTION_LABELS[a.type] || a.label) : (a.deprecated ? `${a.label} (legacy)` : a.label)
       }));
-    const TRIGGER_TYPES = isSimpleUi ? REGISTRY_TRIGGERS.filter((t) => t.live) : REGISTRY_TRIGGERS;
+    // Wave 0b (V19): every component type used to see the identical flat list
+    // regardless of relevance (a core.button offered fineChange/itemTap/etc,
+    // and a core.stepper had no increment/decrement to pick at all). Filtered
+    // by the registry's new componentTypes ('*' = every type, BaseComponent-level).
+    const TRIGGER_TYPES = REGISTRY_TRIGGERS
+      .filter((t) => !isSimpleUi ? true : t.live)
+      .filter((t) => t.componentTypes.includes('*') || t.componentTypes.includes(comp.type));
     const initialActionType = (existingAction && ACTION_TYPES.some((a) => a.type === existingAction.type))
       ? existingAction.type
       : ACTION_TYPES[0].type;

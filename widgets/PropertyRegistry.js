@@ -47,22 +47,47 @@ export const FDWS_VERSIONS = [
 // this exact gap (a real trigger missing from the dropdown) is how 'change'/
 // 'focus'/'blur' were found missing, and 'hold'/'doubleTap'/'release' were found
 // to never fire at all despite being listed.
+//
+// Wave 0b (V19): 15 triggers the runtime fires (grep handleInteraction( across
+// shared/widgets/components/*.js) were live but had no row here at all — the
+// Trigger dropdown could never offer them, so a stepper's increment/decrement,
+// a rocker's zone press, a rotary's drag, a slider's detent, a selector/pad's
+// position change, a list row tap and a pad's pan/zoom were all unauthorable
+// in Studio despite firing correctly today. `componentTypes` (new) is what
+// scripts/check-registry-drift.mjs and StudioInspector.js's Trigger dropdown
+// both key off — '*' means every component type (BaseComponent-level), a
+// specific list means only those types actually dispatch it.
 // ---------------------------------------------------------------------------
 export const TRIGGERS = [
-  { id: 'tap', fires: 'BaseComponent pointer handler — every component', live: true },
-  { id: 'longpress', fires: 'BaseComponent pointer handler (500ms hold) — every component', live: true },
-  { id: 'change', fires: 'core.input only — native DOM listener', live: true },
-  { id: 'focus', fires: 'core.input only — native DOM listener', live: true },
-  { id: 'blur', fires: 'core.input only — native DOM listener', live: true },
+  { id: 'tap', fires: 'BaseComponent pointer handler — every component', live: true, componentTypes: ['*'] },
+  { id: 'longpress', fires: 'BaseComponent pointer handler (500ms hold) — every component', live: true, componentTypes: ['*'] },
+  { id: 'change', fires: 'InputComponent (native DOM listener) and SliderComponent (on commit)', live: true, componentTypes: ['core.input', 'core.slider'] },
+  { id: 'focus', fires: 'core.input only — native DOM listener', live: true, componentTypes: ['core.input'] },
+  { id: 'blur', fires: 'core.input only — native DOM listener', live: true, componentTypes: ['core.input'] },
+  { id: 'guardOpen', fires: 'BaseComponent guard overlay — every component with a guard', live: true, componentTypes: ['*'] },
+  { id: 'guardClose', fires: 'BaseComponent guard overlay — every component with a guard', live: true, componentTypes: ['*'] },
+  { id: 'itemTap', fires: 'ListComponent — a row tap', live: true, componentTypes: ['core.list'] },
+  { id: 'positionChange', fires: 'PadComponent (absolute mode only) and SelectorComponent', live: true, componentTypes: ['core.pad', 'core.selector'] },
+  { id: 'zoomDelta', fires: 'PadComponent — pinch/zoom gesture', live: true, componentTypes: ['core.pad'] },
+  { id: 'panDelta', fires: 'PadComponent — relative-mode drag (the default mode)', live: true, componentTypes: ['core.pad'] },
+  { id: 'zoneActive', fires: 'RockerComponent — one zone pressed', live: true, componentTypes: ['core.rocker'] },
+  { id: 'zoneReleased', fires: 'RockerComponent — a pressed zone released', live: true, componentTypes: ['core.rocker'] },
+  { id: 'push', fires: 'RotaryComponent — center button press', live: true, componentTypes: ['core.rotary'] },
+  { id: 'dragStart', fires: 'RotaryComponent — drag begins', live: true, componentTypes: ['core.rotary'] },
+  { id: 'fineChange', fires: 'RotaryComponent — drag delta (the knob’s defining interaction)', live: true, componentTypes: ['core.rotary'] },
+  { id: 'dragEnd', fires: 'RotaryComponent — drag ends', live: true, componentTypes: ['core.rotary'] },
+  { id: 'detentReached', fires: 'SliderComponent — commit lands on a declared detent', live: true, componentTypes: ['core.slider'] },
+  { id: 'increment', fires: 'StepperComponent — + button', live: true, componentTypes: ['core.stepper'] },
+  { id: 'decrement', fires: 'StepperComponent — − button', live: true, componentTypes: ['core.stepper'] },
   // Kept for backward compat with any widget already authored against them —
   // confirmed via repo-wide grep that nothing in shared/widgets/components/
   // ever dispatches these. Not removed from the list (an existing widget file
   // referencing one must still round-trip), but Phase 1's Inspector should
   // visually flag them as "never fires today" rather than presenting them as
   // equivalent options to the five above.
-  { id: 'hold', fires: 'dead — no dispatcher wires this up', live: false },
-  { id: 'doubleTap', fires: 'dead — no dispatcher wires this up', live: false },
-  { id: 'release', fires: 'dead — no dispatcher wires this up', live: false }
+  { id: 'hold', fires: 'dead — no dispatcher wires this up', live: false, componentTypes: ['*'] },
+  { id: 'doubleTap', fires: 'dead — no dispatcher wires this up', live: false, componentTypes: ['*'] },
+  { id: 'release', fires: 'dead — no dispatcher wires this up', live: false, componentTypes: ['*'] }
 ];
 
 // ---------------------------------------------------------------------------

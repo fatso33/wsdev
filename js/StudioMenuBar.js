@@ -441,14 +441,111 @@ export class StudioMenuBar {
   }
 
   /**
-   * Gate in front of every export path (file, .fdwidget, clipboard): warns
-   * about any referenced-but-unsaved popover (nothing to bundle for it) and
-   * asks before proceeding. Silently proceeds straight to the export when
-   * there's nothing to warn about, so this adds zero friction to the common
-   * case (no popovers, or all of them already saved).
+   * Wave 0b (V20 export block): the "Wire this up" proposal table — only for
+   * component types where a single correct trigger genuinely exists.
+   * Excluded deliberately (see StudioValidator.js's matching comment on the
+   * same exclusion): core.input/core.selector/core.slider never reach this
+   * code path at all (they self-dispatch binding.writeEvent, so the
+   * validator never flags them); core.rocker reaches it but has no sensible
+   * single-trigger fix (it reads a completely different field,
+   * props.zones[].writeEvent) so it falls through to `null` here too.
+   * @param {object} comp
+   * @returns {Array<{trigger: string, action: {type: string}}>|null}
+   */
+  proposeWireUp(comp) {
+    const row = (trigger) => ({ trigger, action: { type: 'core.dispatchEvent' } });
+    switch (comp.type) {
+      case 'core.button':
+        return [row('tap')];
+      case 'core.rotary': {
+        const rows = [row('fineChange')];
+        if (comp.binding?.pushEvent) rows.push(row('push'));
+        return rows;
+      }
+      case 'core.stepper':
+        return [row('increment'), row('decrement')];
+      case 'core.list':
+        return [row('itemTap')];
+      case 'core.pad':
+        // PadComponent only fires positionChange in absolute mode (the
+        // default relative mode fires panDelta instead) — proposing the
+        // wrong one would pass this validator's check but never fire.
+        return [row(comp.props?.mode === 'absolute' ? 'positionChange' : 'panDelta')];
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Wave 0b (V20 export block): gates export on StudioValidator's
+   * blockingIssues — "this control looks connected and provably cannot
+   * work," not style/lint warnings (those stay non-blocking, on the live
+   * badge only). Loops because fixing one component doesn't guarantee
+   * another isn't still unresolved; re-validates after every "Wire this up"
+   * so the loop always reflects current state.
+   * @returns {Promise<boolean>} true once nothing blocks export (or there was
+   *   nothing to block in the first place); false if the author cancelled.
+   */
+  async resolveBlockingIssues() {
+    for (;;) {
+      const result = StudioValidator.validate(this.state.widgetDef);
+      if (!result.blockingIssues.length) return true;
+
+      const issue = result.blockingIssues[0];
+      const comp = this.state.getComponent(issue.componentId);
+      const proposedRows = comp ? this.proposeWireUp(comp) : null;
+      const moreCount = result.blockingIssues.length - 1;
+      const moreNote = moreCount > 0 ? `<p class="modal-confirm-text">(+ ${moreCount} more issue${moreCount > 1 ? 's' : ''} after this one.)</p>` : '';
+
+      if (!proposedRows) {
+        await openModal({
+          title: 'Export Blocked',
+          bodyHtml: `
+            <p class="modal-confirm-text">${escapeHtml(issue.message)}</p>
+            ${moreNote}
+            <p class="modal-confirm-text">Fix this in the Inspector, then export again.</p>
+          `,
+          submitLabel: 'Close',
+          cancelLabel: 'Close'
+        });
+        return false;
+      }
+
+      const rowsHtml = proposedRows.map((r) => `<li><code>${escapeHtml(r.trigger)}</code> → Dispatch Sim Event</li>`).join('');
+      const proceed = await openModal({
+        title: 'Export Blocked — Component Not Wired Up',
+        bodyHtml: `
+          <p class="modal-confirm-text">${escapeHtml(issue.message)}</p>
+          ${moreNote}
+          <p class="modal-confirm-text">Add the following interaction${proposedRows.length > 1 ? 's' : ''} to "${escapeHtml(comp.id)}" to fix it?</p>
+          <ul class="val-list">${rowsHtml}</ul>
+        `,
+        submitLabel: 'Wire This Up',
+        cancelLabel: 'Cancel Export'
+      });
+      if (!proceed) return false;
+
+      const next = [...(comp.interactions || []), ...proposedRows];
+      this.state.updateComponent(comp.id, { interactions: next }, true, 'Wire Up Write Event');
+      this.showToast(`Wired up "${comp.id}" — checking for more issues…`);
+      // Loop: re-validate in case another component still has a blocking issue.
+    }
+  }
+
+  /**
+   * Gate in front of every export path (file, .fdwidget, clipboard): checks
+   * for a provably-broken binding first (V20 — hard block, see
+   * resolveBlockingIssues()), then warns about any referenced-but-unsaved
+   * popover (nothing to bundle for it) and asks before proceeding. Silently
+   * proceeds straight to the export when there's nothing to warn about, so
+   * this adds zero friction to the common case (no issues, no popovers, or
+   * all of them already saved).
    * @param {'fdwidget'|'json'|'clipboard'} format
    */
   async confirmExport(format) {
+    const canProceed = await this.resolveBlockingIssues();
+    if (!canProceed) return;
+
     const { exportDef, missingIds } = this.buildBundledExportDef(this.state.widgetDef);
 
     if (missingIds.length > 0) {

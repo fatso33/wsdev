@@ -61,14 +61,21 @@ export class StudioValidator {
   /**
    * Validates a complete Widget Definition against FDWS v1.1
    * @param {object} def
-   * @returns {{ valid: boolean, errors: string[], warnings: string[], capabilitiesSummary: { readSimVars: string[], writeEvents: string[] } }}
+   * @returns {{ valid: boolean, errors: string[], warnings: string[], blockingIssues: Array<{code: string, componentId: string, message: string}>, capabilitiesSummary: { readSimVars: string[], writeEvents: string[] } }}
    */
   static validate(def) {
     const errors = [];
     const warnings = [];
+    // Wave 0b (V20): a small, separately-typed subset of "real" issues that
+    // can gate an action (export) beyond just warning about them — a
+    // dedicated `code`, not a string-match against `warnings[]`, since this
+    // is the one push site this validator already fully controls. Additive:
+    // warnings/errors keep their existing flat-string shape for every other
+    // consumer (the live badge, the report modal).
+    const blockingIssues = [];
 
     if (!def || typeof def !== 'object') {
-      return { valid: false, errors: ['Widget Definition must be a valid JSON object.'], warnings: [], capabilitiesSummary: { readSimVars: [], writeEvents: [] } };
+      return { valid: false, errors: ['Widget Definition must be a valid JSON object.'], warnings: [], blockingIssues: [], capabilitiesSummary: { readSimVars: [], writeEvents: [] } };
     }
 
     // 1. Top-Level Specification Envelope
@@ -495,7 +502,17 @@ export class StudioValidator {
                 && (!i.action.event || i.action.event.trim() === comp.binding.writeEvent.trim())
               ));
               if (!consumed) {
-                warnings.push(`Component "${comp.id}" sets binding.writeEvent ("${comp.binding.writeEvent}") but this component type doesn't send it automatically, and no interaction dispatches it (add e.g. tap → "Dispatch Sim Event" with Event left blank to use this binding) — nothing on this component currently sends this value to the simulator.`);
+                // Wave 0b: core.rocker never reads binding.writeEvent at all —
+                // it dispatches per-zone via props.zones[].writeEvent instead
+                // (RockerComponent.js) — so an interaction row here would
+                // silence this warning without fixing anything real. Say so,
+                // and don't offer the "Wire this up" auto-fix for this type
+                // (StudioMenuBar.js's WIRE_UP_TABLE excludes core.rocker).
+                const message = comp.type === 'core.rocker'
+                  ? `Component "${comp.id}" sets binding.writeEvent ("${comp.binding.writeEvent}") but core.rocker never reads this field — each zone dispatches its OWN "Write Deck Event" (per-zone, in the zones list), independent of this one. This field currently does nothing; set it per-zone instead, or clear it.`
+                  : `Component "${comp.id}" sets binding.writeEvent ("${comp.binding.writeEvent}") but this component type doesn't send it automatically, and no interaction dispatches it (add e.g. tap → "Dispatch Sim Event" with Event left blank to use this binding) — nothing on this component currently sends this value to the simulator.`;
+                warnings.push(message);
+                blockingIssues.push({ code: 'UNWIRED_WRITE_EVENT', componentId: comp.id, message });
               }
             }
           }
@@ -763,6 +780,7 @@ export class StudioValidator {
       valid: errors.length === 0,
       errors,
       warnings,
+      blockingIssues,
       capabilitiesSummary: {
         readSimVars: Array.from(detectedReadSimVars),
         writeEvents: Array.from(detectedWriteEvents)
