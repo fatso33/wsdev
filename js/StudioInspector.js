@@ -505,7 +505,7 @@ export class StudioInspector {
           <label>Display Name (Title)</label>
           <input type="text" id="w-meta-name" class="prop-input" value="${def.meta?.name || ''}" placeholder="e.g. NAV 1 Radio" />
         </div>
-        <div class="prop-row-2">
+        <div class="prop-row-2" data-tier="build">
           <div class="prop-field">
             <label>Short Name</label>
             <input type="text" id="w-meta-short" class="prop-input" value="${def.meta?.shortName || ''}" placeholder="NAV1" />
@@ -521,11 +521,11 @@ export class StudioInspector {
             </select>
           </div>
         </div>
-        <div class="prop-field">
+        <div class="prop-field" data-tier="build">
           <label>Package ID (Reverse-DNS)</label>
           <input type="text" id="w-id" class="prop-input" value="${def.id || ''}" placeholder="com.author.widgetname" />
         </div>
-        <div class="prop-row-2">
+        <div class="prop-row-2" data-tier="build">
           <div class="prop-field">
             <label>Revision</label>
             <input type="number" id="w-revision" class="prop-input" value="${def.revision || 1}" min="1" />
@@ -535,7 +535,7 @@ export class StudioInspector {
             <input type="text" id="w-author" class="prop-input" value="${def.meta?.author || ''}" placeholder="Author Name" />
           </div>
         </div>
-        <div class="prop-field">
+        <div class="prop-field" data-tier="build">
           <label>Description</label>
           <textarea id="w-desc" class="prop-textarea" rows="2" placeholder="Brief widget description...">${def.meta?.description || ''}</textarea>
         </div>
@@ -556,8 +556,8 @@ export class StudioInspector {
       const grid = layout.grid || { columns: 12, rows: 6 };
 
       body.innerHTML = `
-        <div class="prop-section-subtitle">Internal Sub-Grid</div>
-        <div class="prop-row-2">
+        <div class="prop-section-subtitle" data-tier="build">Internal Sub-Grid</div>
+        <div class="prop-row-2" data-tier="build">
           <div class="prop-field">
             <label>Sub-Grid Columns</label>
             <input type="number" id="w-grid-cols" class="prop-input" value="${grid.columns || 12}" min="2" max="64" />
@@ -568,8 +568,8 @@ export class StudioInspector {
           </div>
         </div>
 
-        <div class="prop-section-subtitle" style="margin-top:10px;">Page Slot Footprint (Columns × Rows)</div>
-        <div class="prop-row-2">
+        <div class="prop-section-subtitle" style="margin-top:10px;" data-tier="build">Page Slot Footprint (Columns × Rows)</div>
+        <div class="prop-row-2" data-tier="build">
           <div class="prop-field">
             <label>Default Width (W)</label>
             <input type="number" id="w-def-w" class="prop-input" value="${layout.defaultW || 8}" min="1" max="44" />
@@ -579,7 +579,7 @@ export class StudioInspector {
             <input type="number" id="w-def-h" class="prop-input" value="${layout.defaultH || 4}" min="1" max="44" />
           </div>
         </div>
-        <div class="prop-row-2">
+        <div class="prop-row-2" data-tier="advanced">
           <div class="prop-field">
             <label>Min Size (W × H)</label>
             <div style="display:flex;gap:4px;">
@@ -637,7 +637,7 @@ export class StudioInspector {
 
       body.innerHTML = `
         ${themeEdit.isOverrideEdit ? `<div class="theme-override-banner">Editing ${this.state.previewTheme.toUpperCase()} theme override</div>` : ''}
-        <div class="prop-row-2">
+        <div class="prop-row-2" data-tier="build">
           <div class="prop-field">
             <label>Border Width (px)</label>
             <input type="number" id="w-border-w" class="prop-input" value="${border.width ?? 1}" min="0" max="10" ${themeEdit.isOverrideEdit ? 'disabled title="Structural — edit on the base theme."' : ''} />
@@ -647,7 +647,7 @@ export class StudioInspector {
             <input type="number" id="w-border-rad" class="prop-input" value="${border.radius ?? 10}" min="0" max="24" ${themeEdit.isOverrideEdit ? 'disabled title="Structural — edit on the base theme."' : ''} />
           </div>
         </div>
-        <div class="prop-field">
+        <div class="prop-field" data-tier="build">
           <label>Border Color</label>
           <div class="color-picker-wrap">
             <input type="color" id="w-border-clr-pick" value="${this.toHexColor(effBorderColor) || '#1f2937'}" />
@@ -655,7 +655,7 @@ export class StudioInspector {
           </div>
         </div>
 
-        <div class="prop-field" style="margin-top:10px;">
+        <div class="prop-field" style="margin-top:10px;" data-tier="build">
           <label>Background Type</label>
           <select id="w-bg-type" class="prop-select">
             <option value="color" ${effBg.type === 'color' ? 'selected' : ''}>Solid Color</option>
@@ -663,7 +663,7 @@ export class StudioInspector {
             <option value="image" ${effBg.type === 'image' ? 'selected' : ''}>Embedded Asset Image</option>
           </select>
         </div>
-        <div id="w-bg-custom-field" class="prop-field">
+        <div id="w-bg-custom-field" class="prop-field" data-tier="build">
           <label>Background Value</label>
           ${effBg.type === 'color' ? `
             <div class="color-picker-wrap">
@@ -740,14 +740,14 @@ export class StudioInspector {
       const otherTheme = baseTheme === 'light' ? 'dark' : 'light';
 
       body.innerHTML = `
-        <div class="prop-field">
+        <div class="prop-field" data-tier="build">
           <label>Designed For <span class="prop-hint" title="Which theme this widget's style properties are literally authored for. Every component's style.* is that theme's color — switching this does NOT recolor anything, it just changes which theme is treated as the base.">ⓘ</span></label>
           <select id="w-theme-base" class="prop-select">
             <option value="dark" ${baseTheme === 'dark' ? 'selected' : ''}>Dark</option>
             <option value="light" ${baseTheme === 'light' ? 'selected' : ''}>Light</option>
           </select>
         </div>
-        <div class="prop-field">
+        <div class="prop-field" data-tier="advanced">
           <label>${otherTheme === 'light' ? 'Light' : 'Dark'} Theme <span class="prop-hint" title="Auto: the app's dark/light switcher derives this theme's colors automatically from the ones above. Manual: author it yourself, field by field, per component.">ⓘ</span></label>
           <select id="w-theme-mode" class="prop-select">
             <option value="auto" ${themeMode === 'auto' ? 'selected' : ''}>Auto-derive</option>
@@ -755,7 +755,7 @@ export class StudioInspector {
           </select>
         </div>
         ${themeMode === 'manual' ? `
-          <div class="empty-tree-notice" style="margin-top:8px;">
+          <div class="empty-tree-notice" style="margin-top:8px;" data-tier="advanced">
             Switch the canvas's Live Theme Preview (sun/moon button) to <strong>${otherTheme}</strong> to edit that theme's colors — every component's Text/Border/Background Color fields will target the ${otherTheme} override instead of the base ${baseTheme} style. New components start from an auto-derived ${otherTheme} color you can then adjust.
           </div>
         ` : ''}
@@ -779,7 +779,12 @@ export class StudioInspector {
     // field, per the standing rule that no FDWS addition goes out JSON-only.
     this.container.appendChild(this.buildAccordionGroup('DECK EVENTS (v1.27)', false, (body) => {
       const events = def.deckEvents || [];
+      // Part 2, Slice 3: wholly Full-tier (declaring custom Deck Events for
+      // other authors' profile mapping is advanced work, not build-a-widget
+      // work) — one wrap around the whole section rather than tagging every
+      // row, since the entire section hides or shows together.
       body.innerHTML = `
+        <div data-tier="advanced">
         <p class="prop-help">
           Names this widget binds to, plus the SimVar/event each should map to by
           default. PC Bridge copies a suggestion into its profile table on
@@ -793,6 +798,7 @@ export class StudioInspector {
         </p>
         <div id="de-list"></div>
         <button id="de-add" class="panel-full-btn" style="margin-top:8px;">+ Declare a Deck Event</button>
+        </div>
       `;
 
       const list = body.querySelector('#de-list');
@@ -901,7 +907,11 @@ export class StudioInspector {
     // Group 4: Capabilities Summary (§11 Rule 5)
     this.container.appendChild(this.buildAccordionGroup('CAPABILITIES MATRIX (§11)', false, (body) => {
       const caps = def.capabilities || { readSimVars: [], writeEvents: [] };
+      // Part 2, Slice 3: wholly Full-tier — diagnostic/export-time summary,
+      // not build-time work. One wrap around the whole section, same
+      // reasoning as DECK EVENTS above.
       body.innerHTML = `
+        <div data-tier="advanced">
         <div class="caps-summary-box">
           <div class="caps-sub-title">READ SIMVARS (${caps.readSimVars?.length || 0}):</div>
           <div class="caps-tags-list">
@@ -914,6 +924,7 @@ export class StudioInspector {
           </div>
         </div>
         <button id="btn-sync-caps" class="panel-full-btn" style="margin-top:8px;">Sync Capabilities with Components</button>
+        </div>
       `;
 
       body.querySelector('#btn-sync-caps')?.addEventListener('click', () => {
