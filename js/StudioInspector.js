@@ -3651,6 +3651,8 @@ export class StudioInspector {
     let selectedName = current;
     let searchQuery = '';
     let rawUnit = comp.binding?.unit || '';
+    let testResult = '';
+    let testBusy = false;
 
     const proposedRows = isWrite ? proposeWireUp(comp) : null;
 
@@ -3717,16 +3719,36 @@ export class StudioInspector {
       `;
     };
 
+    const testTabHtml = () => {
+      if (isWrite) {
+        return `
+          <div class="prop-hint-block" style="font-size:11px;opacity:0.7;">A write event can't be verified by reading it back — firing it and watching a SimVar change is the only real proof. That's Fire &amp; Watch, in the SimVar Tester drawer below; this hands off there with the event pre-filled.</div>
+          <button type="button" class="bar-btn" id="cn-test-firewatch" style="margin-top:8px;" ${selectedName ? '' : 'disabled'}>Open in Fire &amp; Watch →</button>
+        `;
+      }
+      if (!selectedName) {
+        return `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;">Pick or type a SimVar first, then come back here to test it live.</div>`;
+      }
+      return `
+        <div class="prop-field">
+          <label>${escapeHtmlAttr(selectedName)}</label>
+          <button type="button" class="bar-btn" id="cn-test-probe" ${testBusy ? 'disabled' : ''}>${testBusy ? 'Testing…' : 'Test'}</button>
+        </div>
+        <div class="svt-result">${escapeHtmlAttr(testResult)}</div>
+      `;
+    };
+
     const bodyHtml = () => `
-      <div class="prop-row-2" style="margin-bottom:8px;">
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
         <button type="button" class="mode-toggle-btn ${activeTab === 'catalogue' ? 'active' : ''}" id="cn-tab-catalogue" style="flex:1;">Catalogue</button>
         <button type="button" class="mode-toggle-btn ${activeTab === 'raw' ? 'active' : ''}" id="cn-tab-raw" style="flex:1;">Raw Address</button>
+        <button type="button" class="mode-toggle-btn ${activeTab === 'test' ? 'active' : ''}" id="cn-tab-test" style="flex:1;">Test</button>
       </div>
       ${activeTab === 'catalogue' ? `
         <input type="text" id="cn-search" class="prop-input" placeholder="Search by name…" value="${escapeHtmlAttr(searchQuery)}" style="margin-bottom:8px;" />
         <div id="cn-catalogue-rows" style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto;">${catalogueRowsHtml()}</div>
-      ` : rawTabHtml()}
-      <div id="cn-pairing">${pairingHtml()}</div>
+      ` : activeTab === 'raw' ? rawTabHtml() : testTabHtml()}
+      <div id="cn-pairing">${activeTab === 'test' ? '' : pairingHtml()}</div>
     `;
 
     const result = await openModal({
@@ -3774,6 +3796,47 @@ export class StudioInspector {
           });
           unitInput?.addEventListener('input', () => { rawUnit = unitInput.value.trim(); });
         };
+        const rerenderTestTab = () => {
+          card.querySelector('.modal-body').innerHTML = bodyHtml();
+          wireTestTab();
+        };
+        const wireTestTab = () => {
+          card.querySelector('#cn-test-firewatch')?.addEventListener('click', () => {
+            this.simVarTester?.prefillFireAndWatch(selectedName);
+          });
+          card.querySelector('#cn-test-probe')?.addEventListener('click', async () => {
+            if (!this.simBridge?.connected) {
+              testResult = 'Not connected to PC Bridge — set the server address from the status pill in the top bar.';
+              rerenderTestTab();
+              return;
+            }
+            testBusy = true;
+            testResult = '';
+            rerenderTestTab();
+            try {
+              // Same shape-check openConnectDialog uses to decide the initial
+              // tab (:3650) — a raw address always matches, a Deck Event
+              // logical name never does, so this is provenance-free.
+              if (/^(A|L):/i.test(selectedName)) {
+                const value = await this.simBridge.probeReadSimVar(selectedName, rawUnit);
+                testResult = `✅ Live value: ${value}`;
+              } else {
+                const resolved = await this.simBridge.resolveDeckEvent(selectedName);
+                if (!resolved) {
+                  testResult = `"${selectedName}" has no mapping in the active profile.`;
+                } else {
+                  const value = await this.simBridge.probeReadSimVar(resolved.simVar, resolved.unit);
+                  testResult = `✅ Live value: ${value} (${resolved.simVar}, unit ${resolved.unit})`;
+                }
+              }
+            } catch (err) {
+              testResult = `❌ ${err.message}`;
+            } finally {
+              testBusy = false;
+              rerenderTestTab();
+            }
+          });
+        };
 
         card.querySelector('#cn-tab-catalogue')?.addEventListener('click', () => {
           activeTab = 'catalogue';
@@ -3784,6 +3847,11 @@ export class StudioInspector {
           activeTab = 'raw';
           card.querySelector('.modal-body').innerHTML = bodyHtml();
           wireRawTab();
+        });
+        card.querySelector('#cn-tab-test')?.addEventListener('click', () => {
+          activeTab = 'test';
+          card.querySelector('.modal-body').innerHTML = bodyHtml();
+          wireTestTab();
         });
 
         if (activeTab === 'catalogue') wireCatalogueTab(); else wireRawTab();

@@ -128,6 +128,22 @@ export class StudioSimVarTester {
     this.container.classList.remove('open');
   }
 
+  open() {
+    this.isOpen = true;
+    this.container.classList.remove('closed');
+    this.container.classList.add('open');
+  }
+
+  /** External entry point (Connect dialog's Test tab, write kind): a write
+   *  target chosen elsewhere has no meaningful inline probe — only Fire &
+   *  Watch actually verifies it, and that needs a user-chosen SimVar to
+   *  observe. Prefill the event and hand off here rather than fake a test. */
+  prefillFireAndWatch(event) {
+    const input = this.container.querySelector('#svt-fw-event');
+    if (input) input.value = event;
+    this.open();
+  }
+
   handleParse() {
     const resultEl = this.container.querySelector('#svt-result');
     const testBtn = this.container.querySelector('#svt-test');

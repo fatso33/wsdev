@@ -173,6 +173,11 @@ export class StudioApp {
     const testerEl = document.getElementById('studio-simvartester-container');
     this.simVarTester = new StudioSimVarTester(testerEl, this.state, this.simBridge);
     this.statusBar = new StudioStatusBar(statusBarEl, this.state, this.simBench, this.simVarTester);
+    // Inspector is constructed before the tester exists (above) -- same
+    // loosely-coupled cross-panel wiring as state.testerParsed (tester ->
+    // inspector paste buttons), just the reverse direction (Connect dialog's
+    // Test tab -> Fire & Watch hand-off).
+    this.inspector.simVarTester = this.simVarTester;
 
     // Initial mount of the single active central viewport
     this.renderActiveViewport();
