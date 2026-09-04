@@ -775,6 +775,18 @@
   box-shadow: 0 0 8px #22c55e;
 }
 
+/* Step 3 Part A (2026-09-04): added alongside PropertyRegistry.js's core.indicator
+   severity fix — 'advisory' was a real registry/runtime value with no CSS rule at
+   all, so selecting it produced no visible effect. Matches --accent-cyan's cyan
+   used elsewhere in this codebase (e.g. TapeComponent's index line). */
+.fd-ind-sev-advisory.active .fd-ind-box,
+.fd-ind-sev-advisory.active .fd-ind-dot {
+  background: #22d3ee;
+  color: #0f172a;
+  border-color: #a5f3fc;
+  box-shadow: 0 0 10px #22d3ee;
+}
+
 .fd-ind-sev-caution.active .fd-ind-box,
 .fd-ind-sev-caution.active .fd-ind-dot {
   background: #eab308;

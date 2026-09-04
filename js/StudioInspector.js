@@ -2687,65 +2687,36 @@ export class StudioInspector {
         break;
       }
 
-      case 'core.indicator':
-        body.innerHTML = `
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Shape</label>
-              <select id="p-ind-shape" class="prop-select">
-                <option value="tile" ${props.shape === 'tile' ? 'selected' : ''}>Tile (Annunciator)</option>
-                <option value="dot" ${props.shape === 'dot' ? 'selected' : ''}>Dot (LED)</option>
-              </select>
-            </div>
-            <div class="prop-field">
-              <label>Severity</label>
-              <select id="p-ind-sev" class="prop-select">
-                <option value="warning" ${props.severity === 'warning' ? 'selected' : ''}>Warning (Red)</option>
-                <option value="caution" ${props.severity === 'caution' ? 'selected' : ''}>Caution (Amber)</option>
-                <option value="advisory" ${props.severity === 'advisory' ? 'selected' : ''}>Advisory (Cyan)</option>
-                <option value="status" ${props.severity === 'status' ? 'selected' : ''}>Status (Green/Blue)</option>
-              </select>
-            </div>
-          </div>
-          <div class="prop-field">
-            <label>Label</label>
-            <input type="text" id="p-ind-label" class="prop-input" value="${props.label || ''}" placeholder="PITOT HT" />
-          </div>
-        `;
-        body.querySelector('#p-ind-shape')?.addEventListener('change', (e) => this.updateCompProp(comp, 'shape', e.target.value));
-        body.querySelector('#p-ind-sev')?.addEventListener('change', (e) => this.updateCompProp(comp, 'severity', e.target.value));
-        body.querySelector('#p-ind-label')?.addEventListener('change', (e) => this.updateCompProp(comp, 'label', e.target.value));
+      // Step 3 Part A (2026-09-04): converted onto the registry-driven engine — also
+      // fixes two live registry/UI drift bugs: props.severity and props.shape were both
+      // declared in PropertyRegistry.js with option values that matched neither the
+      // runtime (IndicatorComponent.js) nor this hand-coded panel. Fixing the registry
+      // finally lights up optionIcons (implemented since Wave 1, dark until now since
+      // this type was blocked) — Part 1.1's color-swatch acceptance criterion.
+      //
+      // TYPE_FIELDS['core.indicator'] also declares binding.testStateVar — filtered out
+      // here (props.* only) because the existing hand-built Bindings panel already
+      // renders it directly (comp.type === 'core.indicator' gate, further up this file);
+      // passing it through here would render it a second time.
+      case 'core.indicator': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.indicator'].filter((f) => f.path.startsWith('props.')));
         break;
+      }
 
-      case 'core.image':
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Embedded Asset</label>
-            <select id="p-img-asset" class="prop-select">
-              <option value="" ${!props.assetId ? 'selected' : ''}>None</option>
-              ${assets.map((a) => `<option value="${a.id}" ${props.assetId === a.id ? 'selected' : ''}>${a.id} (${a.mimeType})</option>`).join('')}
-            </select>
-          </div>
-          <div class="prop-field">
-            <label>Object Fit</label>
-            <select id="p-img-fit" class="prop-select">
-              <option value="contain" ${props.fit === 'contain' ? 'selected' : ''}>Contain</option>
-              <option value="cover" ${props.fit === 'cover' ? 'selected' : ''}>Cover</option>
-              <option value="fill" ${props.fit === 'fill' ? 'selected' : ''}>Fill</option>
-            </select>
-          </div>
-          <div class="prop-field" data-tier="advanced">
-            <label>Render Mode <span class="prop-hint" title="FDWS v1.20: 'Inline SVG' injects the SVG asset as live markup instead of an opaque image — any shape inside it authored with fill=&quot;currentColor&quot;/stroke=&quot;currentColor&quot; then follows this component's Text Color field (Appearance panel below), including that field's own state-driven Conditional Formatting rules, so an instrument face can recolor at runtime. Has no effect on a non-SVG asset.">ⓘ</span></label>
-            <select id="p-img-rendermode" class="prop-select">
-              <option value="img" ${(!props.renderMode || props.renderMode === 'img') ? 'selected' : ''}>Image (opaque)</option>
-              <option value="inline" ${props.renderMode === 'inline' ? 'selected' : ''}>Inline SVG (tintable via Text Color)</option>
-            </select>
-          </div>
-        `;
-        body.querySelector('#p-img-asset')?.addEventListener('change', (e) => this.updateCompProp(comp, 'assetId', e.target.value));
-        body.querySelector('#p-img-fit')?.addEventListener('change', (e) => this.updateCompProp(comp, 'fit', e.target.value));
-        body.querySelector('#p-img-rendermode')?.addEventListener('change', (e) => this.updateCompProp(comp, 'renderMode', e.target.value));
+      // Step 3 Part A (2026-09-04): converted onto the registry-driven engine — also
+      // fixes a live registry/UI drift bug: props.fit's registry options included
+      // 'tile', not a valid CSS object-fit keyword (ImageComponent.js writes it
+      // straight into img.style.objectFit, so the browser silently ignored it); the
+      // real third option, 'fill', was missing. Corrected to match this panel's own
+      // (correct) values above.
+      case 'core.image': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.image']);
         break;
+      }
 
       case 'core.gauge': {
         const stateVars = this.state.widgetDef.state || [];
@@ -2992,130 +2963,78 @@ export class StudioInspector {
         break;
       }
 
-      case 'core.slider':
-        body.innerHTML = `
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Axis</label>
-              <select id="p-slider-axis" class="prop-select">
-                <option value="y" ${(!props.axis || props.axis === 'y') ? 'selected' : ''}>Vertical (Y)</option>
-                <option value="x" ${props.axis === 'x' ? 'selected' : ''}>Horizontal (X)</option>
-              </select>
-            </div>
-            <div class="prop-field">
-              <label>Min / Max</label>
-              <input type="text" id="p-slider-minmax" class="prop-input" value="${props.min ?? 0}, ${props.max ?? 100}" />
-            </div>
-          </div>
-          <div id="p-slider-detents-mount"></div>
-        `;
-        body.querySelector('#p-slider-axis')?.addEventListener('change', (e) => this.updateCompProp(comp, 'axis', e.target.value));
-        body.querySelector('#p-slider-minmax')?.addEventListener('change', (e) => {
-          const [min, max] = e.target.value.split(',').map((s) => Number(s.trim()));
-          const nextProps = { ...props, min, max };
-          this.state.updateComponent(comp.id, { props: nextProps });
-        });
-        this.renderRowListEditor(body.querySelector('#p-slider-detents-mount'), comp, 'detents', props.detents || [], {
-          title: 'Detents',
-          hint: 'Snap points along the track — drag near one and it locks to that value.',
-          fields: [
-            { key: 'value', label: 'Value', type: 'number', default: 0 },
-            { key: 'label', label: 'Label', type: 'text', default: '' },
-            { key: 'snap', label: 'Snaps', type: 'checkbox', default: true }
-          ]
-        });
+      // Step 3 Part A (2026-09-04): core.slider/core.selector/core.rocker/core.ref
+      // converted onto the registry-driven engine; core.list is a hybrid (registry
+      // fields + the unchanged hand-coded Item Template JSON editor appended after —
+      // that field needs JSON.parse validation the generic engine's controls don't
+      // have, so it stays intentionally bespoke, see PropertyRegistry.js's
+      // itemTemplate comment). Each fixes real registry/UI drift bugs found while
+      // verifying the conversion against the runtime, not just display gaps — see
+      // PropertyRegistry.js's per-field "Step 3 Part A" comments:
+      //   - core.slider/core.rocker's props.axis had options ('horizontal'/'vertical')
+      //     that matched neither the runtime's literal 'x'/'y' check nor this file's
+      //     own hand-coded selects above — same bug class as core.pad's already-fixed
+      //     props.mode. core.selector's props.mode/axis didn't match the runtime OR
+      //     this hand-coded panel at all (registry had 'discrete'/'continuous'; runtime
+      //     is 'rotary'/'lever', with axis meaningful only in lever mode).
+      //   - core.list's props.itemsBinding is now declared at the real nested path
+      //     (props.itemsBinding.stateVar) instead of the object itself; props.textBinding
+      //     removed entirely — ListComponent.js never reads it on this type's own props,
+      //     only on a CHILD component's props inside itemTemplate.components[].
+      //   - core.ref's props.libraryId control changed from 'widgetLibraryPicker' (never
+      //     implemented) to 'text' — matching what this panel always actually was.
+      case 'core.slider': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.slider']);
         break;
+      }
 
-      case 'core.selector':
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Mode</label>
-            <select id="p-sel-mode" class="prop-select">
-              <option value="rotary" ${(!props.mode || props.mode === 'rotary') ? 'selected' : ''}>Rotary</option>
-              <option value="lever" ${props.mode === 'lever' ? 'selected' : ''}>Lever</option>
-            </select>
-          </div>
-          <div id="p-sel-positions-mount"></div>
-        `;
-        body.querySelector('#p-sel-mode')?.addEventListener('change', (e) => this.updateCompProp(comp, 'mode', e.target.value));
-        this.renderRowListEditor(body.querySelector('#p-sel-positions-mount'), comp, 'positions', props.positions || [], {
-          title: 'Positions',
-          hint: (props.mode === 'lever') ? 'Discrete stops along the lever, in order.' : 'Discrete stops around the dial — angle is degrees clockwise from top.',
-          fields: [
-            { key: 'value', label: 'Value', type: 'text', default: '' },
-            { key: 'label', label: 'Label', type: 'text', default: '' },
-            ...(props.mode === 'lever' ? [] : [{ key: 'angle', label: 'Angle°', type: 'number', default: 0 }])
-          ]
-        });
+      case 'core.selector': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.selector']);
         break;
+      }
 
-      case 'core.rocker':
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Axis</label>
-            <select id="p-rocker-axis" class="prop-select">
-              <option value="y" ${(!props.axis || props.axis === 'y') ? 'selected' : ''}>Vertical (Y)</option>
-              <option value="x" ${props.axis === 'x' ? 'selected' : ''}>Horizontal (X)</option>
-            </select>
-          </div>
-          <div id="p-rocker-zones-mount"></div>
-        `;
-        body.querySelector('#p-rocker-axis')?.addEventListener('change', (e) => this.updateCompProp(comp, 'axis', e.target.value));
-        this.renderRowListEditor(body.querySelector('#p-rocker-zones-mount'), comp, 'zones', props.zones || [], {
-          title: 'Zones',
-          hint: 'Each zone is a spring-loaded press-and-hold half of the rocker (e.g. trim up / trim down).',
-          fields: [
-            { key: 'id', label: 'Zone ID', type: 'text', default: '' },
-            { key: 'label', label: 'Label', type: 'text', default: '' },
-            { key: 'writeEvent', label: 'Write Event', type: 'deckEvent', default: '' },
-            { key: 'repeatRate', label: 'Repeat ms', type: 'number', default: 100 }
-          ]
-        });
+      case 'core.rocker': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.rocker']);
         break;
+      }
 
-      case 'core.list':
-        body.innerHTML = `
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Items State Var</label>
-              <input type="text" id="p-list-statevar" class="prop-input" value="${props.itemsBinding?.stateVar || ''}" placeholder="flightPlanLegs" />
-            </div>
-            <div class="prop-field">
-              <label>Max Visible</label>
-              <input type="number" id="p-list-maxvisible" class="prop-input" value="${props.maxVisible ?? ''}" />
-            </div>
-          </div>
-          <div class="prop-field">
-            <label>Item Template (JSON — components[] with props.textBinding: "item.field")
-              <button type="button" id="p-list-template-example" class="btn-mini-inline">Insert example</button>
-            </label>
-            <textarea id="p-list-itemtemplate" class="prop-input" rows="5">${JSON.stringify(props.itemTemplate || { components: [] }, null, 0)}</textarea>
-            <div id="p-list-itemtemplate-error" class="prop-json-error hidden"></div>
-          </div>
+      case 'core.list': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.list']);
+
+        const templateWrap = document.createElement('div');
+        templateWrap.className = 'prop-field';
+        templateWrap.innerHTML = `
+          <label>Item Template (JSON — components[] with props.textBinding: "item.field")
+            <button type="button" id="p-list-template-example" class="btn-mini-inline">Insert example</button>
+          </label>
+          <textarea id="p-list-itemtemplate" class="prop-input" rows="5">${JSON.stringify(props.itemTemplate || { components: [] }, null, 0)}</textarea>
+          <div id="p-list-itemtemplate-error" class="prop-json-error hidden"></div>
         `;
-        body.querySelector('#p-list-statevar')?.addEventListener('change', (e) => {
-          const nextProps = { ...props, itemsBinding: { ...(props.itemsBinding || {}), stateVar: e.target.value } };
-          this.state.updateComponent(comp.id, { props: nextProps });
+        body.appendChild(templateWrap);
+        templateWrap.querySelector('#p-list-itemtemplate')?.addEventListener('change', (e) => {
+          this.updateCompJsonProp(comp, 'itemTemplate', e.target.value, templateWrap.querySelector('#p-list-itemtemplate-error'));
         });
-        body.querySelector('#p-list-maxvisible')?.addEventListener('change', (e) => this.updateCompProp(comp, 'maxVisible', Number(e.target.value) || undefined));
-        body.querySelector('#p-list-itemtemplate')?.addEventListener('change', (e) => {
-          this.updateCompJsonProp(comp, 'itemTemplate', e.target.value, body.querySelector('#p-list-itemtemplate-error'));
-        });
-        body.querySelector('#p-list-template-example')?.addEventListener('click', () => {
+        templateWrap.querySelector('#p-list-template-example')?.addEventListener('click', () => {
           const example = { components: [{ id: 'row_label', type: 'core.label', layout: { col: 1, row: 1, w: 12, h: 1 }, props: { text: '', textBinding: 'item.label' } }] };
           this.updateCompProp(comp, 'itemTemplate', example);
         });
         break;
+      }
 
-      case 'core.ref':
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Library ID (reverse-DNS)</label>
-            <input type="text" id="p-ref-libraryid" class="prop-input" value="${props.libraryId || ''}" placeholder="com.example.numerickeypad12" />
-          </div>
-        `;
-        body.querySelector('#p-ref-libraryid')?.addEventListener('change', (e) => this.updateCompProp(comp, 'libraryId', e.target.value));
+      case 'core.ref': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.ref']);
         break;
+      }
 
       // Wave 1 gap-closing pass (2026-09-04): core.divider/core.tape/core.pad/
       // core.container/core.stepper/core.rotary all converted onto the registry-driven
@@ -3423,7 +3342,15 @@ export class StudioInspector {
     number: (comp, field, mount) => this.renderPlainField(comp, field, mount, 'number'),
     checkbox: (comp, field, mount) => this.renderCheckboxField(comp, field, mount),
     select: (comp, field, mount) => this.renderSelectField(comp, field, mount),
-    color: (comp, field, mount) => this.renderColorField(comp, field, mount)
+    color: (comp, field, mount) => this.renderColorField(comp, field, mount),
+    // Step 3 Part A (2026-09-04): rowListEditor/detentEditor are the same underlying
+    // renderRowListEditor() (see that method's own header comment) — both control
+    // names stay distinct in the registry for self-documentation, resolving to one
+    // implementation here, same as the registry already did before this engine existed.
+    rowListEditor: (comp, field, mount) => this.renderRowListField(comp, field, mount),
+    detentEditor: (comp, field, mount) => this.renderRowListField(comp, field, mount),
+    stateVarPicker: (comp, field, mount) => this.renderStateVarField(comp, field, mount),
+    assetPicker: (comp, field, mount) => this.renderAssetField(comp, field, mount)
   };
 
   /** path.split('.') get, tolerant of missing intermediate objects. */
@@ -3487,6 +3414,12 @@ export class StudioInspector {
     mount.innerHTML = '';
     fields.forEach((field) => {
       if (field.control === null) return; // deprecated/hidden, e.g. props.align
+      // Step 3 Part A (2026-09-04): 'bespoke' is a DIFFERENT skip reason from null —
+      // the field is real and has working UI, it's just intentionally hand-rendered
+      // outside this engine (e.g. core.list's itemTemplate, which needs JSON.parse
+      // validation this engine's controls don't have). Distinct from null so a future
+      // "which fields have no UI at all" check can tell the two apart.
+      if (field.control === 'bespoke') return;
       if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen)) return;
       const renderer = this.FIELD_RENDERERS[field.control];
       if (!renderer) {
@@ -3575,6 +3508,60 @@ export class StudioInspector {
       </div>
     `;
     this.wireColorPair(mount, `${id}-pick`, id, (v) => this.commitField(comp, field.path, v));
+  }
+
+  /**
+   * Step 3 Part A (2026-09-04): registry-driven wrapper around the existing,
+   * unmodified renderRowListEditor() (used directly by core.gauge's still-hand-coded
+   * arc.bands, and by this wrapper for everything else). Reads `field.rowSpec.fields`
+   * — the per-field "row spec" the registry previously had no way to declare, so every
+   * hand-coded call site built its own — filters columns by their own optional
+   * `showWhen` (e.g. core.selector's Angle column, lever-mode-only), and always commits
+   * via commitField(comp, field.path, nextList), which already handles both top-level
+   * paths (positions/zones/detents, this pass) and nested ones (arc.bands, Part B)
+   * identically — no commitOverride hack needed for new callers.
+   */
+  renderRowListField(comp, field, mount) {
+    const rows = this.getFieldValue(comp, field.path) || [];
+    const visibleFields = (field.rowSpec?.fields || []).filter((f) => !f.showWhen || this.evaluateShowWhen(comp, f.showWhen));
+    this.renderRowListEditor(mount, comp, field.path, rows, {
+      title: this.humanizeFieldLabel(field.path),
+      hint: field.tooltip,
+      fields: visibleFields,
+      commitOverride: (nextList) => this.commitField(comp, field.path, nextList)
+    });
+  }
+
+  /** Step 3 Part A: plain <select> from this widget's state[] vars, mirroring the 3 existing hand-coded instances of this exact pattern. */
+  renderStateVarField(comp, field, mount) {
+    const label = this.humanizeFieldLabel(field.path);
+    const id = this.fieldDomId(field.path);
+    const value = this.getFieldValue(comp, field.path) ?? field.default;
+    const stateVars = this.state.widgetDef.state || [];
+    mount.innerHTML = `
+      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
+      <select id="${id}" class="prop-select">
+        <option value="" ${!value ? 'selected' : ''}>— none —</option>
+        ${stateVars.map((s) => `<option value="${escapeHtmlAttr(s.name)}" ${value === s.name ? 'selected' : ''}>${escapeHtmlAttr(s.name)} (${escapeHtmlAttr(s.type)})</option>`).join('')}
+      </select>
+    `;
+    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => this.commitField(comp, field.path, e.target.value || undefined));
+  }
+
+  /** Step 3 Part A: plain <select> from this widget's assets[], mirroring the existing core.image hand-coded select. */
+  renderAssetField(comp, field, mount) {
+    const label = this.humanizeFieldLabel(field.path);
+    const id = this.fieldDomId(field.path);
+    const value = this.getFieldValue(comp, field.path) ?? field.default;
+    const assets = this.state.widgetDef.assets || [];
+    mount.innerHTML = `
+      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
+      <select id="${id}" class="prop-select">
+        <option value="" ${!value ? 'selected' : ''}>None</option>
+        ${assets.map((a) => `<option value="${escapeHtmlAttr(a.id)}" ${value === a.id ? 'selected' : ''}>${escapeHtmlAttr(a.id)} (${escapeHtmlAttr(a.mimeType)})</option>`).join('')}
+      </select>
+    `;
+    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => this.commitField(comp, field.path, e.target.value || undefined));
   }
 
   updateCompProp(comp, propKey, value) {

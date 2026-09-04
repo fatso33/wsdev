@@ -395,8 +395,20 @@ export const TYPE_FIELDS = {
     // a native <option> can't hold nested markup (no <span> swatch), so this
     // is the actual mechanism behind Part 1.1's "colour-coded select options
     // show their colour" acceptance criterion.
-    { path: 'props.severity', control: 'select', options: ['normal', 'caution', 'warning'], tier: 'simple', group: 'Content', default: 'normal', optionIcons: { normal: '🟢', caution: '🟡', warning: '🔴' }, tooltip: 'Color/urgency treatment.' },
-    { path: 'props.shape', control: 'select', options: ['round', 'square'], tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Indicator shape.' },
+    //
+    // Step 3 Part A (2026-09-04): the options/default below were wrong —
+    // IndicatorComponent.js:15,18 actually reads severity as
+    // 'status'|'advisory'|'caution'|'warning' (default 'status'), not the old
+    // 'normal'/'caution'/'warning' set, and the hand-coded panel it's replacing
+    // already used the correct 4 values. optionIcons corrected to match, not
+    // dropped — widgets.css now defines .fd-ind-sev-advisory (cyan) alongside
+    // the pre-existing status/caution/warning rules, so all four are real,
+    // visibly distinct colors the icons faithfully mirror.
+    { path: 'props.severity', control: 'select', options: [{ value: 'status', label: 'Status (Green)' }, { value: 'advisory', label: 'Advisory (Cyan)' }, { value: 'caution', label: 'Caution (Amber)' }, { value: 'warning', label: 'Warning (Red)' }], tier: 'simple', group: 'Content', default: 'status', optionIcons: { status: '🟢', advisory: '🔵', caution: '🟡', warning: '🔴' }, tooltip: 'Color/urgency treatment.' },
+    // Step 3 Part A: options/default were 'round'/'square' — IndicatorComponent.js:15
+    // actually reads 'tile'/'dot' (default 'tile'); neither old value has any CSS
+    // backing at all (widgets.css only defines fd-ind-shape via fd-ind-box/fd-ind-dot).
+    { path: 'props.shape', control: 'select', options: [{ value: 'tile', label: 'Tile (Annunciator)' }, { value: 'dot', label: 'Dot (LED)' }], tier: 'advanced', group: 'Content', default: 'tile', tooltip: 'Indicator shape.' },
     // FDWS v1.15: declarative lamp test — wire the same state var into every
     // indicator's Test State Var, then one button toggling that var lights
     // them all, regardless of each indicator's own real bound value.
@@ -452,19 +464,51 @@ export const TYPE_FIELDS = {
     { path: 'props.columns', control: 'number', tier: 'simple', group: 'Layout', default: 2, tooltip: 'Number of columns, when Direction is "grid".', showWhen: { path: 'props.direction', equals: 'grid' } }
   ],
   'core.slider': [
-    { path: 'props.axis', control: 'select', options: ['horizontal', 'vertical'], tier: 'simple', group: 'Content', default: undefined, tooltip: 'Slide direction.' },
+    // Step 3 Part A (2026-09-04): options were 'horizontal'/'vertical' — SliderComponent.js:17
+    // actually checks `props.axis === 'x' ? 'x' : 'y'`; either old value silently fell
+    // through to 'y', same bug class as core.pad's already-fixed props.mode.
+    { path: 'props.axis', control: 'select', options: [{ value: 'x', label: 'Horizontal (X)' }, { value: 'y', label: 'Vertical (Y)' }], tier: 'simple', group: 'Content', default: 'y', tooltip: 'Slide direction.' },
     { path: 'props.min', control: 'number', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Minimum value.' },
     { path: 'props.max', control: 'number', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Maximum value.' },
-    { path: 'props.detents', control: 'detentEditor', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Positions the slider snaps/clicks to along its travel.' }
+    { path: 'props.detents', control: 'detentEditor', tier: 'advanced', group: 'Content', default: undefined,
+      rowSpec: { fields: [
+        { key: 'value', label: 'Value', type: 'number', default: 0 },
+        { key: 'label', label: 'Label', type: 'text', default: '' },
+        { key: 'snap', label: 'Snaps', type: 'checkbox', default: true }
+      ] },
+      tooltip: 'Positions the slider snaps/clicks to along its travel.' }
   ],
   'core.selector': [
-    { path: 'props.axis', control: 'select', options: ['horizontal', 'vertical', 'rotary'], tier: 'simple', group: 'Content', default: undefined, tooltip: 'How the selector is arranged/operated.' },
-    { path: 'props.mode', control: 'select', options: ['discrete', 'continuous'], tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Whether the selector snaps between named positions or moves continuously.' },
-    { path: 'props.positions', control: 'rowListEditor', tier: 'simple', group: 'Content', default: undefined, tooltip: 'The named positions this selector can be set to (e.g. OFF / L / R / BOTH / START).' }
+    // Step 3 Part A (2026-09-04): axis/mode below were both wrong and conflated two
+    // independent runtime concerns. SelectorComponent.js:18 reads props.mode as
+    // 'lever'|'rotary' (old registry had 'discrete'/'continuous' — neither hand-coded
+    // panel nor runtime ever used those). props.axis (SelectorComponent.js:42,
+    // `=== 'x' ? 'x' : 'y'`) is meaningful ONLY in lever mode (old registry options
+    // 'horizontal'/'vertical'/'rotary' matched nothing, and the hand-coded panel it's
+    // replacing never even rendered an axis control).
+    { path: 'props.mode', control: 'select', options: [{ value: 'rotary', label: 'Rotary' }, { value: 'lever', label: 'Lever' }], tier: 'simple', group: 'Content', default: 'rotary', tooltip: 'Rotary snaps between positions arranged in a circle; Lever snaps along a straight track.' },
+    { path: 'props.axis', control: 'select', options: [{ value: 'x', label: 'Horizontal (X)' }, { value: 'y', label: 'Vertical (Y)' }], tier: 'advanced', group: 'Content', default: 'y', showWhen: { path: 'props.mode', equals: 'lever' }, tooltip: 'Lever travel direction. Not used by Rotary.' },
+    { path: 'props.positions', control: 'rowListEditor', tier: 'simple', group: 'Content', default: undefined,
+      rowSpec: { fields: [
+        { key: 'value', label: 'Value', type: 'text', default: '' },
+        { key: 'label', label: 'Label', type: 'text', default: '' },
+        { key: 'angle', label: 'Angle°', type: 'number', default: 0, showWhen: { path: 'props.mode', notEquals: 'lever' } }
+      ] },
+      tooltip: 'The named positions this selector can be set to (e.g. OFF / L / R / BOTH / START). Angle (degrees clockwise from top) only applies in Rotary mode.' }
   ],
   'core.rocker': [
-    { path: 'props.axis', control: 'select', options: ['horizontal', 'vertical'], tier: 'simple', group: 'Content', default: undefined, tooltip: 'Rocker tilt direction.' },
-    { path: 'props.zones', control: 'rowListEditor', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Press zones (e.g. up/down halves) and what each dispatches.' }
+    // Step 3 Part A (2026-09-04): options were 'horizontal'/'vertical' — RockerComponent.js:18
+    // actually checks `props.axis === 'x' ? 'row' : 'column'`; same bug class as
+    // core.slider's axis above.
+    { path: 'props.axis', control: 'select', options: [{ value: 'x', label: 'Horizontal (X)' }, { value: 'y', label: 'Vertical (Y)' }], tier: 'simple', group: 'Content', default: 'y', tooltip: 'Rocker tilt direction.' },
+    { path: 'props.zones', control: 'rowListEditor', tier: 'advanced', group: 'Content', default: undefined,
+      rowSpec: { fields: [
+        { key: 'id', label: 'Zone ID', type: 'text', default: '' },
+        { key: 'label', label: 'Label', type: 'text', default: '' },
+        { key: 'writeEvent', label: 'Write Event', type: 'deckEvent', default: '' },
+        { key: 'repeatRate', label: 'Repeat ms', type: 'number', default: 100 }
+      ] },
+      tooltip: 'Press zones (e.g. up/down halves) and what each dispatches.' }
   ],
   'core.stepper': [
     { path: 'props.min', control: 'number', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Minimum value.' },
@@ -483,7 +527,11 @@ export const TYPE_FIELDS = {
   ],
   'core.image': [
     { path: 'props.assetId', control: 'assetPicker', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Image from this widget’s Asset Library to display.' },
-    { path: 'props.fit', control: 'select', options: ['cover', 'contain', 'tile'], tier: 'advanced', group: 'Content', default: 'contain', tooltip: 'How the image fills its box.' },
+    // Step 3 Part A (2026-09-04): 'tile' is not a valid CSS object-fit keyword —
+    // ImageComponent.js:49 writes props.fit straight into img.style.objectFit, so the
+    // browser silently ignores it. The hand-coded panel's real third option was 'fill'
+    // (valid CSS), missing from the registry.
+    { path: 'props.fit', control: 'select', options: ['cover', 'contain', 'fill'], tier: 'advanced', group: 'Content', default: 'contain', tooltip: 'How the image fills its box.' },
     // FDWS v1.20 §2: "inline" only has an effect when the chosen asset is an
     // SVG — a PNG/JPEG/WEBP asset falls back to the normal <img> render
     // regardless of this setting (nothing to inline). See props.renderMode's
@@ -491,14 +539,30 @@ export const TYPE_FIELDS = {
     { path: 'props.renderMode', control: 'select', options: ['img', 'inline'], tier: 'advanced', group: 'Content', default: 'img', tooltip: 'FDWS v1.20: "Inline SVG" injects an SVG asset as live markup instead of an opaque <img> — any shape inside it authored with fill="currentColor"/stroke="currentColor" then follows this component\'s Text Color field (below), including that field\'s own state-driven style.rules — so an instrument face can recolor at runtime instead of being permanently baked into one static image. No effect on non-SVG assets.' }
   ],
   'core.list': [
-    { path: 'props.itemsBinding', control: 'stateVarPicker', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Array-typed state variable this list renders one row per item from.' },
-    { path: 'props.itemTemplate', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Template describing how each row is rendered from its item object.' },
-    { path: 'props.textBinding', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Object key read from each item for its display text.' },
+    // Step 3 Part A (2026-09-04): path was 'props.itemsBinding' with control
+    // stateVarPicker, implying a plain string. ListComponent.js:22,33 and the
+    // hand-coded panel both treat it as an object wrapping { stateVar } — corrected to
+    // the real nested path.
+    { path: 'props.itemsBinding.stateVar', control: 'stateVarPicker', tier: 'simple', group: 'Content', default: undefined, tooltip: 'Array-typed state variable this list renders one row per item from.' },
+    // Step 3 Part A: control changed from 'text' to 'bespoke' — this field needs
+    // JSON.parse + validation (updateCompJsonProp) the generic text control doesn't
+    // have, so it stays intentionally hand-rendered (see StudioInspector.js's
+    // core.list case). 'bespoke' is a distinct marker from control:null ("deprecated/
+    // hidden") — this field is neither; it's a real, working field with UI on purpose.
+    { path: 'props.itemTemplate', control: 'bespoke', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Template describing how each row is rendered from its item object.' },
     { path: 'props.maxVisible', control: 'number', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Rows visible before scrolling.' },
     { path: 'props.scrollable', control: 'checkbox', tier: 'advanced', group: 'Content', default: false, tooltip: 'Allows scrolling past Max Visible rows instead of clipping them.' }
+    // Step 3 Part A: props.textBinding removed — ListComponent.js never reads
+    // this.def.props.textBinding; the only real textBinding read (:71) is on a CHILD
+    // component's own props inside itemTemplate.components[], a different object
+    // entirely. Declaring it here was dead — it had zero runtime effect on core.list
+    // itself.
   ],
   'core.ref': [
-    { path: 'props.libraryId', control: 'widgetLibraryPicker', tier: 'simple', group: 'Content', default: undefined, tooltip: 'ID of a shared widget-library component this one embeds.' }
+    // Step 3 Part A (2026-09-04): control changed from 'widgetLibraryPicker' (never
+    // implemented — no such picker exists anywhere) to 'text', matching what the
+    // hand-coded panel it's replacing actually was: a plain free-text input.
+    { path: 'props.libraryId', control: 'text', tier: 'simple', group: 'Content', default: undefined, tooltip: 'ID of a shared widget-library component this one embeds.' }
   ],
   'core.pad': [
     // Wave 1 gap-closing pass (2026-09-04): options were ['xy','x','y'] — stale, and not
