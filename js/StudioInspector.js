@@ -4,7 +4,7 @@
  * Organized into intuitive, structured accordion property groups adhering strictly to FDWS v1.4
  */
 
-import { StudioValidator } from './StudioValidator.js';
+import { StudioValidator, isWriteEventConsumed, proposeWireUp, SELF_DISPATCHING_WRITE_EVENT_TYPES } from './StudioValidator.js';
 import { SecurityValidator } from '../core/SecurityValidator.js';
 import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_NAMES } from '../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
@@ -1421,7 +1421,10 @@ export class StudioInspector {
         </div>
         <div class="prop-field" data-tier="advanced">
           <label>Read Deck Event (Telemetry In)</label>
-          <select id="c-bind-read" class="prop-select">${buildDefaultOptions('read', binding.readSimVar)}</select>
+          <div class="prop-row-2">
+            <select id="c-bind-read" class="prop-select">${buildDefaultOptions('read', binding.readSimVar)}</select>
+            <button type="button" class="btn-small" id="c-bind-read-connect" style="flex:0 0 auto;">Connect…</button>
+          </div>
         </div>
         <div class="prop-field prop-custom-block ${readIsCustom ? '' : 'hidden'}" id="c-bind-read-custom-block">
           <label>Custom Deck Event (used by another saved widget)</label>
@@ -1482,7 +1485,10 @@ export class StudioInspector {
         </div>
         <div class="prop-field" data-tier="advanced">
           <label>Write Deck Event (SimConnect Out)</label>
-          <select id="c-bind-write" class="prop-select">${buildDefaultOptions('write', binding.writeEvent)}</select>
+          <div class="prop-row-2">
+            <select id="c-bind-write" class="prop-select">${buildDefaultOptions('write', binding.writeEvent)}</select>
+            <button type="button" class="btn-small" id="c-bind-write-connect" style="flex:0 0 auto;">Connect…</button>
+          </div>
         </div>
         <div class="prop-field prop-custom-block ${writeIsCustom ? '' : 'hidden'}" id="c-bind-write-custom-block">
           <label>Custom Deck Event (used by another saved widget)</label>
@@ -1618,6 +1624,11 @@ export class StudioInspector {
       wireBindingKind('write', 'writeEvent');
       wireBindingKind('ack', 'ackEvent');
       wireBindingKind('push', 'pushEvent');
+
+      // Part 5a, Slice 1: additive — the dropdown/custom-input fields above
+      // stay the direct-edit escape hatch; Connect is the new recommended path.
+      body.querySelector('#c-bind-read-connect')?.addEventListener('click', () => this.openConnectDialog(comp, def, 'read'));
+      body.querySelector('#c-bind-write-connect')?.addEventListener('click', () => this.openConnectDialog(comp, def, 'write'));
 
       // Wires one Connect-to-Simulator category+variable pair (kind: 'read'
       // or 'write') straight onto the same bindingField the Advanced dropdown
@@ -3591,6 +3602,219 @@ export class StudioInspector {
     this.state.updateComponent(comp.id, { interactions: nextInteractions });
   }
 
+  /**
+   * Part 5a, Slice 1: the Connect dialog — Catalogue + Raw Address tabs.
+   * `kind` is 'read' (binding.readSimVar) or 'write' (binding.writeEvent).
+   * Additive: the existing Advanced dropdown/custom-input fields and the
+   * Simple-mode two-step picker are untouched and stay fully usable — this
+   * is a new, recommended entry point, not a replacement (design principle
+   * 6, "escape hatches stay, and stop being the only route" — not "become
+   * the only route").
+   *
+   * The write-kind commit is the V20 fix: picking a write target here also
+   * proposes (default-checked) the interaction that makes it actually fire,
+   * reusing StudioValidator's isWriteEventConsumed()/proposeWireUp() so a
+   * Connect-created binding can't end up in the "looks wired, does nothing"
+   * state those exist to detect. Test tab (SimVar Tester reuse) and "Use
+   * this component's own value" (syncFrom, V14) are deliberately not part
+   * of this slice — see the plan file's Context section.
+   */
+  async openConnectDialog(comp, def, kind) {
+    const isWrite = kind === 'write';
+    const bindingField = isWrite ? 'writeEvent' : 'readSimVar';
+    const sanitizeKind = isWrite ? 'event' : 'simvar';
+    const current = comp.binding?.[bindingField] || '';
+
+    const stateVars = def.state || [];
+    const savedWidgets = this.state.loadSavedWidgets().filter((w) => w.id !== def.id);
+    const customDeckEvents = extractCustomDeckEvents(savedWidgets, DECK_EVENT_NAMES).map((e) => ({
+      ...e,
+      source: e.widgetIds.length ? `used by ${e.widgetIds.join(', ')}` : ''
+    }));
+    const packEvents = getPackSuggestedEvents()
+      .filter((e) => !customDeckEvents.some((c) => c.name === e.name))
+      .map((e) => ({ name: e.name, kind: e.kind, source: `from pack: ${e.fromPack}` }));
+    // Same "previously used" data the existing Custom… dropdown already
+    // reads (buildCustomOptions, above) — surfaced here as browsable rows
+    // and as autocomplete suggestions on the Raw Address tab, not a new
+    // list. This project does not grow simvar/event coverage lists by any
+    // method (see project memory) — this is existing in-app data only.
+    const mergedCustom = [...customDeckEvents, ...packEvents].filter((e) => e.kind === kind);
+
+    const catalogueItems = getDeckEventsByKind(kind);
+    const categories = [...new Set(catalogueItems.map((e) => e.category))];
+
+    // Dialog-local state, mutated in place across re-renders (same pattern
+    // openAddInteractionModal's contextRows uses) rather than re-opening
+    // the modal on every interaction.
+    let activeTab = /^(A|L|H|K):/i.test(current) ? 'raw' : 'catalogue';
+    let selectedName = current;
+    let searchQuery = '';
+    let rawUnit = comp.binding?.unit || '';
+
+    const proposedRows = isWrite ? proposeWireUp(comp) : null;
+
+    const catalogueRowsHtml = () => {
+      const q = searchQuery.trim().toLowerCase();
+      const matches = (e) => !q || e.label.toLowerCase().includes(q) || e.name.toLowerCase().includes(q);
+      const rows = catalogueItems.filter(matches).map((e) => `
+        <button type="button" class="row-list-item cn-pick" data-name="${escapeHtmlAttr(e.name)}" style="width:100%;text-align:left;cursor:pointer;${selectedName === e.name ? 'outline:1px solid var(--accent-cyan);' : ''}">
+          <div style="flex:1;min-width:0;">
+            <div>${escapeHtmlAttr(e.label)}</div>
+            <div style="font-size:10px;color:var(--text-label);">${escapeHtmlAttr(e.name)} · ${escapeHtmlAttr(CATEGORY_LABELS[e.category] || e.category)}</div>
+          </div>
+        </button>
+      `).join('');
+      const customRows = mergedCustom.filter(matches).map((e) => `
+        <button type="button" class="row-list-item cn-pick" data-name="${escapeHtmlAttr(e.name)}" style="width:100%;text-align:left;cursor:pointer;${selectedName === e.name ? 'outline:1px solid var(--accent-cyan);' : ''}">
+          <div style="flex:1;min-width:0;">
+            <div>${escapeHtmlAttr(e.name)}</div>
+            <div style="font-size:10px;color:var(--text-label);">${escapeHtmlAttr(e.source || '')}</div>
+          </div>
+        </button>
+      `).join('');
+      return `
+        ${rows || '<div class="caps-empty">No matches in this widget\'s Deck Events catalogue.</div>'}
+        ${customRows ? `<div class="prop-section-subtitle" style="margin-top:8px;">Previously Used</div>${customRows}` : ''}
+      `;
+    };
+
+    const rawTabHtml = () => `
+      <div class="prop-field">
+        <label>${isWrite ? 'Raw SimConnect Event (H:/K:...)' : 'Raw SimVar (A:/L:...)'}</label>
+        <input type="text" id="cn-raw-input" class="prop-input" value="${escapeHtmlAttr(activeTab === 'raw' ? selectedName : '')}" placeholder="${isWrite ? 'e.g. H:GTN750_DirectToPush' : 'e.g. L:FBW_TAXI_LIGHT_INTENSITY'}" list="cn-raw-suggestions" />
+        <datalist id="cn-raw-suggestions">${mergedCustom.map((e) => `<option value="${escapeHtmlAttr(e.name)}"></option>`).join('')}</datalist>
+        <div class="prop-sanitize-diff hidden" id="cn-raw-diff"></div>
+      </div>
+      ${!isWrite ? `
+        <div class="prop-field">
+          <label>SimConnect Unit <span class="prop-hint" title="Only a raw address's unit is yours to set — a Deck Event's unit comes from the active PC Bridge profile, which is why this field only appears here, not on the Catalogue tab. Leave blank to use the host's default ('Number'). For a TEXT variable (TITLE, ATC MODEL, ATC ID) type 'string'.">ⓘ</span></label>
+          <input type="text" id="cn-raw-unit" class="prop-input" value="${escapeHtmlAttr(rawUnit)}" placeholder="Number" />
+        </div>
+      ` : ''}
+    `;
+
+    const pairingHtml = () => {
+      if (!isWrite || !selectedName) return '';
+      // Matches StudioValidator's own exemptions exactly (comp.type dictates
+      // this, never the chosen event) — these types dispatch binding.writeEvent
+      // themselves at runtime, so no interaction is needed or meaningful.
+      if (SELF_DISPATCHING_WRITE_EVENT_TYPES.includes(comp.type)) {
+        return `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-top:8px;">This component type sends this value automatically — no interaction needed.</div>`;
+      }
+      if (isWriteEventConsumed({ ...comp, binding: { ...comp.binding, writeEvent: selectedName } })) {
+        return `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-top:8px;">Already wired — an existing interaction dispatches this event.</div>`;
+      }
+      if (!proposedRows) {
+        return `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-top:8px;">This component type has no single-trigger auto-wire — add an interaction manually (Behavior panel) once connected, or it won't do anything yet.</div>`;
+      }
+      const rowsDesc = proposedRows.map((r) => `<code>${escapeHtmlAttr(r.trigger)}</code>`).join(' + ');
+      return `
+        <label class="prop-field" style="display:flex;align-items:center;gap:6px;font-size:11px;margin-top:8px;">
+          <input type="checkbox" id="cn-pair-checkbox" checked />
+          Also add: ${rowsDesc} → Dispatch Sim Event — without this, setting the event alone does nothing when tapped.
+        </label>
+      `;
+    };
+
+    const bodyHtml = () => `
+      <div class="prop-row-2" style="margin-bottom:8px;">
+        <button type="button" class="mode-toggle-btn ${activeTab === 'catalogue' ? 'active' : ''}" id="cn-tab-catalogue" style="flex:1;">Catalogue</button>
+        <button type="button" class="mode-toggle-btn ${activeTab === 'raw' ? 'active' : ''}" id="cn-tab-raw" style="flex:1;">Raw Address</button>
+      </div>
+      ${activeTab === 'catalogue' ? `
+        <input type="text" id="cn-search" class="prop-input" placeholder="Search by name…" value="${escapeHtmlAttr(searchQuery)}" style="margin-bottom:8px;" />
+        <div id="cn-catalogue-rows" style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto;">${catalogueRowsHtml()}</div>
+      ` : rawTabHtml()}
+      <div id="cn-pairing">${pairingHtml()}</div>
+    `;
+
+    const result = await openModal({
+      title: `Connect — ${isWrite ? 'Write to' : 'Read from'} Simulator`,
+      bodyHtml: bodyHtml(),
+      submitLabel: 'Connect',
+      wide: true,
+      onMount: (card) => {
+        const pairingMount = () => card.querySelector('#cn-pairing');
+        const refreshPairing = () => { pairingMount().innerHTML = pairingHtml(); };
+
+        const wireCatalogueTab = () => {
+          card.querySelector('#cn-search')?.addEventListener('input', (e) => {
+            searchQuery = e.target.value;
+            card.querySelector('#cn-catalogue-rows').innerHTML = catalogueRowsHtml();
+            wireCatalogueRows();
+          });
+          wireCatalogueRows();
+        };
+        const wireCatalogueRows = () => {
+          card.querySelectorAll('.cn-pick').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              selectedName = btn.dataset.name;
+              rawUnit = ''; // FDWS v1.2 §1.5: a catalogue pick's unit comes from the PC Bridge profile — a stale raw unit left over from a prior raw-address value would now be silently inert.
+              card.querySelectorAll('.cn-pick').forEach((b) => b.style.outline = b.dataset.name === selectedName ? '1px solid var(--accent-cyan)' : '');
+              refreshPairing();
+            });
+          });
+        };
+        const wireRawTab = () => {
+          const input = card.querySelector('#cn-raw-input');
+          const unitInput = card.querySelector('#cn-raw-unit');
+          const diffEl = card.querySelector('#cn-raw-diff');
+          const updateDiff = () => {
+            if (!input || !diffEl) return;
+            const { removed } = SecurityValidator.sanitizeWithReport(sanitizeKind, input.value);
+            diffEl.classList.toggle('hidden', removed.length === 0);
+            if (removed.length) diffEl.textContent = `Removed ${removed.map((c) => `"${c}"`).join(' ')} — only the cleaned text will be saved.`;
+          };
+          input?.addEventListener('input', () => {
+            const { cleaned } = SecurityValidator.sanitizeWithReport(sanitizeKind, input.value);
+            selectedName = cleaned;
+            updateDiff();
+            refreshPairing();
+          });
+          unitInput?.addEventListener('input', () => { rawUnit = unitInput.value.trim(); });
+        };
+
+        card.querySelector('#cn-tab-catalogue')?.addEventListener('click', () => {
+          activeTab = 'catalogue';
+          card.querySelector('.modal-body').innerHTML = bodyHtml();
+          wireCatalogueTab();
+        });
+        card.querySelector('#cn-tab-raw')?.addEventListener('click', () => {
+          activeTab = 'raw';
+          card.querySelector('.modal-body').innerHTML = bodyHtml();
+          wireRawTab();
+        });
+
+        if (activeTab === 'catalogue') wireCatalogueTab(); else wireRawTab();
+      },
+      onSubmit: (card) => {
+        if (!selectedName) return { error: `Choose or type a ${isWrite ? 'write event' : 'SimVar'} first.` };
+        const pairChecked = card.querySelector('#cn-pair-checkbox')?.checked ?? true;
+        return { value: { name: selectedName, unit: activeTab === 'raw' ? rawUnit : undefined, pair: pairChecked } };
+      }
+    });
+
+    if (!result) return;
+
+    const updates = { [bindingField]: result.name };
+    if (!isWrite) updates.unit = result.unit || undefined;
+
+    if (isWrite && result.pair) {
+      const withNewEvent = { ...comp, binding: { ...comp.binding, writeEvent: result.name } };
+      if (!isWriteEventConsumed(withNewEvent)) {
+        const rows = proposeWireUp(comp);
+        if (rows) {
+          this.state.updateComponent(comp.id, {
+            binding: { ...(comp.binding || {}), ...updates },
+            interactions: [...(comp.interactions || []), ...rows]
+          });
+          return;
+        }
+      }
+    }
+    this.state.updateComponent(comp.id, { binding: { ...(comp.binding || {}), ...updates } });
+  }
 
   // --- Widget Studio 2.0, Phase 6: collapsed-group summary badges ---
   // Deliberately plain, short, scannable strings — not full sentences — since

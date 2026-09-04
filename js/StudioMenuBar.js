@@ -5,7 +5,7 @@
  * Popover, Save, Import, Export, Undo, Redo.
  */
 
-import { StudioValidator } from './StudioValidator.js';
+import { StudioValidator, proposeWireUp } from './StudioValidator.js';
 import { STUDIO_TEMPLATES } from './StudioTemplates.js';
 import { openModal, confirmModal, showToast } from './StudioModal.js';
 import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
@@ -441,42 +441,6 @@ export class StudioMenuBar {
   }
 
   /**
-   * Wave 0b (V20 export block): the "Wire this up" proposal table — only for
-   * component types where a single correct trigger genuinely exists.
-   * Excluded deliberately (see StudioValidator.js's matching comment on the
-   * same exclusion): core.input/core.selector/core.slider never reach this
-   * code path at all (they self-dispatch binding.writeEvent, so the
-   * validator never flags them); core.rocker reaches it but has no sensible
-   * single-trigger fix (it reads a completely different field,
-   * props.zones[].writeEvent) so it falls through to `null` here too.
-   * @param {object} comp
-   * @returns {Array<{trigger: string, action: {type: string}}>|null}
-   */
-  proposeWireUp(comp) {
-    const row = (trigger) => ({ trigger, action: { type: 'core.dispatchEvent' } });
-    switch (comp.type) {
-      case 'core.button':
-        return [row('tap')];
-      case 'core.rotary': {
-        const rows = [row('fineChange')];
-        if (comp.binding?.pushEvent) rows.push(row('push'));
-        return rows;
-      }
-      case 'core.stepper':
-        return [row('increment'), row('decrement')];
-      case 'core.list':
-        return [row('itemTap')];
-      case 'core.pad':
-        // PadComponent only fires positionChange in absolute mode (the
-        // default relative mode fires panDelta instead) — proposing the
-        // wrong one would pass this validator's check but never fire.
-        return [row(comp.props?.mode === 'absolute' ? 'positionChange' : 'panDelta')];
-      default:
-        return null;
-    }
-  }
-
-  /**
    * Wave 0b (V20 export block): gates export on StudioValidator's
    * blockingIssues — "this control looks connected and provably cannot
    * work," not style/lint warnings (those stay non-blocking, on the live
@@ -493,7 +457,7 @@ export class StudioMenuBar {
 
       const issue = result.blockingIssues[0];
       const comp = this.state.getComponent(issue.componentId);
-      const proposedRows = comp ? this.proposeWireUp(comp) : null;
+      const proposedRows = comp ? proposeWireUp(comp) : null;
       const moreCount = result.blockingIssues.length - 1;
       const moreNote = moreCount > 0 ? `<p class="modal-confirm-text">(+ ${moreCount} more issue${moreCount > 1 ? 's' : ''} after this one.)</p>` : '';
 

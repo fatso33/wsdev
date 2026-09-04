@@ -42,7 +42,66 @@ const GRADIENT_VALUE_RE = /^(?:repeating-)?(?:linear|radial|conic)-gradient\(/i;
 // Wave 0a (V20): component types whose own runtime component class dispatches
 // binding.writeEvent itself (no interaction row required) — see the comment
 // at its one call site below for how this was verified.
-const SELF_DISPATCHING_WRITE_EVENT_TYPES = ['core.input', 'core.selector', 'core.slider'];
+export const SELF_DISPATCHING_WRITE_EVENT_TYPES = ['core.input', 'core.selector', 'core.slider'];
+
+/**
+ * Wave 0a (V20): does an interaction already exist that would dispatch
+ * comp.binding.writeEvent? A core.dispatchEvent action with no `event` of
+ * its own falls back to this field at runtime (InteractionDispatcher.js),
+ * so a blank-event row counts as consuming it too. Extracted here (Part 5a)
+ * so the Connect dialog (StudioInspector.js) can call the exact same check
+ * the validator's own blocking-issue detection uses, instead of a second,
+ * driftable copy.
+ * @param {object} comp
+ * @returns {boolean}
+ */
+export function isWriteEventConsumed(comp) {
+  if (!comp.binding?.writeEvent) return true;
+  return Array.isArray(comp.interactions) && comp.interactions.some((i) => (
+    i.action?.type === 'core.dispatchEvent'
+    && (!i.action.event || i.action.event.trim() === comp.binding.writeEvent.trim())
+  ));
+}
+
+/**
+ * Wave 0b (V20 export block), moved here Part 5a so both StudioMenuBar's
+ * export-time "Wire this up" flow AND the Connect dialog can propose the
+ * same correct trigger(s) — only for component types where a single
+ * correct trigger genuinely exists. Excluded deliberately:
+ * core.input/core.selector/core.slider never reach this at all (they
+ * self-dispatch binding.writeEvent, see SELF_DISPATCHING_WRITE_EVENT_TYPES
+ * above); core.rocker has no sensible single-trigger fix (it reads a
+ * completely different field, props.zones[].writeEvent) so it falls
+ * through to `null` here too. Each row deliberately leaves `action.event`
+ * unset — it rides the same fallback-to-binding.writeEvent precedence
+ * `isWriteEventConsumed()` above already checks for, so a later Connect
+ * re-pick of the write event doesn't orphan an already-wired interaction.
+ * @param {object} comp
+ * @returns {Array<{trigger: string, action: {type: string}}>|null}
+ */
+export function proposeWireUp(comp) {
+  const row = (trigger) => ({ trigger, action: { type: 'core.dispatchEvent' } });
+  switch (comp.type) {
+    case 'core.button':
+      return [row('tap')];
+    case 'core.rotary': {
+      const rows = [row('fineChange')];
+      if (comp.binding?.pushEvent) rows.push(row('push'));
+      return rows;
+    }
+    case 'core.stepper':
+      return [row('increment'), row('decrement')];
+    case 'core.list':
+      return [row('itemTap')];
+    case 'core.pad':
+      // PadComponent only fires positionChange in absolute mode (the
+      // default relative mode fires panDelta instead) — proposing the
+      // wrong one would pass this validator's check but never fire.
+      return [row(comp.props?.mode === 'absolute' ? 'positionChange' : 'panDelta')];
+    default:
+      return null;
+  }
+}
 
 export class StudioValidator {
   // Widget Studio 2.0, Phase 0 (adjustment pass): this was a fourth
@@ -497,11 +556,7 @@ export class StudioValidator {
             // repeats it explicitly. Without one, the Inspector's "Write Deck
             // Event" field looks like a working connection and does nothing.
             if (!SELF_DISPATCHING_WRITE_EVENT_TYPES.includes(comp.type)) {
-              const consumed = Array.isArray(comp.interactions) && comp.interactions.some((i) => (
-                i.action?.type === 'core.dispatchEvent'
-                && (!i.action.event || i.action.event.trim() === comp.binding.writeEvent.trim())
-              ));
-              if (!consumed) {
+              if (!isWriteEventConsumed(comp)) {
                 // Wave 0b: core.rocker never reads binding.writeEvent at all —
                 // it dispatches per-zone via props.zones[].writeEvent instead
                 // (RockerComponent.js) — so an interaction row here would
