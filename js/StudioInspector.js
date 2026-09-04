@@ -44,13 +44,27 @@ function resolveStateStyleConfig(comp) {
   return getStateStyleConfig(comp.type, comp.props);
 }
 
+// Wave 2 Part B2: short chip label for a style.rules[] entry's condition —
+// e.g. "oilTempF > 115" — used both as the rule chip's visible text and its
+// title tooltip (chips truncate with ellipsis once there are several).
+const RULE_OP_SYMBOLS = { equals: '=', notEquals: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' };
+function summarizeRuleCondition(when) {
+  if (!when || !when.state) return 'New Rule';
+  const op = Object.keys(RULE_OP_SYMBOLS).find((o) => when[o] !== undefined);
+  if (op) return `${when.state} ${RULE_OP_SYMBOLS[op]} ${when[op]}`;
+  if (Array.isArray(when.between)) return `${when.state} in [${when.between.join(', ')}]`;
+  return when.state;
+}
+
 // Wave 2 Part B1 (Part 4, first slice): the Appearance panel's field set,
 // filtered from COMMON_FIELDS rather than hand-listed, so a future FDWS
 // field addition to COMMON_FIELDS appears here automatically. Excludes
-// style.rules (its own panel, renderConditionalFormatting), style.states
-// (this IS the panel, not a field within it), and style.themeOverride.*
-// (the Theme chip — not part of this slice, see renderAppearanceSection's
-// own comment for why Theme stays hand-coded on the Base tab for now).
+// style.rules (Wave 2 Part B2: a rule's own fields are these SAME rows,
+// retargeted per-rule — this just excludes the `style.rules` row itself,
+// the array/panel-level entry, not its contents) and style.states (this IS
+// the panel, not a field within it), and style.themeOverride.* (the Theme
+// chip — not part of this slice, see renderAppearanceSection's own comment
+// for why Theme stays hand-coded on the Base tab for now).
 function getAppearanceFieldSpecs() {
   return REGISTRY_COMMON_FIELDS.filter((f) =>
     f.path.startsWith('style.') &&
@@ -839,6 +853,12 @@ export class StudioInspector {
     if (this._styleTabCompId !== comp.id) {
       this._styleTabCompId = comp.id;
       this._styleTab = 'normal';
+      // Wave 2 Part B2: which rule chip (by index into style.rules[]) is
+      // active, if any — takes precedence over _styleTab when set. Reset
+      // alongside _styleTab for the same reason: switching components must
+      // not leave a stale rule tab selected on a component with fewer (or
+      // no) rules.
+      this._styleTabRuleIndex = null;
     }
 
     const def = this.state.widgetDef;
@@ -1027,6 +1047,15 @@ export class StudioInspector {
       const stateCfg = resolveStateStyleConfig(comp);
       const themeEdit = this.getThemeEditContext();
       const assets = this.state.widgetDef.assets || [];
+      const stateVars = def.state || [];
+      // Wave 2 Part B2: rule chips — a third (fourth, counting Base) target
+      // for the same generic field engine, alongside Normal/State. Every
+      // component type supports style.rules (unlike interaction-state
+      // styling, which is per-type), so this renders regardless of stateCfg.
+      const rules = Array.isArray(style.rules) ? style.rules : [];
+      const activeRuleIndex = (this._styleTabRuleIndex != null && this._styleTabRuleIndex < rules.length)
+        ? this._styleTabRuleIndex : null;
+      const activeRule = activeRuleIndex !== null ? rules[activeRuleIndex] : null;
 
       // Wave 2 Part B1: Text Color, Border Color, and the whole Background
       // section stay hand-coded on the Base tab (see
@@ -1075,11 +1104,23 @@ export class StudioInspector {
         });
       }
 
-      // "normal" vs the one state name this component supports (see
-      // renderComponentInspector()'s reset of this._styleTab) — only ever
-      // "state" when stateCfg actually resolved, since that's the only way
-      // the toggle button that sets it gets rendered at all.
-      const activeTab = (stateCfg && this._styleTab === 'state') ? 'state' : 'normal';
+      // "normal" vs the one state name this component supports vs a rule —
+      // a rule chip (see renderComponentInspector()'s reset of
+      // this._styleTabRuleIndex) takes precedence when set, since it's only
+      // ever non-null via an explicit chip click or "+ Rule".
+      const activeTab = activeRuleIndex !== null ? 'rule' : ((stateCfg && this._styleTab === 'state') ? 'state' : 'normal');
+
+      // Wave 2 Part B2: the active rule's condition, read for the
+      // condition-editor block below — same grammar/fields as
+      // renderVisibilityAndGuard's visibleWhen row, deliberately not
+      // genericized (Part 4 widens what a rule can STYLE, not how its
+      // CONDITION is authored — see ConditionEvaluator.js).
+      const RULE_OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
+      const ruleCond = activeRule?.when || {};
+      const ruleCondIsCustom = !!ruleCond.state && !stateVars.some((s) => s.name === ruleCond.state);
+      const ruleCondOp = RULE_OPS.find((o) => ruleCond[o] !== undefined) || 'equals';
+      const ruleCondVal = ruleCondOp === 'between' ? (ruleCond.between || []).join(',') : (ruleCond[ruleCondOp] ?? '');
+      const ruleJsonOpen = activeRuleIndex !== null && !!this._conditionalStyleJsonOpen?.[activeRuleIndex];
 
       body.innerHTML = `
         ${themeEdit.isOverrideEdit ? `<div class="theme-override-banner">Editing ${this.state.previewTheme.toUpperCase()} theme override — Text/Border/Background Color apply only to this theme; other properties stay shared with the base ${themeEdit.baseTheme} style.</div>` : ''}
@@ -1098,13 +1139,46 @@ export class StudioInspector {
           `).join('')}
         </div>
 
-        ${stateCfg ? `
-        <div class="prop-row-2" style="margin:10px 0 12px;">
-          <button type="button" class="mode-toggle-btn ${activeTab === 'normal' ? 'active' : ''}" id="c-styletab-normal" style="flex:1;">Normal</button>
-          <button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="c-styletab-state" style="flex:1;">${stateCfg.tabLabel}</button>
+        <div class="prop-row-2" style="margin:10px 0 12px;flex-wrap:wrap;gap:6px;">
+          <button type="button" class="mode-toggle-btn ${activeTab === 'normal' ? 'active' : ''}" id="c-styletab-normal" style="flex:0 1 auto;">Normal</button>
+          ${stateCfg ? `<button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="c-styletab-state" style="flex:0 1 auto;">${stateCfg.tabLabel}</button>` : ''}
+          ${rules.map((r, i) => `<button type="button" class="mode-toggle-btn ${activeRuleIndex === i ? 'active' : ''}" data-rule-chip="${i}" style="flex:0 1 auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtmlAttr(summarizeRuleCondition(r.when))}">${escapeHtmlAttr(summarizeRuleCondition(r.when))}</button>`).join('')}
+          <button type="button" class="mode-toggle-btn" id="c-styletab-addrule" style="flex:0 1 auto;" title="Add a conditional style rule">+ Rule</button>
+        </div>
+        ${activeTab === 'state' ? `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style while this component is ${stateCfg.tabLabel.toLowerCase()}. Dimmed fields are inherited from the Normal style — edit one to override it just for this state, or (for Outline/Glow/Border Glow) check its own "Clear (don't inherit)" box to turn it off regardless of Base.</div>` : ''}
+        ${activeTab === 'rule' ? `
+        <div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style whenever this rule's condition is true — first matching rule wins over lower rules and over Normal. Dimmed fields are inherited from the Normal style, same as a state.</div>
+        <div class="prop-section-subtitle" style="margin-top:0;">Condition <span class="prop-hint" title="Same condition grammar as Visible When — a rule here only changes the STYLE, never whether the component shows at all.">ⓘ</span></div>
+        <div class="prop-row-2">
+          <div class="prop-field">
+            <label>State Var</label>
+            <select id="c-rule-cond-state" class="prop-select">
+              <option value="">— state var —</option>
+              ${stateVars.map((s) => `<option value="${s.name}" ${ruleCond.state === s.name ? 'selected' : ''}>${s.name}</option>`).join('')}
+              <option value="${CUSTOM_OPTION_VALUE}" ${ruleCondIsCustom ? 'selected' : ''}>Custom / nested path…</option>
+            </select>
+            <input type="text" id="c-rule-cond-state-custom" class="prop-input ${ruleCondIsCustom ? '' : 'hidden'}" value="${ruleCondIsCustom ? escapeHtmlAttr(ruleCond.state) : ''}" placeholder="e.g. presets[0].label" style="margin-top:4px;" />
+          </div>
+          <div class="prop-field">
+            <label>Operator</label>
+            <select id="c-rule-cond-op" class="prop-select">
+              ${RULE_OPS.map((op) => `<option value="${op}" ${ruleCondOp === op ? 'selected' : ''}>${op}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="prop-field">
+          <label>Value</label>
+          <input type="text" id="c-rule-cond-val" class="prop-input" value="${escapeHtmlAttr(ruleCondVal)}" placeholder="${ruleCondOp === 'between' ? 'lo,hi' : 'value'}" />
+        </div>
+        <div class="prop-row-2" style="margin-bottom:8px;">
+          <button type="button" id="c-rule-remove" class="bar-btn">Remove This Rule</button>
+          <button type="button" id="c-rule-json-toggle" class="bar-btn">${ruleJsonOpen ? 'Hide' : 'Advanced'} JSON</button>
+        </div>
+        <div class="${ruleJsonOpen ? '' : 'hidden'}" style="margin-bottom:10px;">
+          <textarea id="c-rule-json" class="prop-input" rows="4">${escapeHtmlAttr(JSON.stringify(activeRule?.style || {}, null, 0))}</textarea>
+          <div id="c-rule-json-error" class="prop-json-error hidden"></div>
         </div>
         ` : ''}
-        ${activeTab === 'state' ? `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style while this component is ${stateCfg.tabLabel.toLowerCase()}. Dimmed fields are inherited from the Normal style — edit one to override it just for this state, or (for Outline/Glow/Border Glow) check its own "Clear (don't inherit)" box to turn it off regardless of Base.</div>` : ''}
 
         <div id="c-appearance-fields"></div>
       `;
@@ -1134,14 +1208,100 @@ export class StudioInspector {
       // only ever builds the currently-active target's fields.
       body.querySelector('#c-styletab-normal')?.addEventListener('click', () => {
         this._styleTab = 'normal';
+        this._styleTabRuleIndex = null;
         this.render();
       });
       body.querySelector('#c-styletab-state')?.addEventListener('click', () => {
         this._styleTab = 'state';
+        this._styleTabRuleIndex = null;
+        this.render();
+      });
+      // Wave 2 Part B2: rule chips + "+ Rule".
+      body.querySelectorAll('[data-rule-chip]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this._styleTabRuleIndex = Number(btn.dataset.ruleChip);
+          this.render();
+        });
+      });
+      body.querySelector('#c-styletab-addrule')?.addEventListener('click', () => {
+        const nextRules = [...rules, { when: { state: stateVars[0]?.name || '', equals: '' }, style: { typography: { color: '#f87171' } } }];
+        this._styleTabRuleIndex = nextRules.length - 1;
+        this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } });
         this.render();
       });
 
-      const target = activeTab === 'state' ? { kind: 'state', name: stateCfg.name } : { kind: 'base' };
+      if (activeTab === 'rule' && activeRule) {
+        const commitRuleCondition = () => {
+          const stateSelect = body.querySelector('#c-rule-cond-state');
+          const stateCustom = body.querySelector('#c-rule-cond-state-custom');
+          const state = stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustom.value.trim() : stateSelect.value;
+          const op = body.querySelector('#c-rule-cond-op').value;
+          const rawVal = body.querySelector('#c-rule-cond-val').value;
+          const when = { state };
+          if (op === 'between') {
+            const [lo, hi] = rawVal.split(',').map((s) => Number(s.trim()));
+            when.between = [lo || 0, hi || 0];
+          } else if (['gt', 'gte', 'lt', 'lte'].includes(op)) {
+            when[op] = Number(rawVal) || 0;
+          } else {
+            when[op] = rawVal;
+          }
+          // Only `when` is ever touched here — `style` is read-only from this
+          // block's perspective, written solely by the generic field engine
+          // (or the Advanced JSON textarea below). Unlike the old row-list
+          // UI's readCurrentRow(), there is no shared-mutation hazard to
+          // guard against (V18): nothing here can accidentally drop a style
+          // sub-field, because nothing here ever touches style at all.
+          const nextRules = [...rules];
+          nextRules[activeRuleIndex] = { ...nextRules[activeRuleIndex], when };
+          this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } });
+        };
+        body.querySelector('#c-rule-cond-state')?.addEventListener('change', (e) => {
+          if (e.target.value === CUSTOM_OPTION_VALUE) {
+            body.querySelector('#c-rule-cond-state-custom')?.classList.remove('hidden');
+          } else {
+            body.querySelector('#c-rule-cond-state-custom')?.classList.add('hidden');
+            commitRuleCondition();
+          }
+        });
+        body.querySelector('#c-rule-cond-state-custom')?.addEventListener('change', commitRuleCondition);
+        body.querySelector('#c-rule-cond-op')?.addEventListener('change', commitRuleCondition);
+        body.querySelector('#c-rule-cond-val')?.addEventListener('change', commitRuleCondition);
+
+        body.querySelector('#c-rule-remove')?.addEventListener('click', async () => {
+          const ok = await confirmModal(`Remove this rule (${summarizeRuleCondition(activeRule.when)})?`, { title: 'Remove Rule', danger: true });
+          if (!ok) return;
+          const nextRules = rules.filter((_, i) => i !== activeRuleIndex);
+          this._styleTabRuleIndex = null;
+          this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules.length ? nextRules : undefined } });
+          this.render();
+        });
+
+        body.querySelector('#c-rule-json-toggle')?.addEventListener('click', () => {
+          this._conditionalStyleJsonOpen = this._conditionalStyleJsonOpen || {};
+          this._conditionalStyleJsonOpen[activeRuleIndex] = !this._conditionalStyleJsonOpen[activeRuleIndex];
+          this.render();
+        });
+        body.querySelector('#c-rule-json')?.addEventListener('change', (e) => {
+          try {
+            const parsedStyle = JSON.parse(e.target.value);
+            const nextRules = [...rules];
+            nextRules[activeRuleIndex] = { when: activeRule.when, style: parsedStyle };
+            body.querySelector('#c-rule-json-error')?.classList.add('hidden');
+            this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } });
+          } catch (err) {
+            const errEl = body.querySelector('#c-rule-json-error');
+            if (errEl) {
+              errEl.textContent = `Invalid JSON — edit not applied: ${err.message}`;
+              errEl.classList.remove('hidden');
+            }
+          }
+        });
+      }
+
+      const target = activeTab === 'rule' ? { kind: 'rule', index: activeRuleIndex }
+        : activeTab === 'state' ? { kind: 'state', name: stateCfg.name }
+        : { kind: 'base' };
       this.renderAppearanceSection(comp, body.querySelector('#c-appearance-fields'), target, { themeEdit, effTypoColor, effBorderColor, effBg, assets });
     })(appearanceBody.appendChild(document.createElement('div')));
 
@@ -1655,17 +1815,11 @@ export class StudioInspector {
     this.renderVisibilityAndGuard(comp, def, outerBody.appendChild(document.createElement('div')));
     }, this.buildBehaviorBadge(comp)));
 
-    // 8. Conditional Formatting (style.rules, FDWS v1.15) — swap this
-    // component's style (not just show/hide, that's visibleWhen above) when
-    // a condition is true. Reuses the same condition grammar/UI pattern as
-    // visibleWhen, deliberately — see ConditionEvaluator.js. Part of the
-    // Appearance group (appearanceBody created above, alongside dataBody).
-    const cfDivider = document.createElement('div');
-    cfDivider.className = 'prop-section-subtitle';
-    cfDivider.style.marginTop = '14px';
-    cfDivider.textContent = 'Conditional Formatting';
-    appearanceBody.appendChild(cfDivider);
-    this.renderConditionalFormatting(comp, def, appearanceBody.appendChild(document.createElement('div')));
+    // Wave 2 Part B2: Conditional Formatting (style.rules, FDWS v1.15) no
+    // longer has its own section here — a rule is now a target-strip chip
+    // in the Appearance panel's main IIFE above, alongside Normal/State,
+    // rendered through the same generic field engine. See
+    // renderAppearanceSection()'s doc comment.
   }
 
   renderVisibilityAndGuard(comp, def, body) {
@@ -1841,231 +1995,12 @@ export class StudioInspector {
     });
   }
 
-  /**
-   * FDWS v1.15 §style.rules — first-match-wins conditional style override.
-   * Each rule pairs one condition (same shape as a single visibleWhen row —
-   * compound allOf/anyOf isn't offered here, only the JSON escape hatch, since
-   * a single leaf condition covers the target use cases: "past this limit",
-   * "equals this state") with a compact style editor covering the two
-   * headline use cases (recolor text, swap background image for a
-   * photorealistic multi-position switch) plus border color. Anything beyond
-   * that (stroke, glow, align, orientation, gradient) is reachable via each
-   * rule's own "Advanced: edit style as JSON" fallback — same progressive-
-   * disclosure pattern as the Array Items editor and visibleWhen's own
-   * complex-expression fallback elsewhere in this file.
-   */
-  renderConditionalFormatting(comp, def, body) {
-    const stateVars = def.state || [];
-    const assets = def.assets || [];
-    const rules = Array.isArray(comp.style?.rules) ? comp.style.rules : [];
-    const OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
-    const stateIsCustomPath = (name) => !!name && !stateVars.some((s) => s.name === name);
-
-    const commitRules = (nextRules) => {
-      this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules.length ? nextRules : undefined } });
-    };
-
-    const ruleRowHtml = (rule, idx) => {
-      const cond = rule.when || {};
-      const isCustom = stateIsCustomPath(cond.state);
-      const styleObj = rule.style || {};
-      const bgType = styleObj.background?.type || 'none';
-      const jsonOpen = !!this._conditionalStyleJsonOpen?.[idx];
-      return `
-      <div class="row-list-item" data-rule-idx="${idx}" style="flex-direction:column;align-items:stretch;">
-        <div style="display:flex;gap:6px;align-items:flex-start;">
-          <div class="row-field-grid" style="flex:1;min-width:0;">
-            <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
-              <select class="rule-field cf-state prop-select" data-field="state">
-                <option value="">— state var —</option>
-                ${stateVars.map((s) => `<option value="${s.name}" ${cond.state === s.name ? 'selected' : ''}>${s.name}</option>`).join('')}
-                <option value="${CUSTOM_OPTION_VALUE}" ${isCustom ? 'selected' : ''}>Custom / nested path…</option>
-              </select>
-              <input type="text" class="rule-field cf-state-custom prop-input ${isCustom ? '' : 'hidden'}" value="${isCustom ? cond.state : ''}" placeholder="e.g. presets[0].label" />
-            </div>
-            <select class="rule-field cf-op prop-select" data-field="op">
-              ${OPS.map((op) => `<option value="${op}" ${OPS.find((o) => cond[o] !== undefined) === op ? 'selected' : ''}>${op}</option>`).join('')}
-            </select>
-            <input type="text" class="rule-field cf-val prop-input" value="${(() => { const op = OPS.find((o) => cond[o] !== undefined); return op ? (op === 'between' ? (cond.between || []).join(',') : cond[op]) : ''; })()}" placeholder="${(OPS.find((o) => cond[o] !== undefined) === 'between') ? 'lo,hi' : 'value'}" />
-          </div>
-          <button type="button" class="btn-mini-close cf-remove" title="Remove rule">✕</button>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-left:2px;">
-          <span style="font-size:10px;color:var(--text-label);">then style:</span>
-          <label style="font-size:10px;display:flex;align-items:center;gap:3px;">
-            <input type="checkbox" class="rule-field cf-text-color-on" ${styleObj.typography?.color ? 'checked' : ''} /> Text
-            <input type="color" class="rule-field cf-text-color" value="${this.toHexColor(styleObj.typography?.color) || '#f8fafc'}" title="Text color" ${styleObj.typography?.color ? '' : 'disabled'} />
-          </label>
-          <label style="font-size:10px;display:flex;align-items:center;gap:3px;">
-            <input type="checkbox" class="rule-field cf-border-color-on" ${styleObj.border?.color ? 'checked' : ''} /> Border
-            <input type="color" class="rule-field cf-border-color" value="${this.toHexColor(styleObj.border?.color) || '#273344'}" title="Border color" ${styleObj.border?.color ? '' : 'disabled'} />
-          </label>
-          <select class="rule-field cf-bg-type prop-select" style="width:auto;font-size:10px;">
-            <option value="none" ${bgType === 'none' ? 'selected' : ''}>No bg override</option>
-            <option value="color" ${bgType === 'color' ? 'selected' : ''}>Bg color</option>
-            <option value="image" ${bgType === 'image' ? 'selected' : ''}>Bg image</option>
-          </select>
-          ${bgType === 'color' ? `<input type="color" class="rule-field cf-bg-color" value="${this.toHexColor(styleObj.background?.color) || '#131b26'}" />` : ''}
-          ${bgType === 'image' ? `
-            <select class="rule-field cf-bg-image prop-select" style="width:auto;font-size:10px;">
-              <option value="">— asset —</option>
-              ${assets.map((a) => `<option value="${a.id}" ${styleObj.background?.image?.assetId === a.id ? 'selected' : ''}>${a.id}</option>`).join('')}
-            </select>
-          ` : ''}
-          <button type="button" class="btn-mini-inline cf-json-toggle">${jsonOpen ? 'Hide' : 'Advanced'} JSON</button>
-        </div>
-        <div class="${jsonOpen ? '' : 'hidden'}">
-          <textarea class="rule-field cf-json prop-input" rows="3">${JSON.stringify(styleObj, null, 0)}</textarea>
-          <div class="cf-json-error prop-json-error hidden"></div>
-        </div>
-      </div>
-    `;
-    };
-
-    body.innerHTML = `
-      <div class="prop-section-subtitle">Rules <span class="prop-hint" title="FDWS v1.15: first matching rule wins. Falls back to this component's base style (above) when no rule matches. Reuses the same condition grammar as Visible When — a rule here only changes the STYLE, never whether the component shows at all.">ⓘ</span></div>
-      <div id="cf-rules">${rules.map(ruleRowHtml).join('') || '<div class="caps-empty">No conditional formatting — always uses the base style above.</div>'}</div>
-      <button type="button" id="cf-add-rule" class="bar-btn row-add">+ Add Rule</button>
-    `;
-
-    body.querySelectorAll('#cf-rules .row-list-item').forEach((rowEl) => {
-      const idx = Number(rowEl.dataset.ruleIdx);
-      const rule = rules[idx];
-
-      const readCurrentRow = () => {
-        const stateSelect = rowEl.querySelector('.cf-state');
-        const stateCustom = rowEl.querySelector('.cf-state-custom');
-        const state = stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustom.value.trim() : stateSelect.value;
-        const op = rowEl.querySelector('.cf-op').value;
-        const rawVal = rowEl.querySelector('.cf-val').value;
-        const when = { state };
-        if (op === 'between') {
-          const [lo, hi] = rawVal.split(',').map((s) => Number(s.trim()));
-          when.between = [lo || 0, hi || 0];
-        } else if (['gt', 'gte', 'lt', 'lte'].includes(op)) {
-          when[op] = Number(rawVal) || 0;
-        } else {
-          when[op] = rawVal;
-        }
-
-        // Enable checkboxes gate whether each color actually gets included —
-        // a plain <input type="color"> always carries SOME hex value, so
-        // reading it unconditionally would silently persist a border-color
-        // override onto every rule even when the author never touched it
-        // (the exact "displayed default gets eagerly written as if chosen"
-        // bug class from this repo's own audit history — fixed here by
-        // requiring explicit opt-in instead of inferring intent from a
-        // color input that can never be truly empty).
-        //
-        // Wave 0a (V18): this used to rebuild `style` from scratch out of
-        // only these 4 controls, which silently dropped anything authored
-        // through this row's own "Advanced JSON" textarea (glow, stroke,
-        // gradient, align, offset, orientation, ...) the moment ANY other
-        // control in the row was touched — the sole escape hatch to those
-        // properties destroying itself on the first ordinary edit. Now it
-        // starts from the rule's existing style and only touches the two
-        // sub-properties (typography.color/border.color) these two
-        // checkboxes actually own, leaving everything else (including
-        // whatever the JSON textarea last wrote) untouched. background stays
-        // a wholesale replace/delete — it's exclusive-replace at runtime
-        // (BaseComponent.applyStyles()), so there's nothing to preserve there.
-        const style = JSON.parse(JSON.stringify(rule.style || {}));
-        if (rowEl.querySelector('.cf-text-color-on')?.checked) {
-          style.typography = { ...(style.typography || {}), color: rowEl.querySelector('.cf-text-color')?.value };
-        } else if (style.typography) {
-          delete style.typography.color;
-          if (Object.keys(style.typography).length === 0) delete style.typography;
-        }
-        if (rowEl.querySelector('.cf-border-color-on')?.checked) {
-          style.border = { ...(style.border || {}), color: rowEl.querySelector('.cf-border-color')?.value };
-        } else if (style.border) {
-          delete style.border.color;
-          if (Object.keys(style.border).length === 0) delete style.border;
-        }
-        const bgType = rowEl.querySelector('.cf-bg-type')?.value;
-        if (bgType === 'color') {
-          style.background = { type: 'color', color: rowEl.querySelector('.cf-bg-color')?.value || '#131b26' };
-        } else if (bgType === 'image') {
-          style.background = { type: 'image', image: { assetId: rowEl.querySelector('.cf-bg-image')?.value || '' } };
-        } else {
-          delete style.background;
-        }
-        return { when, style };
-      };
-
-      const commitRow = () => {
-        const next = [...rules];
-        next[idx] = readCurrentRow();
-        commitRules(next);
-      };
-
-      rowEl.querySelector('.cf-state')?.addEventListener('change', (e) => {
-        if (e.target.value === CUSTOM_OPTION_VALUE) {
-          rowEl.querySelector('.cf-state-custom')?.classList.remove('hidden');
-        } else {
-          rowEl.querySelector('.cf-state-custom')?.classList.add('hidden');
-          commitRow();
-        }
-      });
-      rowEl.querySelector('.cf-state-custom')?.addEventListener('change', commitRow);
-      rowEl.querySelector('.cf-op')?.addEventListener('change', commitRow);
-      rowEl.querySelector('.cf-val')?.addEventListener('change', commitRow);
-      rowEl.querySelector('.cf-text-color')?.addEventListener('input', commitRow);
-      rowEl.querySelector('.cf-border-color')?.addEventListener('input', commitRow);
-      rowEl.querySelector('.cf-text-color-on')?.addEventListener('change', (e) => {
-        const picker = rowEl.querySelector('.cf-text-color');
-        if (picker) picker.disabled = !e.target.checked;
-        commitRow();
-      });
-      rowEl.querySelector('.cf-border-color-on')?.addEventListener('change', (e) => {
-        const picker = rowEl.querySelector('.cf-border-color');
-        if (picker) picker.disabled = !e.target.checked;
-        commitRow();
-      });
-      rowEl.querySelector('.cf-bg-color')?.addEventListener('input', commitRow);
-      rowEl.querySelector('.cf-bg-image')?.addEventListener('change', commitRow);
-      // bg-type re-renders the whole panel (its own option set changes shape) rather
-      // than trying to patch the row in place — matches the state-image use case's
-      // "swap type, then pick a value" flow used by the component-level Background
-      // Fill editor above.
-      rowEl.querySelector('.cf-bg-type')?.addEventListener('change', (e) => {
-        const next = [...rules];
-        const current = readCurrentRow();
-        if (e.target.value === 'none') delete current.style.background;
-        next[idx] = current;
-        rules[idx] = current; // keep local copy in sync before re-render reads `rules` again
-        commitRules(next);
-      });
-
-      rowEl.querySelector('.cf-json-toggle')?.addEventListener('click', () => {
-        this._conditionalStyleJsonOpen = this._conditionalStyleJsonOpen || {};
-        this._conditionalStyleJsonOpen[idx] = !this._conditionalStyleJsonOpen[idx];
-        this.render();
-      });
-      rowEl.querySelector('.cf-json')?.addEventListener('change', (e) => {
-        try {
-          const parsedStyle = JSON.parse(e.target.value);
-          const next = [...rules];
-          next[idx] = { when: rule.when, style: parsedStyle };
-          rowEl.querySelector('.cf-json-error')?.classList.add('hidden');
-          commitRules(next);
-        } catch (err) {
-          const errEl = rowEl.querySelector('.cf-json-error');
-          if (errEl) {
-            errEl.textContent = `Invalid JSON — edit not applied: ${err.message}`;
-            errEl.classList.remove('hidden');
-          }
-        }
-      });
-      rowEl.querySelector('.cf-remove')?.addEventListener('click', () => {
-        commitRules(rules.filter((_, i) => i !== idx));
-      });
-    });
-
-    body.querySelector('#cf-add-rule')?.addEventListener('click', () => {
-      commitRules([...rules, { when: { state: stateVars[0]?.name || '', equals: '' }, style: { typography: { color: '#f87171' } } }]);
-    });
-  }
+  // Wave 2 Part B2: the old row-list editor for style.rules (with its own
+  // compact typography.color/border.color/background controls + per-row
+  // JSON fallback) is DELETED — superseded by rule chips in the Appearance
+  // panel's target strip (main IIFE in renderComponentInspector()), which
+  // render every rule's style through the same generic field engine
+  // Normal/State already use. See renderAppearanceSection()'s doc comment.
 
   updateVisibleWhenJson(comp, rawValue, errorEl) {
     try {
@@ -2598,10 +2533,12 @@ export class StudioInspector {
   // call site (arc bands, slider detents, selector positions, rocker zones)
   // builds that spec by hand. conditionBuilder/conditionalStyleBuilder read
   // from COMMON_FIELDS (visibleWhen/style.rules), which already have
-  // dedicated hand-built panels elsewhere in this file
-  // (renderVisibilityAndGuard/renderConditionalFormatting) — genericizing
-  // those specifically would duplicate/shadow them, not replace them, since
-  // this pass only converts two types' OWN TYPE_FIELDS, not COMMON_FIELDS.
+  // dedicated hand-built panels elsewhere in this file (renderVisibilityAndGuard,
+  // and — until Wave 2 Part B2 folded style.rules' STYLE side into the
+  // generic engine via rule chips, see renderAppearanceSection() —
+  // renderConditionalFormatting) — genericizing those specifically would
+  // duplicate/shadow them, not replace them, since this pass only converts
+  // two types' OWN TYPE_FIELDS, not COMMON_FIELDS.
   //
   // So FIELD_RENDERERS covers the true plain, single-value primitives —
   // text/number/checkbox/select/color/iconPicker — the ones this pass's
@@ -2649,7 +2586,12 @@ export class StudioInspector {
   commitField(comp, path, value) {
     const segs = path.split('.');
     const topKey = segs[0];
-    const cloneLevel = (obj) => (obj && typeof obj === 'object' ? { ...obj } : {});
+    // Wave 2 Part B2: style.rules is an ARRAY — {...arr} produces a plain
+    // object with numeric string keys, silently corrupting Array.isArray()
+    // and .length for every downstream consumer (resolveActiveRuleStyle(),
+    // the rule chip list). Preserving array-ness here is what makes it safe
+    // to commitField() through a `style.rules.<idx>.style.*` path at all.
+    const cloneLevel = (obj) => (Array.isArray(obj) ? [...obj] : (obj && typeof obj === 'object' ? { ...obj } : {}));
     const topVal = cloneLevel(comp[topKey]);
     let cur = topVal;
     for (let i = 1; i < segs.length - 1; i++) {
@@ -2708,27 +2650,39 @@ export class StudioInspector {
   }
 
   /**
-   * Wave 2 Part B1: remaps an Appearance field list from Base's storage
-   * (style.*) onto another target's storage. `target` is `{kind:'base'}`
-   * (no-op, returns `fields` unchanged) or `{kind:'state', name}` (rewrites
-   * `style.` -> `style.states.<name>.` in both `path` and, if present,
-   * `showWhen.path`). Future targets ('rule'/'theme', Wave 2 Part B2/B3) add
-   * cases here, reusing the same mechanism. For a non-base target, each
-   * cloned field also gets `inheritedValue` — the LIVE value at the
-   * original (un-retargeted) path, i.e. what this field currently resolves
-   * to one layer up — which resolveEffectiveValue()/evaluateShowWhen() use
-   * to show and gate on "what you'd get if you didn't override this here,"
-   * matching the state tab's old eff() dimmed-inherited-value convention.
+   * Wave 2 Part B1/B2: rewrites a single Appearance field path from Base's
+   * storage (style.*) onto another target's storage. `'base'` is a no-op;
+   * `'state'` -> `style.states.<name>.`; `'rule'` -> `style.rules.<index>.style.`.
+   * Shared by retargetAppearanceFields()/renderClearInheritedToggle()/
+   * applyClearedFieldState() so the three don't drift against each other —
+   * a future Theme target (Part B3) adds one more case here.
+   */
+  remapAppearancePath(path, target) {
+    if (target.kind === 'state') return path.replace(/^style\./, `style.states.${target.name}.`);
+    if (target.kind === 'rule') return path.replace(/^style\./, `style.rules.${target.index}.style.`);
+    return path;
+  }
+
+  /**
+   * Wave 2 Part B1: remaps an Appearance field list from Base's storage onto
+   * another target's storage via remapAppearancePath(), applied to both
+   * `path` and, if present, `showWhen.path`. `{kind:'base'}` is a no-op. For
+   * a non-base target, each cloned field also gets `inheritedValue` — the
+   * LIVE value at the original (un-retargeted) path, i.e. what this field
+   * currently resolves to one layer up — which resolveEffectiveValue()/
+   * evaluateShowWhen() use to show and gate on "what you'd get if you didn't
+   * override this here," matching the state tab's old eff()
+   * dimmed-inherited-value convention. (A rule's "inherited" value is Base's
+   * literal value, not a full base->state->rule runtime preview — the same
+   * simplification the state target already uses, since which state is
+   * concurrently active isn't knowable from the Inspector's own UI state.)
    */
   retargetAppearanceFields(comp, fields, target) {
     if (target.kind === 'base') return fields;
-    const remap = (path) => target.kind === 'state'
-      ? path.replace(/^style\./, `style.states.${target.name}.`)
-      : path;
     return fields.map((f) => ({
       ...f,
-      path: remap(f.path),
-      showWhen: f.showWhen ? { ...f.showWhen, path: remap(f.showWhen.path) } : undefined,
+      path: this.remapAppearancePath(f.path, target),
+      showWhen: f.showWhen ? { ...f.showWhen, path: this.remapAppearancePath(f.showWhen.path, target) } : undefined,
       inheritedValue: this.getFieldValue(comp, f.path)
     }));
   }
@@ -2792,7 +2746,8 @@ export class StudioInspector {
       // Separate child mounts: renderRegistryFields() clears its own mount's
       // innerHTML on entry, which would otherwise wipe out the clear-toggle
       // checkboxes appended before it if they shared one mount.
-      if (target.kind === 'state') {
+      const isOverridable = target.kind === 'state' || target.kind === 'rule';
+      if (isOverridable) {
         const togglesMount = groupMount.appendChild(document.createElement('div'));
         (CLEARABLE_SUB_OBJECTS[groupName] || []).forEach(([basePath, label]) => {
           this.renderClearInheritedToggle(comp, basePath, label, target, togglesMount);
@@ -2805,7 +2760,7 @@ export class StudioInspector {
       if (target.kind === 'base' && (groupName === 'Typography' || groupName === 'Border' || groupName === 'Background')) {
         this.renderBaseThemeAwareAppearanceFields(comp, groupName, groupMount.appendChild(document.createElement('div')), baseThemeCtx);
       }
-      if (target.kind === 'state') {
+      if (isOverridable) {
         (CLEARABLE_SUB_OBJECTS[groupName] || []).forEach(([basePath, , leafPaths]) => {
           this.applyClearedFieldState(comp, basePath, leafPaths, target, fieldsMount);
         });
@@ -2813,9 +2768,9 @@ export class StudioInspector {
     });
   }
 
-  /** Wave 2 Part A's per-sub-object "Clear (don't inherit)" checkbox — writes the V24 `null` sentinel. State target only; Base has nothing to inherit from. */
+  /** Wave 2 Part A's per-sub-object "Clear (don't inherit)" checkbox — writes the V24 `null` sentinel. State/Rule targets only; Base has nothing to inherit from. */
   renderClearInheritedToggle(comp, basePath, label, target, mount) {
-    const targetPath = basePath.replace(/^style\./, `style.states.${target.name}.`);
+    const targetPath = this.remapAppearancePath(basePath, target);
     const isCleared = this.getFieldValue(comp, targetPath) === null;
     const id = `${this.fieldDomId(targetPath)}-clear`;
     const div = document.createElement('div');
@@ -2833,10 +2788,10 @@ export class StudioInspector {
 
   /** Disables+dims a cleared sub-object's own leaf inputs (and color-pick swatch), matching the old hand-coded state tab's behavior. */
   applyClearedFieldState(comp, basePath, leafPaths, target, mount) {
-    const targetPath = basePath.replace(/^style\./, `style.states.${target.name}.`);
+    const targetPath = this.remapAppearancePath(basePath, target);
     if (this.getFieldValue(comp, targetPath) !== null) return;
     leafPaths.forEach((p) => {
-      const retargeted = p.replace(/^style\./, `style.states.${target.name}.`);
+      const retargeted = this.remapAppearancePath(p, target);
       const id = this.fieldDomId(retargeted);
       const el = mount.querySelector(`#${id}`);
       const pickEl = mount.querySelector(`#${id}-pick`);
