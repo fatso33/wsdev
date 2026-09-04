@@ -16,7 +16,7 @@ import { openModal, confirmModal, showToast } from './StudioModal.js';
 // "UI list is stale relative to runtime" bug class found four times in the
 // original Studio audit (this file's own trigger/action lists were two of
 // those four instances).
-import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, getFieldsForType, getStateStyleConfig } from '../widgets/PropertyRegistry.js';
+import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS as REGISTRY_TYPE_FIELDS, VALUE_FORMATS as REGISTRY_VALUE_FORMATS, getFieldsForType, getStateStyleConfig } from '../widgets/PropertyRegistry.js';
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
@@ -57,6 +57,18 @@ function resolveStateStyleConfig(comp) {
 // dark. Caught live on a real widget's button. Detected here so the field
 // can self-correct to the matching type instead of saving broken data.
 const GRADIENT_VALUE_RE = /^(?:repeating-)?(?:linear|radial|conic)-gradient\(/i;
+
+// Wave 1: the generic field-rendering engine interpolates registry tooltip
+// text (which, unlike this file's other hand-written labels, can genuinely
+// contain a literal '"' — e.g. props.variant's tooltip quotes "preset") and
+// widget-authored prop values directly into HTML attributes, so both need
+// real escaping rather than this file's usual "authors just avoid quotes"
+// convention.
+function escapeHtmlAttr(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
 
 // Widget Studio 2.0, Phase 8: Simple mode's "Connect to Simulator" picker
 // groups deckEvents.js's flat list by this same category tag pc-bridge's own
@@ -2616,16 +2628,20 @@ export class StudioInspector {
     const assets = this.state.widgetDef.assets || [];
 
     switch (comp.type) {
-      case 'core.label':
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Text Content</label>
-            <input type="text" id="p-label-text" class="prop-input" value="${props.text || ''}" />
-          </div>
-          <div class="empty-tree-notice">Alignment moved to the "VISUAL STYLING & TYPOGRAPHY" panel below (FDWS v1.8) — now shared by every component type instead of being label-only.</div>
-        `;
-        body.querySelector('#p-label-text')?.addEventListener('change', (e) => this.updateCompProp(comp, 'text', e.target.value));
+      // Wave 1 (Part 1): first type converted onto the registry-driven
+      // engine — also fixes a live registry/UI drift bug in the process:
+      // props.truncate has been declared in PropertyRegistry.js all along
+      // but was never reachable in this hand-coded panel until now.
+      case 'core.label': {
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.label']);
+        const notice = document.createElement('div');
+        notice.className = 'empty-tree-notice';
+        notice.textContent = 'Alignment moved to the "VISUAL STYLING & TYPOGRAPHY" panel below (FDWS v1.8) — now shared by every component type instead of being label-only.';
+        body.appendChild(notice);
         break;
+      }
 
       case 'core.display': {
         const needsDecimals = props.format === 'DECIMAL_N';
@@ -2686,35 +2702,20 @@ export class StudioInspector {
         break;
       }
 
+      // Wave 1 (Part 1): converted onto the registry-driven engine — also
+      // fixes two live registry/UI drift bugs: props.icon and props.hasLed
+      // have been declared in PropertyRegistry.js all along but were never
+      // reachable in this hand-coded panel until now.
+      //
+      // FDWS v1.14: props.presetSlot/emptyLabel and the "preset" variant
+      // are gone — superseded entirely by binding.stateRef/
+      // sublabelStateRef (below, in SIMVARS & BINDINGS), which generalize
+      // to any state path instead of being special-cased to one array
+      // shape (presets[n].freq/.label). See that spec's §0 for why.
       case 'core.button': {
-        // FDWS v1.14: props.presetSlot/emptyLabel and the "preset" variant
-        // are gone — superseded entirely by binding.stateRef/
-        // sublabelStateRef (below, in SIMVARS & BINDINGS), which generalize
-        // to any state path instead of being special-cased to one array
-        // shape (presets[n].freq/.label). See that spec's §0 for why.
-        body.innerHTML = `
-          <div class="prop-field">
-            <label>Button Variant</label>
-            <select id="p-btn-variant" class="prop-select">
-              <option value="momentary" ${props.variant === 'momentary' ? 'selected' : ''}>Momentary (Push)</option>
-              <option value="toggle" ${props.variant === 'toggle' ? 'selected' : ''}>Toggle (On / Off)</option>
-              <option value="swap" ${props.variant === 'swap' ? 'selected' : ''}>Swap Active / Standby</option>
-            </select>
-          </div>
-          <div class="prop-row-2">
-            <div class="prop-field">
-              <label>Primary Label <span class="prop-hint" title="FDWS v1.14: this is the fallback/static text — if this button's binding.stateRef is set (SIMVARS & BINDINGS panel below), the resolved value is shown instead whenever it's non-empty, falling back to this text otherwise (e.g. as an unconfigured-slot placeholder).">ⓘ</span></label>
-              <input type="text" id="p-btn-label" class="prop-input" value="${props.label || ''}" placeholder="HDG" />
-            </div>
-            <div class="prop-field">
-              <label>Sublabel <span class="prop-hint" title="FDWS v1.14: fallback/static text — overridden by binding.sublabelStateRef's resolved value (SIMVARS & BINDINGS panel below) whenever it's non-empty.">ⓘ</span></label>
-              <input type="text" id="p-btn-sub" class="prop-input" value="${props.sublabel || ''}" placeholder="HOLD" />
-            </div>
-          </div>
-        `;
-        body.querySelector('#p-btn-variant')?.addEventListener('change', (e) => this.updateCompProp(comp, 'variant', e.target.value));
-        body.querySelector('#p-btn-label')?.addEventListener('change', (e) => this.updateCompProp(comp, 'label', e.target.value));
-        body.querySelector('#p-btn-sub')?.addEventListener('change', (e) => this.updateCompProp(comp, 'sublabel', e.target.value));
+        const fieldMount = document.createElement('div');
+        body.appendChild(fieldMount);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.button']);
         break;
       }
 
@@ -3597,6 +3598,180 @@ export class StudioInspector {
       const v = e.target.value.trim();
       if (/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v) || (allowGradient && GRADIENT_VALUE_RE.test(v))) commit(v);
     });
+  }
+
+  // =========================================================================
+  // Wave 1 (Part 1): the generic, registry-driven field-rendering engine.
+  //
+  // Scoped narrower than first planned. Building this turned up that several
+  // of the registry's control names aren't cleanly delegate-able yet:
+  // rowListEditor/arcBandsEditor/detentEditor need a per-field row spec
+  // (headers, add-row shape) the registry doesn't declare — every existing
+  // call site (arc bands, slider detents, selector positions, rocker zones)
+  // builds that spec by hand. conditionBuilder/conditionalStyleBuilder read
+  // from COMMON_FIELDS (visibleWhen/style.rules), which already have
+  // dedicated hand-built panels elsewhere in this file
+  // (renderVisibilityAndGuard/renderConditionalFormatting) — genericizing
+  // those specifically would duplicate/shadow them, not replace them, since
+  // this pass only converts two types' OWN TYPE_FIELDS, not COMMON_FIELDS.
+  //
+  // So FIELD_RENDERERS covers the true plain, single-value primitives —
+  // text/number/checkbox/select/color/iconPicker — the ones this pass's
+  // conversion (core.label, core.button) actually needs and can fully
+  // verify. The rest stay hand-coded; scripts/check-registry-drift.mjs's
+  // matching CI check allowlists them as "not yet migrated" rather than
+  // silently passing or falsely asserting they're covered.
+  // =========================================================================
+
+  FIELD_RENDERERS = {
+    text: (comp, field, mount) => this.renderPlainField(comp, field, mount, 'text'),
+    iconPicker: (comp, field, mount) => this.renderPlainField(comp, field, mount, 'text'),
+    number: (comp, field, mount) => this.renderPlainField(comp, field, mount, 'number'),
+    checkbox: (comp, field, mount) => this.renderCheckboxField(comp, field, mount),
+    select: (comp, field, mount) => this.renderSelectField(comp, field, mount),
+    color: (comp, field, mount) => this.renderColorField(comp, field, mount)
+  };
+
+  /** path.split('.') get, tolerant of missing intermediate objects. */
+  getFieldValue(comp, path) {
+    return path.split('.').reduce((cur, seg) => (cur == null ? undefined : cur[seg]), comp);
+  }
+
+  /**
+   * Generic nested-path commit — clones only the objects along `path` (not
+   * the whole component), splices in the leaf value, and commits the ONE
+   * top-level key via the existing updateComponent(). Mirrors the manual
+   * per-field pattern already hand-written throughout this file (e.g.
+   * `updateStyle({ typography: { ...(comp.style?.typography||{}), color } })`),
+   * generalized once instead of repeated per field.
+   */
+  commitField(comp, path, value) {
+    const segs = path.split('.');
+    const topKey = segs[0];
+    const cloneLevel = (obj) => (obj && typeof obj === 'object' ? { ...obj } : {});
+    const topVal = cloneLevel(comp[topKey]);
+    let cur = topVal;
+    for (let i = 1; i < segs.length - 1; i++) {
+      cur[segs[i]] = cloneLevel(cur[segs[i]]);
+      cur = cur[segs[i]];
+    }
+    if (segs.length > 1) cur[segs[segs.length - 1]] = value;
+    this.state.updateComponent(comp.id, { [topKey]: topVal });
+  }
+
+  /** The registry's existing {path, equals|equalsAny|notEquals} showWhen grammar — real for the first time. */
+  evaluateShowWhen(comp, showWhen) {
+    const val = this.getFieldValue(comp, showWhen.path);
+    if ('equals' in showWhen) return val === showWhen.equals;
+    if ('notEquals' in showWhen) return val !== showWhen.notEquals;
+    if ('equalsAny' in showWhen) return showWhen.equalsAny.includes(val);
+    return true;
+  }
+
+  /** path's last segment, camelCase -> "Title Case", with a couple of acronym fixups. */
+  humanizeFieldLabel(path) {
+    const key = path.split('.').pop();
+    const spaced = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+    const titled = spaced.charAt(0).toUpperCase() + spaced.slice(1);
+    return titled.replace(/\bLed\b/, 'LED').replace(/\bId\b/, 'ID').replace(/\bUrl\b/, 'URL');
+  }
+
+  fieldDomId(path) {
+    return `rf-${path.replace(/\./g, '-')}`;
+  }
+
+  /**
+   * Walks `fields` (a raw TYPE_FIELDS[type] array — deliberately NOT
+   * getFieldsForType(), which also merges in COMMON_FIELDS: those already
+   * have their own dedicated panels elsewhere in this file, e.g. the
+   * Appearance/Bindings sections, and rendering them again here would
+   * duplicate those, not replace them) and dispatches each to
+   * FIELD_RENDERERS[control]. Throws (dev-time, loud) on an unregistered
+   * control string, so a registry typo can't silently render nothing.
+   */
+  renderRegistryFields(comp, mount, fields) {
+    mount.innerHTML = '';
+    fields.forEach((field) => {
+      if (field.control === null) return; // deprecated/hidden, e.g. props.align
+      if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen)) return;
+      const renderer = this.FIELD_RENDERERS[field.control];
+      if (!renderer) {
+        throw new Error(`[StudioInspector] No FIELD_RENDERERS entry for control "${field.control}" (path "${field.path}") — register one before declaring a field with this control.`);
+      }
+      const wrap = document.createElement('div');
+      wrap.className = 'prop-field';
+      if (field.tier === 'advanced') wrap.setAttribute('data-tier', 'advanced');
+      mount.appendChild(wrap);
+      renderer(comp, field, wrap);
+    });
+  }
+
+  renderPlainField(comp, field, mount, inputType) {
+    const label = this.humanizeFieldLabel(field.path);
+    const id = this.fieldDomId(field.path);
+    const value = this.getFieldValue(comp, field.path);
+    mount.innerHTML = `
+      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
+      <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" />
+    `;
+    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
+      const raw = e.target.value;
+      const v = inputType === 'number' ? (raw === '' ? undefined : (Number(raw) || 0)) : raw;
+      this.commitField(comp, field.path, v);
+    });
+  }
+
+  renderCheckboxField(comp, field, mount) {
+    const label = this.humanizeFieldLabel(field.path);
+    const id = this.fieldDomId(field.path);
+    const value = !!this.getFieldValue(comp, field.path);
+    mount.innerHTML = `
+      <label title="${escapeHtmlAttr(field.tooltip || '')}" style="display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="${id}" ${value ? 'checked' : ''} /> ${escapeHtmlAttr(label)}
+      </label>
+    `;
+    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => this.commitField(comp, field.path, e.target.checked));
+  }
+
+  renderSelectField(comp, field, mount) {
+    const label = this.humanizeFieldLabel(field.path);
+    const id = this.fieldDomId(field.path);
+    const value = this.getFieldValue(comp, field.path);
+    const rawOptions = field.optionsRef === 'VALUE_FORMATS' ? REGISTRY_VALUE_FORMATS : (field.options || []);
+    const optionHtml = rawOptions.map((opt) => {
+      const optVal = (opt && typeof opt === 'object') ? opt.value : opt;
+      const optLabel = (opt && typeof opt === 'object') ? opt.label : String(opt);
+      const icon = field.optionIcons?.[optVal];
+      const selected = value === optVal ? 'selected' : '';
+      return `<option value="${escapeHtmlAttr(optVal)}" ${selected}>${icon ? `${icon} ` : ''}${escapeHtmlAttr(optLabel)}</option>`;
+    }).join('');
+    mount.innerHTML = `
+      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
+      <select id="${id}" class="prop-select">${optionHtml}</select>
+    `;
+    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
+      // Options are always rendered from string/number literals above (never
+      // user text), so a numeric-typed option (e.g. style.typography.weight's
+      // [400,500,600,700]) needs coercing back from the <select>'s own
+      // always-string e.target.value.
+      const original = rawOptions.find((opt) => String((opt && typeof opt === 'object') ? opt.value : opt) === e.target.value);
+      const coerced = (original && typeof original === 'object') ? original.value : original;
+      this.commitField(comp, field.path, coerced);
+    });
+  }
+
+  renderColorField(comp, field, mount) {
+    const label = this.humanizeFieldLabel(field.path);
+    const id = this.fieldDomId(field.path);
+    const value = this.getFieldValue(comp, field.path) || '';
+    mount.innerHTML = `
+      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
+      <div class="color-picker-wrap">
+        <input type="color" id="${id}-pick" value="${this.toHexColor(value) || '#000000'}" />
+        <input type="text" id="${id}" class="prop-input" value="${escapeHtmlAttr(value)}" />
+      </div>
+    `;
+    this.wireColorPair(mount, `${id}-pick`, id, (v) => this.commitField(comp, field.path, v));
   }
 
   updateCompProp(comp, propKey, value) {
