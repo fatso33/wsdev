@@ -79,12 +79,30 @@ function resolveStateStyleConfig(comp) {
 // e.g. "oilTempF > 115" — used both as the rule chip's visible text and its
 // title tooltip (chips truncate with ellipsis once there are several).
 const RULE_OP_SYMBOLS = { equals: '=', notEquals: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' };
+function summarizeLeafCondition(leaf) {
+  if (!leaf || typeof leaf.state !== 'string' || !leaf.state) return 'New Rule';
+  const op = Object.keys(RULE_OP_SYMBOLS).find((o) => leaf[o] !== undefined);
+  if (op) return `${leaf.state} ${RULE_OP_SYMBOLS[op]} ${leaf[op]}`;
+  if (Array.isArray(leaf.between)) return `${leaf.state} in [${leaf.between.join(', ')}]`;
+  return leaf.state;
+}
+// Post-implementation review §1 (found live during verification): the visual
+// compound condition editor (renderConditionListEditor) always normalizes a
+// condition to {allOf|anyOf:[...]} — even a single freshly-picked leaf — so
+// this used to keep reading `when.state` directly and show "New Rule"
+// forever, no matter what the author actually set. Unwrap the combinator the
+// same way renderConditionListEditor itself does before falling back to
+// the leaf case.
 function summarizeRuleCondition(when) {
-  if (!when || !when.state) return 'New Rule';
-  const op = Object.keys(RULE_OP_SYMBOLS).find((o) => when[o] !== undefined);
-  if (op) return `${when.state} ${RULE_OP_SYMBOLS[op]} ${when[op]}`;
-  if (Array.isArray(when.between)) return `${when.state} in [${when.between.join(', ')}]`;
-  return when.state;
+  if (!when) return 'New Rule';
+  const combinator = when.anyOf ? 'anyOf' : (when.allOf ? 'allOf' : null);
+  if (combinator) {
+    const leaves = when[combinator];
+    if (!Array.isArray(leaves) || leaves.length === 0) return 'New Rule';
+    if (leaves.length === 1) return summarizeRuleCondition(leaves[0]);
+    return leaves.map(summarizeRuleCondition).join(combinator === 'anyOf' ? ' or ' : ' and ');
+  }
+  return summarizeLeafCondition(when);
 }
 
 // Wave 2 Part B1 (Part 4, first slice): the Appearance panel's field set,
@@ -1162,7 +1180,7 @@ export class StudioInspector {
         </div>
         `}
         <div class="prop-row-2">
-          <div class="prop-field">
+          <div class="prop-field" data-tier="advanced">
             <label>Component ID</label>
             <input type="text" id="c-id" class="prop-input" value="${comp.id}" />
           </div>
@@ -1174,8 +1192,8 @@ export class StudioInspector {
           </div>
         </div>
 
-        <div class="prop-section-subtitle" style="margin-top:10px;">Layer Group & Z-Index (§9.3)</div>
-        <div class="prop-row-2">
+        <div class="prop-section-subtitle" style="margin-top:10px;" data-tier="advanced">Layer Group & Z-Index (§9.3)</div>
+        <div class="prop-row-2" data-tier="advanced">
           <div class="prop-field">
             <label>Layer Group <span class="prop-hint" title="Puts this component on a named z-order layer (e.g. 'background', 'controls') defined in the Layers panel's own Z field — lets a whole group of components move in front of/behind another group at once, instead of hand-tuning every component's Z individually.">ⓘ</span></label>
             <select id="c-layer-group" class="prop-select">
@@ -1189,7 +1207,7 @@ export class StudioInspector {
           </div>
         </div>
 
-        <div class="prop-row-2" style="margin-top:6px;">
+        <div class="prop-row-2" style="margin-top:6px;" data-tier="advanced">
           <div class="prop-field">
             <label>Pointer Events <span class="prop-hint" title="'none' makes this component visually present but click/tap-through — the component (or whatever's behind it) receives the touch instead. Useful for a purely decorative overlay (a glass glare image, a label sitting on top of a button) that shouldn't steal taps from what's underneath.">ⓘ</span></label>
             <select id="c-pointer-events" class="prop-select">
@@ -1238,6 +1256,11 @@ export class StudioInspector {
     geomDivider.className = 'prop-section-subtitle';
     geomDivider.style.marginTop = '14px';
     geomDivider.textContent = 'Grid Position & Size';
+    // Guided users place/resize on the canvas (drag-to-place); typing exact
+    // grid coordinates is a Build+ convenience, matching the same
+    // data-tier="build" precedent already set by widget-root's own
+    // Sub-Grid/Default-Size fields (GRID & DIMENSIONS accordion above).
+    geomDivider.setAttribute('data-tier', 'build');
     outerBody.appendChild(geomDivider);
 
     ((body) => {
@@ -1246,7 +1269,7 @@ export class StudioInspector {
       const maxRows = def.layout?.grid?.rows || 6;
 
       body.innerHTML = `
-        <div class="prop-row-2">
+        <div class="prop-row-2" data-tier="build">
           <div class="prop-field">
             <label>Column (X)</label>
             <input type="number" id="c-layout-col" class="prop-input" value="${layout.col || 1}" min="1" max="${maxCols}" />
@@ -1256,7 +1279,7 @@ export class StudioInspector {
             <input type="number" id="c-layout-row" class="prop-input" value="${layout.row || 1}" min="1" max="${maxRows}" />
           </div>
         </div>
-        <div class="prop-row-2">
+        <div class="prop-row-2" data-tier="build">
           <div class="prop-field">
             <label>Width (Span Columns)</label>
             <input type="number" id="c-layout-w" class="prop-input" value="${layout.w || 1}" min="1" max="${maxCols}" />
@@ -1443,12 +1466,16 @@ export class StudioInspector {
         <div class="prop-row-2" style="margin:10px 0 12px;flex-wrap:wrap;gap:6px;">
           <button type="button" class="mode-toggle-btn ${activeTab === 'normal' ? 'active' : ''}" id="c-styletab-normal" style="flex:0 1 auto;">Normal</button>
           ${stateCfg ? `<button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="c-styletab-state" style="flex:0 1 auto;">${stateCfg.tabLabel}</button>` : ''}
-          ${rules.map((r, i) => `<button type="button" class="mode-toggle-btn ${activeRuleIndex === i ? 'active' : ''}" data-rule-chip="${i}" style="flex:0 1 auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtmlAttr(summarizeRuleCondition(r.when))}">${escapeHtmlAttr(summarizeRuleCondition(r.when))}</button>`).join('')}
+          ${rules.map((r, i) => `<button type="button" class="mode-toggle-btn ${activeRuleIndex === i ? 'active' : ''}" data-rule-chip="${i}" style="flex:0 1 auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="Rule ${i + 1} of ${rules.length} — ${escapeHtmlAttr(summarizeRuleCondition(r.when))} (first matching rule wins)">${i + 1}. ${escapeHtmlAttr(summarizeRuleCondition(r.when))}</button>`).join('')}
           <button type="button" class="mode-toggle-btn" id="c-styletab-addrule" style="flex:0 1 auto;" title="Add a conditional style rule">+ Rule</button>
-          ${themeEdit.themeMode === 'manual' ? `
           <span style="width:1px;align-self:stretch;background:var(--studio-panel-border);margin:0 2px;"></span>
-          <button type="button" class="mode-toggle-btn ${themeEdit.isOverrideEdit ? 'active' : ''}" id="c-styletab-theme" style="flex:0 1 auto;" ${activeTab !== 'normal' ? `disabled title="Theme overrides apply to the Base style only — states and rules are already conditional."` : `title="Edit this component's ${otherTheme} theme override — Text/Stroke/Glow/Border/Border Glow/Background Color only."`}>${otherTheme.charAt(0).toUpperCase() + otherTheme.slice(1)} Override</button>
-          ` : ''}
+          <button type="button" class="mode-toggle-btn ${themeEdit.isOverrideEdit ? 'active' : ''}" id="c-styletab-theme" style="flex:0 1 auto;" ${
+            themeEdit.themeMode !== 'manual'
+              ? `disabled title="This widget's Theme Mode is Auto — the ${otherTheme} theme is fully auto-derived. Switch Theme Mode to Manual (widget-root Theme settings) to author a separate override here."`
+              : activeTab !== 'normal'
+                ? `disabled title="Theme overrides apply to the Base style only — states and rules are already conditional."`
+                : `title="Edit this component's ${otherTheme} theme override — Text/Stroke/Glow/Border/Border Glow/Background Color only."`
+          }>${otherTheme.charAt(0).toUpperCase() + otherTheme.slice(1)} Override</button>
         </div>
         ${orphanedStateKeys.map((key) => {
           const canMigrate = !!stateCfg?.name && style.states[stateCfg.name] === undefined;
@@ -1470,7 +1497,9 @@ export class StudioInspector {
         <div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style whenever this rule's condition is true — first matching rule wins over lower rules and over Normal. Dimmed fields are inherited from the Normal style, same as a state.</div>
         <div class="prop-section-subtitle" style="margin-top:0;">Condition <span class="prop-hint" title="Same condition grammar as Visible When — a rule here only changes the STYLE, never whether the component shows at all.">ⓘ</span></div>
         ${ruleCondEditor.html}
-        <div class="prop-row-2" style="margin-bottom:8px;">
+        <div class="prop-row-2" style="margin-bottom:8px;flex-wrap:wrap;">
+          <button type="button" id="c-rule-move-up" class="bar-btn" ${activeRuleIndex === 0 ? 'disabled' : ''} title="Move this rule earlier — first matching rule wins, so earlier rules take priority">▲ Move Up</button>
+          <button type="button" id="c-rule-move-down" class="bar-btn" ${activeRuleIndex === rules.length - 1 ? 'disabled' : ''} title="Move this rule later">▼ Move Down</button>
           <button type="button" id="c-rule-remove" class="bar-btn">Remove This Rule</button>
           <button type="button" id="c-rule-json-toggle" class="bar-btn">${ruleJsonOpen ? 'Hide' : 'Advanced'} JSON</button>
         </div>
@@ -1561,6 +1590,25 @@ export class StudioInspector {
 
       if (activeTab === 'rule' && activeRule) {
         ruleCondEditor.wire(body);
+
+        // Post-implementation review §1: rules are first-match-wins
+        // (resolveActiveRuleStyle) but had no reorder control at all — a
+        // natural-order two-threshold gauge (amber then red) silently never
+        // reached red. Rules have no stable id (indexed array only), so this
+        // swaps by index and commits through the same generic
+        // updateComponent() add/remove already use above, rather than a new
+        // state-layer method.
+        const moveRule = (delta) => {
+          const to = activeRuleIndex + delta;
+          if (to < 0 || to >= rules.length) return;
+          const nextRules = [...rules];
+          [nextRules[activeRuleIndex], nextRules[to]] = [nextRules[to], nextRules[activeRuleIndex]];
+          this._styleTabRuleIndex = to;
+          this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, true, 'Reorder Rule');
+          this.render();
+        };
+        body.querySelector('#c-rule-move-up')?.addEventListener('click', () => moveRule(-1));
+        body.querySelector('#c-rule-move-down')?.addEventListener('click', () => moveRule(1));
 
         body.querySelector('#c-rule-remove')?.addEventListener('click', async () => {
           const ok = await confirmModal(`Remove this rule (${summarizeRuleCondition(activeRule.when)})?`, { title: 'Remove Rule', danger: true });
@@ -1694,6 +1742,10 @@ export class StudioInspector {
           <label>Connect to Simulator — Value to Show <span class="prop-hint" title="Pick a category, then the specific value this component should read. Fills in the same field Advanced mode's Read Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.">ⓘ</span></label>
           <div class="connect-sim-picker">${buildConnectSimPicker('read', 'c-connect-read', binding.readSimVar)}</div>
         </div>
+        <div class="prop-hint-block" style="font-size:11px;opacity:0.75;margin:-4px 0 8px;" data-tier="simple-only">
+          Don't see it? <button type="button" class="btn-mini-inline" id="c-connect-read-findit">Find it by moving it →</button>
+          or <button type="button" class="btn-mini-inline" id="c-connect-read-full">switch to Full mode</button> for Raw Address / Custom.
+        </div>
         <div class="prop-field" data-tier="advanced">
           <label>Read Deck Event (Telemetry In)</label>
           <div class="prop-row-2">
@@ -1757,6 +1809,10 @@ export class StudioInspector {
         <div class="prop-field" data-tier="simple-only">
           <label>Connect to Simulator — Value to Send <span class="prop-hint" title="Pick a category, then the specific command this component should send. Fills in the same field Advanced mode's Write Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.">ⓘ</span></label>
           <div class="connect-sim-picker">${buildConnectSimPicker('write', 'c-connect-write', binding.writeEvent)}</div>
+        </div>
+        <div class="prop-hint-block" style="font-size:11px;opacity:0.75;margin:-4px 0 8px;" data-tier="simple-only">
+          Don't see it? <button type="button" class="btn-mini-inline" id="c-connect-write-findit">Find it by moving it →</button>
+          or <button type="button" class="btn-mini-inline" id="c-connect-write-full">switch to Full mode</button> for Raw Address / Custom.
         </div>
         <div class="prop-field" data-tier="advanced">
           <label>Write Deck Event (SimConnect Out)</label>
@@ -1931,6 +1987,20 @@ export class StudioInspector {
       };
       wireConnectSimPicker('read', 'c-connect-read', 'readSimVar');
       wireConnectSimPicker('write', 'c-connect-write', 'writeEvent');
+
+      // Post-implementation review §7: the 4-category Simple picker above has
+      // no escape hatch when an author's value isn't Radios/AP/Lights/Yoke —
+      // the category select just has no matching option, with nothing
+      // pointing at Raw Address or the SimVar Tester's wiggle-to-find. Same
+      // two-link fix on both read and write pickers.
+      ['read', 'write'].forEach((kind) => {
+        body.querySelector(`#c-connect-${kind}-findit`)?.addEventListener('click', () => this.simVarTester?.open());
+        body.querySelector(`#c-connect-${kind}-full`)?.addEventListener('click', () => {
+          this.uiTier = 'full';
+          localStorage.setItem('fdws_studio_uiMode', 'full');
+          this.render();
+        });
+      });
 
       const stateSelect = body.querySelector('#c-bind-state');
       const stateCustomBlock = body.querySelector('#c-bind-state-custom-block');
@@ -2244,7 +2314,13 @@ export class StudioInspector {
     // deeper (a group containing a group) has no bounded visual form and
     // still falls back to the JSON escape hatch below.
     const combinator = expr?.anyOf ? 'anyOf' : 'allOf';
-    const conditions = expr ? (expr[combinator] || (expr.state ? [expr] : [])) : [];
+    // Post-implementation review §3: `expr.state` used to be read as a
+    // truthiness test, so a fresh rule's `{state:'', equals:''}` (empty
+    // string is falsy) fell straight through to the JSON fallback below —
+    // on exactly the widget-with-no-declared-state-vars case a first-time
+    // author is most likely building. `typeof` matches isLeafCondition's
+    // own (already-correct) check a few lines down.
+    const conditions = expr ? (expr[combinator] || (typeof expr.state === 'string' ? [expr] : [])) : [];
     const isGroupCondition = (c) => !!c && typeof c === 'object' && (Array.isArray(c.allOf) || Array.isArray(c.anyOf));
     // Bug found live during G6 slice 1 verification, pre-existing (not
     // introduced here — this was visibleWhen's own original check, copied
@@ -2256,9 +2332,13 @@ export class StudioInspector {
     // render on the next row edit.
     const isLeafCondition = (c) => !!c && typeof c === 'object' && typeof c.state === 'string' && !isGroupCondition(c);
     const isSimpleItem = (c) => isLeafCondition(c) || (isGroupCondition(c) && (c.allOf || c.anyOf).every(isLeafCondition));
-    const isNestedOrComplex = !!expr && (!(expr.allOf || expr.anyOf || expr.state) || !conditions.every(isSimpleItem));
+    const isNestedOrComplex = !!expr && (!(expr.allOf || expr.anyOf || typeof expr.state === 'string') || !conditions.every(isSimpleItem));
 
     const OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
+    // Post-implementation review §9: the dropdown used to show these raw
+    // JSON keys verbatim (gt, gte, notEquals...) — plain-English labels only,
+    // the stored `value` (and cond[op] lookups elsewhere) stay the raw key.
+    const OP_LABELS = { equals: 'is', notEquals: 'is not', gt: 'is greater than', gte: 'is at least', lt: 'is less than', lte: 'is at most', between: 'is between' };
 
     // FDWS v1.13: a condition's `state` can address a nested/indexed path
     // (e.g. "presets[0].label"), not just a declared state[] var — same
@@ -2280,7 +2360,7 @@ export class StudioInspector {
           <input type="text" class="row-field ${idPrefix}-state-custom prop-input ${isCustom ? '' : 'hidden'}" value="${isCustom ? escapeHtmlAttr(cond.state) : ''}" placeholder="e.g. presets[0].label" title="FDWS v1.13: 'name[index].field' path into an array/object state var — same grammar as a component's Bind to Local State Path." />
         </div>
         <select class="row-field ${idPrefix}-op prop-select" data-field="op">
-          ${OPS.map((op) => `<option value="${op}" ${OPS.find((o) => cond[o] !== undefined) === op ? 'selected' : ''}>${op}</option>`).join('')}
+          ${OPS.map((op) => `<option value="${op}" ${OPS.find((o) => cond[o] !== undefined) === op ? 'selected' : ''}>${OP_LABELS[op] || op}</option>`).join('')}
         </select>
         <input type="text" class="row-field ${idPrefix}-val" data-field="val" value="${(() => { const op = OPS.find((o) => cond[o] !== undefined); return op ? (op === 'between' ? (cond.between || []).join(',') : cond[op]) : ''; })()}" placeholder="${(OPS.find((o) => cond[o] !== undefined) === 'between') ? 'lo,hi' : 'value'}" />
       `;
@@ -3617,15 +3697,25 @@ export class StudioInspector {
       // validation this engine's controls don't have). Distinct from null so a future
       // "which fields have no UI at all" check can tell the two apart.
       if (field.control === 'bespoke') return;
-      // Part 2, §2.1 (Ingrid's guarantee): a showWhen-false field is normally
-      // skipped entirely, but a GENUINELY AUTHORED value (raw, stored, and
-      // different from the field's own default — not just "happens to be
-      // set to its own default") must never silently vanish, at any tier.
-      // Render it anyway, dimmed, with why it's hidden and a one-click clear.
+      // Part 2, §2.1 (Ingrid's guarantee): "a field holding a non-default
+      // value surfaces regardless of tier and regardless of showWhen."
+      // Computed once, reused for both halves of that guarantee — post-
+      // implementation review §5 found only the showWhen half was actually
+      // wired: a field with no showWhen at all (the common case) still
+      // vanished below Full purely because of its own field.tier, authored
+      // or not (e.g. core.button's props.hasLed set true, then invisible
+      // again the moment you left Full).
+      const raw = this.getFieldValue(comp, field.path);
+      const isAuthored = raw !== undefined && raw !== field.default;
+
+      // A showWhen-false field is normally skipped entirely, but a
+      // GENUINELY AUTHORED value (raw, stored, and different from the
+      // field's own default — not just "happens to be set to its own
+      // default") must never silently vanish, at any tier. Render it
+      // anyway, dimmed, with why it's hidden and a one-click clear.
       let suppressed = false;
       if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen, fields)) {
-        const raw = this.getFieldValue(comp, field.path);
-        if (raw === undefined || raw === field.default) return; // unchanged: nothing authored, skip as before
+        if (!isAuthored) return; // unchanged: nothing authored, skip as before
         suppressed = true;
       }
       const renderer = this.FIELD_RENDERERS[field.control];
@@ -3638,10 +3728,10 @@ export class StudioInspector {
       // not in the curated Guided allowlist (field.guided) is Build+Full —
       // hidden only in Guided. A curated Guided field gets no data-tier
       // attribute at all, same as every field before Part 2 existed: always
-      // visible, at every tier. A suppressed-but-authored field ALSO gets no
-      // data-tier — §2.1 shows "regardless of tier and regardless of
-      // showWhen," the same bypass as the showWhen gate itself just got.
-      if (!suppressed) {
+      // visible, at every tier. A suppressed-but-authored field, OR any
+      // other authored field regardless of showWhen, ALSO gets no data-tier
+      // — §2.1's full guarantee, both axes.
+      if (!suppressed && !isAuthored) {
         if (field.tier === 'advanced') wrap.setAttribute('data-tier', 'advanced');
         else if (field.tier === 'simple' && !field.guided) wrap.setAttribute('data-tier', 'build');
       }
@@ -4348,7 +4438,7 @@ export class StudioInspector {
         </button>
       `).join('');
       return `
-        ${rows || '<div class="caps-empty">No matches in this widget\'s Deck Events catalogue.</div>'}
+        ${rows || `<div class="caps-empty">No matches in this widget's Deck Events catalogue. <button type="button" class="btn-mini-inline" id="cn-findit">Find it by moving it →</button></div>`}
         ${customRows ? `<div class="prop-section-subtitle" style="margin-top:8px;">Previously Used</div>${customRows}` : ''}
       `;
     };
@@ -4448,6 +4538,14 @@ export class StudioInspector {
               card.querySelectorAll('.cn-pick').forEach((b) => b.style.outline = b.dataset.name === selectedName ? '1px solid var(--accent-cyan)' : '');
               refreshPairing();
             });
+          });
+          // Post-implementation review §7: a zero-match search used to be a
+          // dead end — point at the SimVar Tester's wiggle-to-find instead.
+          // The overlay-modal chrome sits above the app's own drawers, so the
+          // tester wouldn't be visible without closing this dialog first.
+          card.querySelector('#cn-findit')?.addEventListener('click', () => {
+            card.querySelector('[data-modal-cancel]')?.click();
+            this.simVarTester?.open();
           });
         };
         const wireRawTab = () => {
