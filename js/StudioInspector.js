@@ -487,6 +487,32 @@ export class StudioInspector {
       const overridden = el.closest('.inspector-group.tier-override');
       el.classList.toggle('hidden', !overridden && this.tierHidesField(el.dataset.tier));
     });
+    this.applySubtitleVisibility();
+  }
+
+  /**
+   * Review follow-up item 1: a `.prop-section-subtitle` heading whose fields
+   * are ALL tier-hidden still rendered on its own — a title floating over
+   * nothing (e.g. Appearance's Layout/Background groups at Guided tier).
+   * Skips any subtitle that already carries its own `data-tier` (a separate,
+   * static-heading mechanism, e.g. "Content Alignment") and checks real
+   * rendered visibility via offsetParent rather than the `.hidden` class, so
+   * a field visible only because it holds an authored non-default value
+   * (Part 2.1's guarantee, which deliberately carries no data-tier) still
+   * counts as "this heading has something to show".
+   */
+  applySubtitleVisibility() {
+    this.container.querySelectorAll('.prop-section-subtitle').forEach((subtitle) => {
+      if (subtitle.dataset.tier) return;
+      let hasVisibleField = false;
+      let node = subtitle.nextElementSibling;
+      while (node && !node.classList.contains('prop-section-subtitle')) {
+        const fields = node.matches('.prop-field') ? [node] : Array.from(node.querySelectorAll('.prop-field'));
+        if (fields.some((f) => f.offsetParent !== null)) { hasVisibleField = true; break; }
+        node = node.nextElementSibling;
+      }
+      subtitle.classList.toggle('hidden', !hasVisibleField);
+    });
   }
 
   /**
