@@ -533,9 +533,20 @@ export class StudioMenuBar {
       }
 
       const rowsHtml = proposedRows.map((r) => `<li><code>${escapeHtml(r.trigger)}</code> → Dispatch Sim Event</li>`).join('');
+      // Post-implementation review §9: the headline/buttons here were already
+      // clear, but issue.message itself is StudioValidator's technical
+      // warning text (written for the Validate panel's audience) — add a
+      // plain-language lead sentence rather than replacing the detail below.
+      // Guarded on the specific code (the only one that exists today) so a
+      // future second blocking-issue code degrades to today's
+      // technical-only behavior instead of showing a wrong lead line.
+      const plainLead = issue.code === 'UNWIRED_WRITE_EVENT'
+        ? `<p class="modal-confirm-text"><strong>"${escapeHtml(comp.id)}" won't do anything in the cockpit yet</strong> — it's set up to send a value, but nothing actually sends it.</p>`
+        : '';
       const proceed = await openModal({
         title: 'Export Blocked — Component Not Wired Up',
         bodyHtml: `
+          ${plainLead}
           <p class="modal-confirm-text">${escapeHtml(issue.message)}</p>
           ${moreNote}
           <p class="modal-confirm-text">Add the following interaction${proposedRows.length > 1 ? 's' : ''} to "${escapeHtml(comp.id)}" to fix it?</p>
