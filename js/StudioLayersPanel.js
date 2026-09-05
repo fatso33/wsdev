@@ -15,6 +15,283 @@ import { DECK_EVENT_NAMES, getDeckEventsByKind } from '../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { loadImportedPacks, removePack, parsePackFile, importPack, buildPackFromCustomEvents } from '../core/deckEventPacks.js';
 
+// Wave 3, Part 7 item 1: shared drag MIME type, so StudioCanvas.js's dragover
+// handler can recognize a palette-card drag (vs. an unrelated drag, e.g. a
+// file dropped onto the page) without hardcoding the string twice.
+export const PALETTE_DRAG_MIME = 'application/x-studio-palette-item';
+
+// Module-level so StudioCanvas.js's drag-drop handler can look up a dropped
+// card's full definition by type, without a second, driftable copy of this
+// list.
+export const PALETTE_ITEMS = [
+  {
+    type: 'core.label',
+    title: 'Label',
+    desc: 'Static or dynamic bound avionics text title',
+    category: 'Text & Display',
+    icon: '<path d="M4 7V4h16v3M9 20h6M12 4v16"/>',
+    defaultProps: { text: 'NAV 1', align: 'left' },
+    defaultLayout: { col: 1, row: 1, w: 6, h: 1 }
+  },
+  {
+    // Wave 3, Part 7 item 2 (V15): used to arrive pre-bound to
+    // com1ActFreq/FREQ_COM/"ACT"/"MHz" — a real SimVar that has nothing to
+    // do with the author's actual intent, propagating as silent junk
+    // through Duplicate. Now arrives neutral: no binding, a generic format.
+    type: 'core.display',
+    title: 'Display Box',
+    desc: 'Formatted numeric / frequency readout value box',
+    category: 'Text & Display',
+    icon: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 10h4v4H7z"/>',
+    defaultProps: { format: 'RAW_INT' },
+    defaultLayout: { col: 1, row: 2, w: 6, h: 3 }
+  },
+  {
+    type: 'core.indicator',
+    title: 'Annunciator LED',
+    desc: 'Advisory, caution, warning or status indicator tile',
+    category: 'Text & Display',
+    icon: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/>',
+    defaultProps: { shape: 'tile', severity: 'warning', label: 'WARN' },
+    defaultBinding: { readSimVar: 'master_warning' },
+    defaultLayout: { col: 1, row: 1, w: 4, h: 2 }
+  },
+  {
+    type: 'core.divider',
+    title: 'Divider Line (v1.17)',
+    desc: 'Grid-snapped horizontal or vertical separator line',
+    category: 'Text & Display',
+    icon: '<line x1="3" y1="12" x2="21" y2="12"/>',
+    defaultProps: { orientation: 'horizontal' },
+    defaultStyle: { border: { width: 2, color: '#333c4a', style: 'solid' } },
+    defaultLayout: { col: 1, row: 1, w: 8, h: 1 }
+  },
+  {
+    type: 'core.image',
+    title: 'Image / Placard',
+    desc: 'Background artwork, hardware texture, or placard photo',
+    category: 'Text & Display',
+    icon: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+    defaultProps: { fit: 'cover' },
+    defaultLayout: { col: 1, row: 1, w: 12, h: 6 }
+  },
+  {
+    // Wave 3, Part 7 item 2 (V15): used to arrive pre-wired to a live
+    // dispatchEvent CUSTOM_EVENT interaction — a generic, collision-prone
+    // placeholder that looks wired but isn't wired to anything the author
+    // meant. Marcus's four preset buttons all ended up non-functional this
+    // way after Duplicate. Now arrives with no interaction at all.
+    type: 'core.button',
+    title: 'Button Control',
+    desc: 'Momentary, toggle, swap, or preset push-button',
+    category: 'Buttons & Inputs',
+    icon: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/>',
+    defaultProps: { variant: 'momentary', label: 'ACTIVATE' },
+    defaultLayout: { col: 1, row: 1, w: 4, h: 2 }
+  },
+  {
+    type: 'core.input',
+    title: 'Editable Input',
+    desc: 'Direct frequency, squawk or target input field',
+    category: 'Buttons & Inputs',
+    icon: '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>',
+    defaultProps: { format: 'FREQ_COM', placeholder: '121.500' },
+    defaultBinding: { readSimVar: 'com1StbyFreq', writeEvent: 'com1StbySet' },
+    defaultLayout: { col: 7, row: 2, w: 6, h: 3 }
+  },
+  {
+    type: 'core.stepper',
+    title: 'Stepper Control',
+    desc: '+ / − increment control for altitude, heading, or speed',
+    category: 'Buttons & Inputs',
+    icon: '<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="7" y1="12" x2="11" y2="12"/><line x1="15" y1="12" x2="19" y2="12"/><line x1="17" y1="10" x2="17" y2="14"/>',
+    defaultProps: { step: 100, min: 0, max: 50000 },
+    defaultBinding: { readSimVar: 'apAltBugValue', writeEvent: 'apAltSet' },
+    defaultLayout: { col: 1, row: 1, w: 4, h: 2 }
+  },
+  {
+    type: 'core.pad',
+    title: 'Touch Pad (v1.2)',
+    desc: '2D touch surface for map pan/zoom or absolute cursor placement',
+    category: 'Buttons & Inputs',
+    icon: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="2"/>',
+    defaultProps: { mode: 'relative', sensitivity: 1.0 },
+    defaultLayout: { col: 1, row: 1, w: 20, h: 20 }
+  },
+  {
+    type: 'core.gauge',
+    title: 'Gauge (v1.2)',
+    desc: 'Display-only needle/bar/arc driven by a bound value transform',
+    category: 'Avionics Controls',
+    icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="12" x2="17" y2="8"/>',
+    defaultProps: { transform: 'rotate', valueRange: [0, 400], outputRange: [-25, 230], clamp: true },
+    defaultBinding: { readSimVar: 'airspeed_indicated', deadband: 0.5 },
+    defaultLayout: { col: 1, row: 1, w: 8, h: 8 }
+  },
+  {
+    type: 'core.tape',
+    title: 'Scrolling Tape (v1.20)',
+    desc: 'Continuously-scrolling ruler with tick marks/labels driven by a bound value — airspeed/altitude tapes',
+    category: 'Avionics Controls',
+    icon: '<rect x="3" y="2" width="10" height="20" rx="1"/><line x1="16" y1="12" x2="22" y2="12"/><line x1="6" y1="6" x2="10" y2="6"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="6" y1="18" x2="10" y2="18"/>',
+    defaultProps: { axis: 'y', tickInterval: 10, majorEvery: 5, pxPerUnit: 3, decimals: 0 },
+    defaultBinding: { readSimVar: 'airspeed_indicated', deadband: 0.5 },
+    defaultLayout: { col: 1, row: 1, w: 6, h: 20 }
+  },
+  {
+    type: 'core.slider',
+    title: 'Slider (v1.2)',
+    desc: 'Absolute-position lever with optional detents (throttle, mixture, flaps)',
+    category: 'Avionics Controls',
+    icon: '<rect x="9" y="2" width="6" height="20" rx="2"/><rect x="6" y="9" width="12" height="6" rx="1"/>',
+    defaultProps: { axis: 'y', min: 0, max: 100, detents: [{ value: 0, label: 'IDLE', snap: true, snapTolerance: 3 }] },
+    defaultBinding: { writeEvent: 'THROTTLE1_SET' },
+    defaultLayout: { col: 1, row: 1, w: 3, h: 10 }
+  },
+  {
+    type: 'core.selector',
+    title: 'Selector (v1.2)',
+    desc: 'Discrete multi-position rotary or lever switch (fuel selector, mag switch)',
+    category: 'Avionics Controls',
+    icon: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="5" r="1.5"/><circle cx="19" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/><circle cx="5" cy="12" r="1.5"/>',
+    defaultProps: {
+      mode: 'rotary',
+      positions: [
+        { value: 'OFF', label: 'OFF', angle: 0 },
+        { value: 'LEFT', label: 'L', angle: 90 },
+        { value: 'BOTH', label: 'BOTH', angle: 180 },
+        { value: 'RIGHT', label: 'R', angle: 270 }
+      ]
+    },
+    defaultBinding: { writeEvent: 'FUEL_SELECTOR_SET', stateVar: 'fuelSelectorPos' },
+    defaultLayout: { col: 1, row: 1, w: 6, h: 6 }
+  },
+  {
+    type: 'core.rocker',
+    title: 'Rocker (v1.2)',
+    desc: 'Spring-loaded 2-zone momentary rocker (elevator trim, incremental flaps)',
+    category: 'Avionics Controls',
+    icon: '<rect x="4" y="4" width="16" height="16" rx="3"/><line x1="12" y1="4" x2="12" y2="20"/>',
+    defaultProps: {
+      axis: 'y',
+      zones: [
+        { id: 'nose_down', label: '▼', writeEvent: 'ELEV_TRIM_DN', repeatRate: 100 },
+        { id: 'nose_up', label: '▲', writeEvent: 'ELEV_TRIM_UP', repeatRate: 100 }
+      ],
+      springReturn: true
+    },
+    defaultLayout: { col: 1, row: 1, w: 4, h: 8 }
+  },
+  {
+    type: 'core.rotary',
+    title: 'Rotary Dial',
+    desc: 'Dual coarse/fine rotary dial knob with center push. Note: the runtime rotary does not dispatch write events on its own — pair it with an interaction or use core.stepper for a control that writes.',
+    category: 'Avionics Controls',
+    icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="12" x2="12" y2="6"/><circle cx="12" cy="12" r="2"/>',
+    defaultProps: { coarseStep: 10, fineStep: 1, circular: true },
+    defaultBinding: { readSimVar: 'apHdgBugValue', writeEvent: 'apHdgSet' },
+    defaultLayout: { col: 1, row: 1, w: 4, h: 4 }
+  },
+  {
+    type: 'core.list',
+    title: 'List (v1.2)',
+    desc: 'Scrollable repeater for array-length data (flight plan legs, CAS queue)',
+    category: 'Data & Composition',
+    icon: '<line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>',
+    defaultProps: { itemsBinding: { stateVar: 'flightPlanLegs' }, maxVisible: 6, scrollable: true, itemTemplate: { components: [] } },
+    defaultLayout: { col: 1, row: 1, w: 12, h: 20 }
+  },
+  {
+    type: 'core.ref',
+    title: 'Reference (v1.2)',
+    desc: 'References a packaged component-library instead of inlining structure',
+    category: 'Data & Composition',
+    icon: '<circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/>',
+    defaultProps: { libraryId: 'com.example.componentlibrary' },
+    defaultLayout: { col: 1, row: 1, w: 8, h: 10 }
+  }
+];
+
+/**
+ * Wave 3, Part 7 item 1: best-effort first-free-cell search for click-to-add
+ * (replacing a prior placement formula that never checked occupancy at all —
+ * see createComponentFromPaletteItem's own comment). Deliberately best-effort,
+ * not a hard collision rule — StudioState.js's `allowOverlap` (FDWS v1.1
+ * free-stacking layering mode) makes overlap a legitimate, supported outcome
+ * elsewhere in this app (e.g. an HSI's stacked compass/bug/needle layers), so
+ * a genuinely full grid falls back to a fixed position rather than refusing
+ * placement.
+ * @param {object} def widgetDef
+ * @param {number} w component width in grid cells
+ * @param {number} h component height in grid cells
+ * @returns {{col: number, row: number}}
+ */
+export function findFreeGridPosition(def, w, h) {
+  const maxCols = def.layout?.grid?.columns || 12;
+  const maxRows = def.layout?.grid?.rows || 6;
+  const cw = Math.min(maxCols, w);
+  const ch = Math.min(maxRows, h);
+  const occupied = (def.components || []).map((c) => c.layout).filter(Boolean);
+  const overlapsAny = (col, row) => occupied.some((o) => !(
+    col + cw <= o.col || o.col + o.w <= col || row + ch <= o.row || o.row + o.h <= row
+  ));
+  for (let row = 1; row <= maxRows - ch + 1; row++) {
+    for (let col = 1; col <= maxCols - cw + 1; col++) {
+      if (!overlapsAny(col, row)) return { col, row };
+    }
+  }
+  return { col: 1, row: 1 };
+}
+
+/**
+ * Wave 3, Part 7 item 1: the shared component-construction body behind both
+ * click-to-add (StudioLayersPanel.addComponentFromPalette, no
+ * explicitPosition — uses findFreeGridPosition) and drag-to-place
+ * (StudioCanvas.js's drop handler, explicitPosition = the drop point's grid
+ * cell, clamped in-bounds). A plain function rather than a method on either
+ * class since neither needs anything but `state`.
+ * @param {import('./StudioState.js').StudioState} state
+ * @param {object} template one of PALETTE_ITEMS
+ * @param {{col: number, row: number}} [explicitPosition]
+ * @returns {object} the newly-added component
+ */
+export function createComponentFromPaletteItem(state, template, explicitPosition) {
+  const def = state.widgetDef;
+  const maxCols = def.layout?.grid?.columns || 12;
+  const maxRows = def.layout?.grid?.rows || 6;
+  const compW = Math.min(maxCols, template.defaultLayout.w);
+  const compH = Math.min(maxRows, template.defaultLayout.h);
+
+  const targetPos = explicitPosition
+    ? {
+        col: Math.max(1, Math.min(explicitPosition.col, maxCols - compW + 1)),
+        row: Math.max(1, Math.min(explicitPosition.row, maxRows - compH + 1))
+      }
+    : findFreeGridPosition(def, compW, compH);
+
+  const newComponent = {
+    id: `${template.type.replace('core.', '')}_${Date.now().toString(36).slice(-3)}`,
+    type: template.type,
+    label: template.title,
+    layout: { col: targetPos.col, row: targetPos.row, w: compW, h: compH },
+    layer: { z: 0, group: def.layerGroups?.[0]?.id || null, pointerEvents: 'auto', clipToBounds: false },
+    props: { ...(template.defaultProps || {}) },
+    // A template can override the usual "every new component starts with
+    // themed typography" default — core.divider has no text, so a
+    // typography block is meaningless; it wants Border (its line's
+    // thickness/color/style) prefilled instead. Every other palette entry
+    // omits defaultStyle and gets the same typography default as before.
+    style: template.defaultStyle ? { ...template.defaultStyle } : {
+      typography: { font: 'Chakra Petch', size: 13, weight: 700, color: 'var(--text-white, #ffffff)' }
+    },
+    binding: template.defaultBinding ? { ...template.defaultBinding } : {},
+    interactions: template.defaultInteractions ? JSON.parse(JSON.stringify(template.defaultInteractions)) : []
+  };
+
+  state.addComponent(newComponent);
+  return newComponent;
+}
+
 export class StudioLayersPanel {
   /**
    * @param {HTMLElement} container
@@ -461,194 +738,7 @@ export class StudioLayersPanel {
 
   renderPaletteList(listMount) {
     listMount.innerHTML = '';
-    const items = [
-      {
-        type: 'core.label',
-        title: 'Label',
-        desc: 'Static or dynamic bound avionics text title',
-        category: 'Text & Display',
-        icon: '<path d="M4 7V4h16v3M9 20h6M12 4v16"/>',
-        defaultProps: { text: 'NAV 1', align: 'left' },
-        defaultLayout: { col: 1, row: 1, w: 6, h: 1 }
-      },
-      {
-        // Wave 3, Part 7 item 2 (V15): used to arrive pre-bound to
-        // com1ActFreq/FREQ_COM/"ACT"/"MHz" — a real SimVar that has nothing to
-        // do with the author's actual intent, propagating as silent junk
-        // through Duplicate. Now arrives neutral: no binding, a generic format.
-        type: 'core.display',
-        title: 'Display Box',
-        desc: 'Formatted numeric / frequency readout value box',
-        category: 'Text & Display',
-        icon: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 10h4v4H7z"/>',
-        defaultProps: { format: 'RAW_INT' },
-        defaultLayout: { col: 1, row: 2, w: 6, h: 3 }
-      },
-      {
-        type: 'core.indicator',
-        title: 'Annunciator LED',
-        desc: 'Advisory, caution, warning or status indicator tile',
-        category: 'Text & Display',
-        icon: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/>',
-        defaultProps: { shape: 'tile', severity: 'warning', label: 'WARN' },
-        defaultBinding: { readSimVar: 'master_warning' },
-        defaultLayout: { col: 1, row: 1, w: 4, h: 2 }
-      },
-      {
-        type: 'core.divider',
-        title: 'Divider Line (v1.17)',
-        desc: 'Grid-snapped horizontal or vertical separator line',
-        category: 'Text & Display',
-        icon: '<line x1="3" y1="12" x2="21" y2="12"/>',
-        defaultProps: { orientation: 'horizontal' },
-        defaultStyle: { border: { width: 2, color: '#333c4a', style: 'solid' } },
-        defaultLayout: { col: 1, row: 1, w: 8, h: 1 }
-      },
-      {
-        type: 'core.image',
-        title: 'Image / Placard',
-        desc: 'Background artwork, hardware texture, or placard photo',
-        category: 'Text & Display',
-        icon: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
-        defaultProps: { fit: 'cover' },
-        defaultLayout: { col: 1, row: 1, w: 12, h: 6 }
-      },
-      {
-        // Wave 3, Part 7 item 2 (V15): used to arrive pre-wired to a live
-        // dispatchEvent CUSTOM_EVENT interaction — a generic, collision-prone
-        // placeholder that looks wired but isn't wired to anything the author
-        // meant. Marcus's four preset buttons all ended up non-functional this
-        // way after Duplicate. Now arrives with no interaction at all.
-        type: 'core.button',
-        title: 'Button Control',
-        desc: 'Momentary, toggle, swap, or preset push-button',
-        category: 'Buttons & Inputs',
-        icon: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/>',
-        defaultProps: { variant: 'momentary', label: 'ACTIVATE' },
-        defaultLayout: { col: 1, row: 1, w: 4, h: 2 }
-      },
-      {
-        type: 'core.input',
-        title: 'Editable Input',
-        desc: 'Direct frequency, squawk or target input field',
-        category: 'Buttons & Inputs',
-        icon: '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>',
-        defaultProps: { format: 'FREQ_COM', placeholder: '121.500' },
-        defaultBinding: { readSimVar: 'com1StbyFreq', writeEvent: 'com1StbySet' },
-        defaultLayout: { col: 7, row: 2, w: 6, h: 3 }
-      },
-      {
-        type: 'core.stepper',
-        title: 'Stepper Control',
-        desc: '+ / − increment control for altitude, heading, or speed',
-        category: 'Buttons & Inputs',
-        icon: '<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="7" y1="12" x2="11" y2="12"/><line x1="15" y1="12" x2="19" y2="12"/><line x1="17" y1="10" x2="17" y2="14"/>',
-        defaultProps: { step: 100, min: 0, max: 50000 },
-        defaultBinding: { readSimVar: 'apAltBugValue', writeEvent: 'apAltSet' },
-        defaultLayout: { col: 1, row: 1, w: 4, h: 2 }
-      },
-      {
-        type: 'core.pad',
-        title: 'Touch Pad (v1.2)',
-        desc: '2D touch surface for map pan/zoom or absolute cursor placement',
-        category: 'Buttons & Inputs',
-        icon: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="2"/>',
-        defaultProps: { mode: 'relative', sensitivity: 1.0 },
-        defaultLayout: { col: 1, row: 1, w: 20, h: 20 }
-      },
-      {
-        type: 'core.gauge',
-        title: 'Gauge (v1.2)',
-        desc: 'Display-only needle/bar/arc driven by a bound value transform',
-        category: 'Avionics Controls',
-        icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="12" x2="17" y2="8"/>',
-        defaultProps: { transform: 'rotate', valueRange: [0, 400], outputRange: [-25, 230], clamp: true },
-        defaultBinding: { readSimVar: 'airspeed_indicated', deadband: 0.5 },
-        defaultLayout: { col: 1, row: 1, w: 8, h: 8 }
-      },
-      {
-        type: 'core.tape',
-        title: 'Scrolling Tape (v1.20)',
-        desc: 'Continuously-scrolling ruler with tick marks/labels driven by a bound value — airspeed/altitude tapes',
-        category: 'Avionics Controls',
-        icon: '<rect x="3" y="2" width="10" height="20" rx="1"/><line x1="16" y1="12" x2="22" y2="12"/><line x1="6" y1="6" x2="10" y2="6"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="6" y1="18" x2="10" y2="18"/>',
-        defaultProps: { axis: 'y', tickInterval: 10, majorEvery: 5, pxPerUnit: 3, decimals: 0 },
-        defaultBinding: { readSimVar: 'airspeed_indicated', deadband: 0.5 },
-        defaultLayout: { col: 1, row: 1, w: 6, h: 20 }
-      },
-      {
-        type: 'core.slider',
-        title: 'Slider (v1.2)',
-        desc: 'Absolute-position lever with optional detents (throttle, mixture, flaps)',
-        category: 'Avionics Controls',
-        icon: '<rect x="9" y="2" width="6" height="20" rx="2"/><rect x="6" y="9" width="12" height="6" rx="1"/>',
-        defaultProps: { axis: 'y', min: 0, max: 100, detents: [{ value: 0, label: 'IDLE', snap: true, snapTolerance: 3 }] },
-        defaultBinding: { writeEvent: 'THROTTLE1_SET' },
-        defaultLayout: { col: 1, row: 1, w: 3, h: 10 }
-      },
-      {
-        type: 'core.selector',
-        title: 'Selector (v1.2)',
-        desc: 'Discrete multi-position rotary or lever switch (fuel selector, mag switch)',
-        category: 'Avionics Controls',
-        icon: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="5" r="1.5"/><circle cx="19" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/><circle cx="5" cy="12" r="1.5"/>',
-        defaultProps: {
-          mode: 'rotary',
-          positions: [
-            { value: 'OFF', label: 'OFF', angle: 0 },
-            { value: 'LEFT', label: 'L', angle: 90 },
-            { value: 'BOTH', label: 'BOTH', angle: 180 },
-            { value: 'RIGHT', label: 'R', angle: 270 }
-          ]
-        },
-        defaultBinding: { writeEvent: 'FUEL_SELECTOR_SET', stateVar: 'fuelSelectorPos' },
-        defaultLayout: { col: 1, row: 1, w: 6, h: 6 }
-      },
-      {
-        type: 'core.rocker',
-        title: 'Rocker (v1.2)',
-        desc: 'Spring-loaded 2-zone momentary rocker (elevator trim, incremental flaps)',
-        category: 'Avionics Controls',
-        icon: '<rect x="4" y="4" width="16" height="16" rx="3"/><line x1="12" y1="4" x2="12" y2="20"/>',
-        defaultProps: {
-          axis: 'y',
-          zones: [
-            { id: 'nose_down', label: '▼', writeEvent: 'ELEV_TRIM_DN', repeatRate: 100 },
-            { id: 'nose_up', label: '▲', writeEvent: 'ELEV_TRIM_UP', repeatRate: 100 }
-          ],
-          springReturn: true
-        },
-        defaultLayout: { col: 1, row: 1, w: 4, h: 8 }
-      },
-      {
-        type: 'core.rotary',
-        title: 'Rotary Dial',
-        desc: 'Dual coarse/fine rotary dial knob with center push. Note: the runtime rotary does not dispatch write events on its own — pair it with an interaction or use core.stepper for a control that writes.',
-        category: 'Avionics Controls',
-        icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="12" x2="12" y2="6"/><circle cx="12" cy="12" r="2"/>',
-        defaultProps: { coarseStep: 10, fineStep: 1, circular: true },
-        defaultBinding: { readSimVar: 'apHdgBugValue', writeEvent: 'apHdgSet' },
-        defaultLayout: { col: 1, row: 1, w: 4, h: 4 }
-      },
-      {
-        type: 'core.list',
-        title: 'List (v1.2)',
-        desc: 'Scrollable repeater for array-length data (flight plan legs, CAS queue)',
-        category: 'Data & Composition',
-        icon: '<line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>',
-        defaultProps: { itemsBinding: { stateVar: 'flightPlanLegs' }, maxVisible: 6, scrollable: true, itemTemplate: { components: [] } },
-        defaultLayout: { col: 1, row: 1, w: 12, h: 20 }
-      },
-      {
-        type: 'core.ref',
-        title: 'Reference (v1.2)',
-        desc: 'References a packaged component-library instead of inlining structure',
-        category: 'Data & Composition',
-        icon: '<circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/>',
-        defaultProps: { libraryId: 'com.example.componentlibrary' },
-        defaultLayout: { col: 1, row: 1, w: 8, h: 10 }
-      }
-    ];
+    const items = PALETTE_ITEMS;
 
     const filter = (this.paletteFilterText || '').trim().toLowerCase();
     const matches = (item) => !filter || item.title.toLowerCase().includes(filter) || item.desc.toLowerCase().includes(filter) || item.category.toLowerCase().includes(filter) || item.type.toLowerCase().includes(filter);
@@ -669,6 +759,10 @@ export class StudioLayersPanel {
       catItems.forEach((item) => {
         const card = document.createElement('div');
         card.className = 'palette-item-card';
+        // Wave 3, Part 7 item 1: click-to-add stays (keyboard/accessibility,
+        // per the proposal) — drag is an additional way to place, not a
+        // replacement.
+        card.draggable = true;
         card.innerHTML = `
           <div class="palette-icon-box">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${item.icon}</svg>
@@ -681,6 +775,11 @@ export class StudioLayersPanel {
 
         card.addEventListener('click', () => {
           this.addComponentFromPalette(item);
+        });
+
+        card.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData(PALETTE_DRAG_MIME, item.type);
+          e.dataTransfer.effectAllowed = 'copy';
         });
 
         paletteList.appendChild(card);
@@ -698,39 +797,13 @@ export class StudioLayersPanel {
   }
 
   addComponentFromPalette(template) {
-    const def = this.state.widgetDef;
-    const maxCols = def.layout?.grid?.columns || 12;
-    const maxRows = def.layout?.grid?.rows || 6;
-
-    // Find next available empty position
-    let targetCol = 1;
-    let targetRow = 1;
-    const compW = Math.min(maxCols, template.defaultLayout.w);
-    const compH = Math.min(maxRows, template.defaultLayout.h);
-
-    const compCount = def.components?.length || 0;
-    targetRow = Math.min(maxRows - compH + 1, 1 + (compCount % 3) * 2);
-
-    const newComponent = {
-      id: `${template.type.replace('core.', '')}_${Date.now().toString(36).slice(-3)}`,
-      type: template.type,
-      label: template.title,
-      layout: { col: targetCol, row: targetRow, w: compW, h: compH },
-      layer: { z: 0, group: def.layerGroups?.[0]?.id || null, pointerEvents: 'auto', clipToBounds: false },
-      props: { ...(template.defaultProps || {}) },
-      // A template can override the usual "every new component starts with
-      // themed typography" default — core.divider has no text, so a
-      // typography block is meaningless; it wants Border (its line's
-      // thickness/color/style) prefilled instead. Every other palette entry
-      // omits defaultStyle and gets the same typography default as before.
-      style: template.defaultStyle ? { ...template.defaultStyle } : {
-        typography: { font: 'Chakra Petch', size: 13, weight: 700, color: 'var(--text-white, #ffffff)' }
-      },
-      binding: template.defaultBinding ? { ...template.defaultBinding } : {},
-      interactions: template.defaultInteractions ? JSON.parse(JSON.stringify(template.defaultInteractions)) : []
-    };
-
-    this.state.addComponent(newComponent);
+    // Wave 3, Part 7 item 1: construction + first-free-cell placement now
+    // live in the module-level createComponentFromPaletteItem() so
+    // StudioCanvas.js's drag-drop handler can share it (with an explicit
+    // drop-point position instead of an auto-found free cell). The tab
+    // switch stays here, click-only — a drag already has the palette open,
+    // and dropping several items in a row shouldn't be interrupted.
+    createComponentFromPaletteItem(this.state, template);
     this.state.setLeftTab('layers');
   }
 

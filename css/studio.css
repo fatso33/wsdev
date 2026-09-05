@@ -1247,6 +1247,13 @@ body, html {
   outline-offset: -1.5px;
 }
 
+/* Wave 3, Part 7 item 1: drop-target cue while dragging a palette card over
+   the canvas — same cyan-dashed language as .studio-component-node.hovered. */
+.canvas-widget-grid.drag-over {
+  outline: 2px dashed var(--accent-cyan);
+  outline-offset: -2px;
+}
+
 /* Component Nodes on Canvas */
 .studio-component-node {
   position: relative;

@@ -4,6 +4,7 @@
  */
 
 import { StudioValidator, isComponentUnconfigured } from './StudioValidator.js';
+import { PALETTE_ITEMS, PALETTE_DRAG_MIME, createComponentFromPaletteItem } from './StudioLayersPanel.js';
 import { resolveThemedColor, resolveThemedColors, resolveThemedBackground } from '../widgets/components/ThemeColor.js';
 
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -257,6 +258,47 @@ export class StudioCanvas {
         e.preventDefault();
         this.state.updateComponent(comp.id, { layout: newLayout }, true, 'Nudge Component');
       }
+    });
+
+    // Wave 3, Part 7 item 1: palette drag-to-place. Reuses the exact
+    // gridRect/cellWidth/cellHeight pixel->grid-cell math the existing
+    // on-canvas component-move drag already proved (see onPointerMove in
+    // the resize/move handler below) rather than a second copy.
+    this.gridElement.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer.types.includes(PALETTE_DRAG_MIME)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+
+    this.gridElement.addEventListener('dragenter', (e) => {
+      if (!e.dataTransfer.types.includes(PALETTE_DRAG_MIME)) return;
+      this.gridElement.classList.add('drag-over');
+    });
+
+    this.gridElement.addEventListener('dragleave', (e) => {
+      if (e.target !== this.gridElement) return;
+      this.gridElement.classList.remove('drag-over');
+    });
+
+    this.gridElement.addEventListener('drop', (e) => {
+      const type = e.dataTransfer.getData(PALETTE_DRAG_MIME);
+      this.gridElement.classList.remove('drag-over');
+      if (!type) return;
+      e.preventDefault();
+
+      const template = PALETTE_ITEMS.find((i) => i.type === type);
+      if (!template) return;
+
+      const gridCols = this.state.widgetDef.layout?.grid?.columns || 12;
+      const gridRows = this.state.widgetDef.layout?.grid?.rows || 6;
+      const gridRect = this.gridElement.getBoundingClientRect();
+      const cellWidth = gridRect.width / gridCols;
+      const cellHeight = gridRect.height / gridRows;
+
+      const col = Math.max(1, Math.round((e.clientX - gridRect.left) / cellWidth) + 1);
+      const row = Math.max(1, Math.round((e.clientY - gridRect.top) / cellHeight) + 1);
+
+      createComponentFromPaletteItem(this.state, template, { col, row });
     });
   }
 
