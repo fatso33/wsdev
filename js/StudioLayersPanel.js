@@ -274,7 +274,15 @@ export function createComponentFromPaletteItem(state, template, explicitPosition
     type: template.type,
     label: template.title,
     layout: { col: targetPos.col, row: targetPos.row, w: compW, h: compH },
-    layer: { z: 0, group: def.layerGroups?.[0]?.id || null, pointerEvents: 'auto', clipToBounds: false },
+    // Post-implementation review §9: blindly taking layerGroups[0] landed
+    // new components in whichever group happened to be declared first — by
+    // convention a template's locked background/bezel group, which `locked`
+    // exists specifically to mark as "don't casually add things here."
+    // Prefer the first UNLOCKED group instead; fall back to [0] only if
+    // every declared group is locked, and to null (ungrouped) only if the
+    // widget declares no layer groups at all (unchanged for a from-scratch
+    // New Widget, whose layerGroups starts empty).
+    layer: { z: 0, group: def.layerGroups?.find((g) => !g.locked)?.id || def.layerGroups?.[0]?.id || null, pointerEvents: 'auto', clipToBounds: false },
     props: { ...(template.defaultProps || {}) },
     // A template can override the usual "every new component starts with
     // themed typography" default — core.divider has no text, so a
