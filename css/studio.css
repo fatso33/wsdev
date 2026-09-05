@@ -2237,6 +2237,31 @@ body, html {
   align-self: flex-start;
 }
 
+/* G6 slice 3: a nested ALL/ANY group inside a condition list editor
+   (visibleWhen / style.rules / interactions' "Only Run If") — dashed cyan
+   border matches this app's existing "structural, not solid" dashed-border
+   language elsewhere (e.g. .studio-component-node's own outline), keeping
+   it visually distinct from the plain-card .row-list-item leaf rows. */
+.cond-group {
+  gap: 8px;
+  background-color: #0d1420;
+  border: 1px dashed var(--accent-cyan, #00d8f6);
+}
+.cond-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cond-group-header > select { flex: 1 1 0; min-width: 0; }
+.cond-group-header > button { flex: 0 0 auto; }
+.cond-group-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--studio-panel-border);
+}
+
 /* Interactions */
 .interaction-card {
   background-color: #090d14;

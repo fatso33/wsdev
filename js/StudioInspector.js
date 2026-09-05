@@ -2154,22 +2154,26 @@ export class StudioInspector {
     const stateVars = def.state || [];
 
     // A compound expression is normalized to a flat condition list under one
-    // combinator (allOf/anyOf) for the visual editor — arbitrary nested
-    // compound expressions remain possible but must be hand-edited via the
-    // JSON escape hatch below, since that shape has no bounded visual form.
+    // combinator (allOf/anyOf) for the visual editor. G6 slice 3: each item
+    // in that list can now be EITHER a leaf OR a one-level-deep group
+    // (itself {allOf|anyOf: [...leaves]}) — exactly "two levels," matching
+    // the proposal's own wording, not arbitrary recursive nesting. Anything
+    // deeper (a group containing a group) has no bounded visual form and
+    // still falls back to the JSON escape hatch below.
     const combinator = expr?.anyOf ? 'anyOf' : 'allOf';
     const conditions = expr ? (expr[combinator] || (expr.state ? [expr] : [])) : [];
+    const isGroupCondition = (c) => !!c && typeof c === 'object' && (Array.isArray(c.allOf) || Array.isArray(c.anyOf));
     // Bug found live during G6 slice 1 verification, pre-existing (not
     // introduced here — this was visibleWhen's own original check, copied
-    // verbatim before this fix): the old check only looked at the OUTERMOST
-    // shape, so a genuinely two-level expression like `{allOf: [{anyOf:
-    // [...]}, {state:'c', ...}]}` — exactly the case G6 is about — passed as
-    // "simple" because the top level has `allOf`. Each array member must
-    // itself be a flat leaf (has `state`, isn't itself an allOf/anyOf group)
-    // or this falls back to the JSON escape hatch instead of silently
-    // destroying the nested group on the next row edit.
-    const isLeafCondition = (c) => !!c && typeof c === 'object' && typeof c.state === 'string' && !('allOf' in c) && !('anyOf' in c);
-    const isNestedOrComplex = !!expr && (!(expr.allOf || expr.anyOf || expr.state) || !conditions.every(isLeafCondition));
+    // verbatim before that fix): the old check only looked at the OUTERMOST
+    // shape, so a genuinely nested expression passed as "simple" because the
+    // top level has `allOf`/`anyOf`. Each array member must itself be
+    // recognized as a leaf or a (leaves-only) group, or this falls back to
+    // the JSON escape hatch instead of silently destroying what it can't
+    // render on the next row edit.
+    const isLeafCondition = (c) => !!c && typeof c === 'object' && typeof c.state === 'string' && !isGroupCondition(c);
+    const isSimpleItem = (c) => isLeafCondition(c) || (isGroupCondition(c) && (c.allOf || c.anyOf).every(isLeafCondition));
+    const isNestedOrComplex = !!expr && (!(expr.allOf || expr.anyOf || expr.state) || !conditions.every(isSimpleItem));
 
     const OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
 
@@ -2180,10 +2184,12 @@ export class StudioInspector {
     // elsewhere in this panel (bindings, event pickers).
     const stateIsCustomPath = (name) => !!name && !stateVars.some((s) => s.name === name);
 
-    const conditionRowHtml = (cond, idx) => {
+    // G6 slice 3: the leaf field markup (state/op/value), extracted so both
+    // a top-level leaf row and a group-nested leaf row render identically —
+    // one template, not two copies to keep in sync.
+    const leafFieldsHtml = (cond) => {
       const isCustom = stateIsCustomPath(cond.state);
       return `
-      <div class="row-list-item" data-idx="${idx}">
         <div class="${idPrefix}-state-wrap" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;">
           <select class="row-field ${idPrefix}-state prop-select" data-field="state">
             ${conditionStateOptionsHtml(stateVars, cond.state, false, comp.binding?.readSimVar)}
@@ -2194,6 +2200,42 @@ export class StudioInspector {
           ${OPS.map((op) => `<option value="${op}" ${OPS.find((o) => cond[o] !== undefined) === op ? 'selected' : ''}>${op}</option>`).join('')}
         </select>
         <input type="text" class="row-field ${idPrefix}-val" data-field="val" value="${(() => { const op = OPS.find((o) => cond[o] !== undefined); return op ? (op === 'between' ? (cond.between || []).join(',') : cond[op]) : ''; })()}" placeholder="${(OPS.find((o) => cond[o] !== undefined) === 'between') ? 'lo,hi' : 'value'}" />
+      `;
+    };
+
+    // G6 slice 3: a top-level item is either a plain leaf row (unchanged
+    // markup) or a bordered group box containing its own combinator + N
+    // leaf rows — nested leaf rows are structurally one level deeper in the
+    // DOM (inside .cond-group-rows), not a different CSS class, so the
+    // top-level wiring's `>` direct-child query naturally excludes them.
+    const conditionRowHtml = (cond, idx) => {
+      if (isGroupCondition(cond)) {
+        const groupCombinator = cond.anyOf ? 'anyOf' : 'allOf';
+        const groupLeaves = cond[groupCombinator] || [];
+        return `
+      <div class="row-list-item cond-group" data-idx="${idx}" style="flex-direction:column;align-items:stretch;">
+        <div class="cond-group-header">
+          <select class="row-field ${idPrefix}-group-combinator prop-select">
+            <option value="allOf" ${groupCombinator === 'allOf' ? 'selected' : ''}>Group: ALL of these are true</option>
+            <option value="anyOf" ${groupCombinator === 'anyOf' ? 'selected' : ''}>Group: ANY of these are true</option>
+          </select>
+          <button type="button" class="btn-mini-close ${idPrefix}-remove" title="Remove Group">✕</button>
+        </div>
+        <div class="cond-group-rows">
+          ${groupLeaves.map((leaf, leafIdx) => `
+            <div class="row-list-item" data-leaf-idx="${leafIdx}">
+              ${leafFieldsHtml(leaf)}
+              <button type="button" class="btn-mini-close ${idPrefix}-remove-leaf" title="Remove">✕</button>
+            </div>
+          `).join('') || '<div class="caps-empty">Empty group — add a condition.</div>'}
+        </div>
+        <button type="button" class="bar-btn row-add ${idPrefix}-add-group-leaf">+ Add Condition to Group</button>
+      </div>
+    `;
+      }
+      return `
+      <div class="row-list-item" data-idx="${idx}">
+        ${leafFieldsHtml(cond)}
         <button type="button" class="btn-mini-close ${idPrefix}-remove" title="Remove">✕</button>
       </div>
     `;
@@ -2214,7 +2256,10 @@ export class StudioInspector {
           </select>
         </div>
         <div id="${idPrefix}-conditions">${conditions.map(conditionRowHtml).join('') || '<div class="caps-empty">No conditions set.</div>'}</div>
-        <button type="button" id="${idPrefix}-add-condition" class="bar-btn row-add">+ Add Condition</button>
+        <div class="prop-row-2" style="margin-top:6px;">
+          <button type="button" id="${idPrefix}-add-condition" class="bar-btn row-add">+ Add Condition</button>
+          <button type="button" id="${idPrefix}-add-group" class="bar-btn row-add" title="A nested ALL/ANY group — for e.g. 'X AND (Y OR Z)'">+ Add Group</button>
+        </div>
       `}
     `;
 
@@ -2226,8 +2271,11 @@ export class StudioInspector {
 
       mountEl.querySelector(`#${idPrefix}-combinator`)?.addEventListener('change', (e) => commit(conditions, e.target.value));
 
-      mountEl.querySelectorAll(`#${idPrefix}-conditions .row-list-item`).forEach((rowEl) => {
-        const idx = Number(rowEl.dataset.idx);
+      // G6 slice 3: shared leaf-field wiring (state/op/value, including
+      // "Use This Component's Own Value") — `writeValue(nextLeaf,
+      // recordHistory)` is the only thing that differs between a top-level
+      // leaf and a group-nested one, so this one function backs both.
+      const wireLeafFields = (rowEl, writeValue) => {
         const stateSelect = rowEl.querySelector(`.${idPrefix}-state`);
         const stateCustomInput = rowEl.querySelector(`.${idPrefix}-state-custom`);
 
@@ -2238,7 +2286,6 @@ export class StudioInspector {
             : stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustomInput.value.trim() : stateSelect.value;
           const op = rowEl.querySelector(`.${idPrefix}-op`).value;
           const rawVal = rowEl.querySelector(`.${idPrefix}-val`).value;
-          const next = [...conditions];
           const cond = { state };
           if (op === 'between') {
             const [lo, hi] = rawVal.split(',').map((s) => Number(s.trim()));
@@ -2248,8 +2295,7 @@ export class StudioInspector {
           } else {
             cond[op] = rawVal;
           }
-          next[idx] = cond;
-          commit(next, combinator, recordHistory);
+          writeValue(cond, recordHistory);
         };
         stateSelect?.addEventListener('change', () => {
           if (stateSelect.value === OWN_VALUE_OPTION) {
@@ -2284,13 +2330,74 @@ export class StudioInspector {
         stateCustomInput?.addEventListener('change', applyRowChange);
         rowEl.querySelector(`.${idPrefix}-op`)?.addEventListener('change', applyRowChange);
         rowEl.querySelector(`.${idPrefix}-val`)?.addEventListener('change', applyRowChange);
-        rowEl.querySelector(`.${idPrefix}-remove`)?.addEventListener('click', () => {
-          commit(conditions.filter((_, i) => i !== idx), combinator);
-        });
+      };
+
+      mountEl.querySelectorAll(`#${idPrefix}-conditions > .row-list-item`).forEach((rowEl) => {
+        const idx = Number(rowEl.dataset.idx);
+
+        if (rowEl.classList.contains('cond-group')) {
+          rowEl.querySelector(`.${idPrefix}-group-combinator`)?.addEventListener('change', (e) => {
+            const item = conditions[idx];
+            const groupLeaves = item[item.anyOf ? 'anyOf' : 'allOf'] || [];
+            const next = [...conditions];
+            next[idx] = { [e.target.value]: groupLeaves };
+            commit(next, combinator);
+          });
+          rowEl.querySelector(`.${idPrefix}-remove`)?.addEventListener('click', () => {
+            commit(conditions.filter((_, i) => i !== idx), combinator);
+          });
+          rowEl.querySelectorAll('.cond-group-rows > .row-list-item').forEach((leafEl) => {
+            const leafIdx = Number(leafEl.dataset.leafIdx);
+            wireLeafFields(leafEl, (nextLeaf, recordHistory) => {
+              const item = conditions[idx];
+              const gc = item.anyOf ? 'anyOf' : 'allOf';
+              const nextLeaves = [...(item[gc] || [])];
+              nextLeaves[leafIdx] = nextLeaf;
+              const next = [...conditions];
+              next[idx] = { [gc]: nextLeaves };
+              commit(next, combinator, recordHistory);
+            });
+            leafEl.querySelector(`.${idPrefix}-remove-leaf`)?.addEventListener('click', () => {
+              const item = conditions[idx];
+              const gc = item.anyOf ? 'anyOf' : 'allOf';
+              const nextLeaves = (item[gc] || []).filter((_, i) => i !== leafIdx);
+              const next = [...conditions];
+              // No empty groups — removing a group's last leaf removes the
+              // whole group rather than leaving a stray {allOf: []}.
+              if (nextLeaves.length === 0) {
+                next.splice(idx, 1);
+              } else {
+                next[idx] = { [gc]: nextLeaves };
+              }
+              commit(next, combinator);
+            });
+          });
+          rowEl.querySelector(`.${idPrefix}-add-group-leaf`)?.addEventListener('click', () => {
+            const item = conditions[idx];
+            const gc = item.anyOf ? 'anyOf' : 'allOf';
+            const nextLeaves = [...(item[gc] || []), { state: stateVars[0]?.name || '', equals: '' }];
+            const next = [...conditions];
+            next[idx] = { [gc]: nextLeaves };
+            commit(next, combinator);
+          });
+        } else {
+          wireLeafFields(rowEl, (nextLeaf, recordHistory) => {
+            const next = [...conditions];
+            next[idx] = nextLeaf;
+            commit(next, combinator, recordHistory);
+          });
+          rowEl.querySelector(`.${idPrefix}-remove`)?.addEventListener('click', () => {
+            commit(conditions.filter((_, i) => i !== idx), combinator);
+          });
+        }
       });
 
       mountEl.querySelector(`#${idPrefix}-add-condition`)?.addEventListener('click', () => {
         commit([...conditions, { state: stateVars[0]?.name || '', equals: '' }], combinator);
+      });
+
+      mountEl.querySelector(`#${idPrefix}-add-group`)?.addEventListener('click', () => {
+        commit([...conditions, { allOf: [{ state: stateVars[0]?.name || '', equals: '' }] }], combinator);
       });
 
       mountEl.querySelector(`#${idPrefix}-clear`)?.addEventListener('click', () => {
