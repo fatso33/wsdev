@@ -28,6 +28,18 @@ import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/The
 
 const CUSTOM_OPTION_VALUE = '__custom__';
 
+// Wave 3, Part 6 item 5 (V7): the only 3 component types with a runtime
+// `props.<field> → def.label` fallback (confirmed in LabelComponent.js,
+// ButtonComponent.js, IndicatorComponent.js) — and the only 3 with a matching
+// registry Content-group field at that same path. Drives the "Shows"/"Called"
+// paired row in LAYOUT & LAYERING below; every other type keeps a plain
+// "Display Label" field, unchanged.
+const CONTENT_FIELD_BY_TYPE = {
+  'core.label': 'props.text',
+  'core.button': 'props.label',
+  'core.indicator': 'props.label'
+};
+
 // V14 ("Use This Component's Own Value"): a fourth option shared by every
 // condition-source dropdown (visibleWhen row, style.rules condition, an
 // interaction's "Only Run If"), alongside declared state[] vars and the
@@ -1065,11 +1077,32 @@ export class StudioInspector {
     this.container.appendChild(this.buildAccordionGroup('LAYOUT & LAYERING', true, (outerBody) => {
     ((body) => {
       const layer = comp.layer || {};
+      const contentPath = CONTENT_FIELD_BY_TYPE[comp.type];
+      // Reuse the registry's own per-type tooltip (already tailored — e.g.
+      // core.button's mentions binding.stateRef) rather than a hand-written
+      // one-size string, appending only the fallback note this pairing adds.
+      const contentFieldDef = contentPath
+        ? REGISTRY_TYPE_FIELDS[comp.type]?.find((f) => f.path === contentPath)
+        : null;
+      const contentTooltip = `${contentFieldDef?.tooltip || ''} Falls back to "Called" (right) if this has never been set.`.trim();
       body.innerHTML = `
+        ${contentPath ? `
+        <div class="prop-row-2">
+          <div class="prop-field">
+            <label>Shows <span class="prop-hint" title="${escapeHtmlAttr(contentTooltip)}">ⓘ</span></label>
+            <input type="text" id="c-content-field" class="prop-input" value="${escapeHtmlAttr(this.getFieldValue(comp, contentPath) ?? '')}" placeholder="Runtime text..." />
+          </div>
+          <div class="prop-field">
+            <label>Called <span class="prop-hint" title="Studio-only authoring name — shown in the layer tree and this panel's header. Never rendered on the widget itself.">ⓘ</span></label>
+            <input type="text" id="c-label" class="prop-input" value="${comp.label || ''}" placeholder="Component label..." />
+          </div>
+        </div>
+        ` : `
         <div class="prop-field">
           <label>Display Label</label>
           <input type="text" id="c-label" class="prop-input" value="${comp.label || ''}" placeholder="Component label..." />
         </div>
+        `}
         <div class="prop-row-2">
           <div class="prop-field">
             <label>Component ID</label>
@@ -1117,6 +1150,7 @@ export class StudioInspector {
       `;
 
       body.querySelector('#c-label')?.addEventListener('change', (e) => this.state.updateComponent(comp.id, { label: e.target.value }));
+      body.querySelector('#c-content-field')?.addEventListener('change', (e) => this.commitField(comp, contentPath, e.target.value));
       body.querySelector('#c-id')?.addEventListener('change', (e) => {
         const newId = e.target.value.trim();
         if (newId && newId !== comp.id) {
@@ -2306,7 +2340,7 @@ export class StudioInspector {
       case 'core.label': {
         const fieldMount = document.createElement('div');
         body.appendChild(fieldMount);
-        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.label']);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.label'].filter((f) => f.path !== CONTENT_FIELD_BY_TYPE['core.label']));
         const notice = document.createElement('div');
         notice.className = 'empty-tree-notice';
         notice.textContent = 'Alignment moved to the "VISUAL STYLING & TYPOGRAPHY" panel below (FDWS v1.8) — now shared by every component type instead of being label-only.';
@@ -2341,7 +2375,7 @@ export class StudioInspector {
       case 'core.button': {
         const fieldMount = document.createElement('div');
         body.appendChild(fieldMount);
-        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.button']);
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.button'].filter((f) => f.path !== CONTENT_FIELD_BY_TYPE['core.button']));
         break;
       }
 
@@ -2373,7 +2407,7 @@ export class StudioInspector {
       case 'core.indicator': {
         const fieldMount = document.createElement('div');
         body.appendChild(fieldMount);
-        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.indicator'].filter((f) => f.path.startsWith('props.')));
+        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.indicator'].filter((f) => f.path.startsWith('props.') && f.path !== CONTENT_FIELD_BY_TYPE['core.indicator']));
         break;
       }
 
