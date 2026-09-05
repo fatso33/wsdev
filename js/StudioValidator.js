@@ -7,6 +7,25 @@
 
 import { parseStateRef } from '../widgets/utils/StateRefPath.js';
 import { DECK_EVENTS } from '../core/deckEvents.js';
+
+/**
+ * Post-implementation review §2: walks a visibleWhen/style.rules[].when/
+ * interaction-condition expression ({allOf|anyOf:[...]} | {state, ...}) and
+ * returns every leaf `state` path string found, however deeply nested under
+ * allOf/anyOf. Same grammar shared/widgets/components/ConditionEvaluator.js's
+ * evaluateConditionExpr() walks at runtime — kept here as the one place that
+ * needs to enumerate rather than evaluate the leaves.
+ * @param {object} expr
+ * @param {Array<string>} out
+ * @returns {Array<string>}
+ */
+function collectConditionStateRefs(expr, out = []) {
+  if (!expr || typeof expr !== 'object') return out;
+  if (Array.isArray(expr.allOf)) { expr.allOf.forEach((e) => collectConditionStateRefs(e, out)); return out; }
+  if (Array.isArray(expr.anyOf)) { expr.anyOf.forEach((e) => collectConditionStateRefs(e, out)); return out; }
+  if (typeof expr.state === 'string' && expr.state) out.push(expr.state);
+  return out;
+}
 // Widget Studio 2.0, Phase 0: these were four separate hand-maintained arrays
 // (here, and their real-runtime counterparts in PropertyRegistry.js/
 // InteractionDispatcher.js) with no check that they agreed — the exact "UI list
@@ -586,6 +605,26 @@ export class StudioValidator {
       }
     };
 
+    // Post-implementation review §2: binding.stateVar and
+    // interactions[].action.fromStateRef were already cross-checked against
+    // declared state[] vars, but binding.stateRef/sublabelStateRef,
+    // style.rules[].when and visibleWhen use the identical grammar and were
+    // silently unchecked — a widget whose conditional formatting can never
+    // fire (undeclared state ref) validated as fully compliant. One helper,
+    // reused at every site below (and to close a related gap: the existing
+    // interaction-condition check only looked at the outer leaf, never
+    // recursing into allOf/anyOf sub-conditions).
+    const checkStateRefs = (compId, expr, siteLabel) => {
+      collectConditionStateRefs(expr).forEach((ref) => {
+        const parsed = parseStateRef(ref);
+        if (!parsed) {
+          warnings.push(`Component "${compId}" ${siteLabel} "${ref}" is not a valid path (expected e.g. "name" or "name[0].field").`);
+        } else if (!stateVarNames.has(parsed.name)) {
+          warnings.push(`Component "${compId}" ${siteLabel} references undeclared state variable "${parsed.name}".`);
+        }
+      });
+    };
+
     const maxCols = def.layout?.grid?.columns || 64;
     const maxRows = def.layout?.grid?.rows || 64;
 
@@ -702,6 +741,10 @@ export class StudioValidator {
           if (comp.binding.stateVar && !comp.binding.stateVar.startsWith('$context.') && !stateVarNames.has(comp.binding.stateVar)) {
             warnings.push(`Component "${comp.id}" binds to undeclared state variable "${comp.binding.stateVar}".`);
           }
+          // Post-implementation review §2: same nested-path grammar as
+          // fromStateRef, previously unchecked.
+          if (comp.binding.stateRef) checkStateRefs(comp.id, { state: comp.binding.stateRef }, 'binding.stateRef');
+          if (comp.binding.sublabelStateRef) checkStateRefs(comp.id, { state: comp.binding.sublabelStateRef }, 'binding.sublabelStateRef');
           // FDWS v1.7
           if (comp.binding.pollFrequencyHz !== undefined && (typeof comp.binding.pollFrequencyHz !== 'number' || comp.binding.pollFrequencyHz <= 0)) {
             warnings.push(`Component "${comp.id}" has a non-numeric or non-positive binding.pollFrequencyHz (${JSON.stringify(comp.binding.pollFrequencyHz)}).`);
@@ -797,19 +840,16 @@ export class StudioValidator {
 
             // FDWS v1.23: an interaction's optional `condition` — same shape as
             // visibleWhen/style.rules' `when` — gates whether the action (and
-            // feedback) runs at all. Cross-check the same way fromStateRef does:
-            // must parse, and its base name must be a declared state var.
+            // feedback) runs at all. Post-implementation review §2: the old
+            // check here only looked at the outer leaf, so a compound
+            // allOf/anyOf condition's nested state refs went unchecked —
+            // checkStateRefs recurses, so this is a strict superset (still
+            // catches the flat case, now also the nested one).
             if (inter.condition) {
-              const condStateRef = inter.condition.state;
-              if (!condStateRef && !Array.isArray(inter.condition.allOf) && !Array.isArray(inter.condition.anyOf)) {
+              if (typeof inter.condition.state !== 'string' && !Array.isArray(inter.condition.allOf) && !Array.isArray(inter.condition.anyOf)) {
                 warnings.push(`Component "${comp.id}" interaction #${interIdx + 1}: condition is missing "state" (or an allOf/anyOf list).`);
-              } else if (condStateRef) {
-                const parsed = parseStateRef(condStateRef);
-                if (!parsed) {
-                  warnings.push(`Component "${comp.id}" interaction #${interIdx + 1}: condition.state "${condStateRef}" is not a valid path (expected e.g. "name" or "name[0].field").`);
-                } else if (!stateVarNames.has(parsed.name)) {
-                  warnings.push(`Component "${comp.id}" interaction #${interIdx + 1}: condition.state references undeclared state variable "${parsed.name}".`);
-                }
+              } else {
+                checkStateRefs(comp.id, inter.condition, `interaction #${interIdx + 1} condition`);
               }
             }
           });
@@ -832,6 +872,18 @@ export class StudioValidator {
           if (comp.props?.variant === 'preset') {
             warnings.push(`Component "${comp.id}": variant:"preset" was removed in FDWS v1.14 — pick a different Button Variant; it no longer changes any preset-related behavior (that's now driven entirely by binding.stateRef/sublabelStateRef, independent of variant).`);
           }
+        }
+
+        // Post-implementation review §2: style.rules[].when and visibleWhen
+        // use the same condition grammar as interactions[].condition (which
+        // was already cross-checked) but were silently unchecked — a rule/
+        // visibility gate on an undeclared state var can never fire, and the
+        // widget still validated as fully compliant.
+        if (Array.isArray(comp.style?.rules)) {
+          comp.style.rules.forEach((rule, i) => checkStateRefs(comp.id, rule?.when, `style.rules[${i}].when`));
+        }
+        if (comp.visibleWhen) {
+          checkStateRefs(comp.id, comp.visibleWhen, 'visibleWhen');
         }
 
         // Asset Reference check
