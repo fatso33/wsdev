@@ -432,6 +432,18 @@ export class StudioLayersPanel {
       this.renderLayersList();
     });
 
+    // Review follow-up item 4: the align/distribute toolbar (StudioCanvas.js)
+    // only appears after a shift-click multi-select, so anyone who doesn't
+    // already know the gesture never discovers it exists. Cheapest fix per
+    // the doc: a hint where it'd be discovered, no new selection model.
+    if (components.length >= 2) {
+      const hint = document.createElement('div');
+      hint.className = 'layers-panel-hint';
+      hint.style.cssText = 'font-size:11px;opacity:0.7;padding:2px 10px 8px;';
+      hint.textContent = 'Tip: shift-click 2+ components on the canvas to align or distribute them.';
+      this.contentArea.appendChild(hint);
+    }
+
     const treeContainer = document.createElement('div');
     treeContainer.id = 'layers-tree-container';
     treeContainer.className = 'layers-tree-list';
