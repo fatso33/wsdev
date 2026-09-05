@@ -198,12 +198,19 @@ export class StudioApp {
         this.renderActiveViewport();
       }
 
-      if (['WIDGET_DEF_LOADED', 'WIDGET_META_UPDATED'].includes(changeType)) {
-        const nameEl = document.getElementById('nav-widget-name');
-        const revEl = document.getElementById('nav-widget-rev');
-        if (nameEl) nameEl.textContent = this.state.widgetDef.meta?.name || 'Untitled';
-        if (revEl) revEl.textContent = `r${this.state.widgetDef.revision || 1}`;
-      }
+      // Wave 4 follow-up (found live while verifying G10's full JSON panel):
+      // this used to be gated to a hardcoded changeType allowlist
+      // (WIDGET_DEF_LOADED/WIDGET_META_UPDATED) that missed HISTORY_CHANGE
+      // (Undo/Redo after any widget-meta edit) and WIDGET_SAVED (a plain
+      // Save bumping revision) — both reproduced live, confirmed unrelated
+      // to G10 itself (the same staleness hits the pre-existing Display
+      // Name field too). The update itself is cheap and idempotent, so it
+      // now runs on every notify instead of maintaining an allowlist a
+      // future state method can silently fall outside of.
+      const nameEl = document.getElementById('nav-widget-name');
+      const revEl = document.getElementById('nav-widget-rev');
+      if (nameEl) nameEl.textContent = this.state.widgetDef.meta?.name || 'Untitled';
+      if (revEl) revEl.textContent = `r${this.state.widgetDef.revision || 1}`;
     });
   }
 
