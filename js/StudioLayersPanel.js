@@ -10,7 +10,7 @@
 
 import { STUDIO_TEMPLATES } from './StudioTemplates.js';
 import { openModal, confirmModal, showToast } from './StudioModal.js';
-import { StudioValidator } from './StudioValidator.js';
+import { StudioValidator, isComponentUnconfigured } from './StudioValidator.js';
 import { DECK_EVENT_NAMES, getDeckEventsByKind } from '../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { loadImportedPacks, removePack, parsePackFile, importPack, buildPackFromCustomEvents } from '../core/deckEventPacks.js';
@@ -292,6 +292,10 @@ export class StudioLayersPanel {
     if (isSelected) row.classList.add('selected');
     const isHidden = this.state.hiddenInEditorIds.has(comp.id);
     if (isHidden) row.classList.add('editor-hidden');
+    // Wave 3, Part 7 item 3 (V15): mirrors StudioCanvas.js's dashed
+    // "not connected" cue, same isComponentUnconfigured() check.
+    const unconfigured = isComponentUnconfigured(comp);
+    if (unconfigured) row.classList.add('unconfigured');
 
     const pointerEvents = comp.layer?.pointerEvents || 'auto';
     const typeShort = comp.type.replace('core.', '');
@@ -303,6 +307,7 @@ export class StudioLayersPanel {
         <span class="comp-type-badge">${typeShort}</span>
         <span class="comp-name" title="${comp.id}">${comp.label || comp.id}</span>
         ${severity ? `<span class="tree-validation-badge ${severity}" title="${[...issues.errors, ...issues.warnings].join('\n').replace(/"/g, '&quot;')}">${severity === 'error' ? '!' : '?'}</span>` : ''}
+        ${unconfigured ? '<span class="tree-unconfigured-badge" title="No binding or interaction wired yet.">⋯</span>' : ''}
       </div>
       <div class="tree-comp-meta">
         <span class="z-badge" title="Effective Z-index">Z:${effectiveZ}</span>

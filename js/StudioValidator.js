@@ -64,6 +64,47 @@ export function isWriteEventConsumed(comp) {
 }
 
 /**
+ * Wave 3, Part 7 item 3 (V15): "does this component look configured, or is it
+ * the same blank state a fresh palette drop leaves it in?" — the affordance
+ * StudioCanvas.js/StudioLayersPanel.js both need to render a dashed "not
+ * connected" cue, so it lives here once rather than twice.
+ *
+ * Deliberately scoped to the 4 types where "no read binding and no write
+ * mechanism" is unambiguous: core.display/core.indicator (readSimVar/stateVar-
+ * driven), core.input (readSimVar/writeEvent/stateVar-driven), core.button
+ * (stateRef/sublabelStateRef OR interactions-driven). core.label is NOT
+ * included even though binding.readSimVar etc. are technically available to
+ * it (COMMON_FIELDS has no appliesTo restriction) — an unbound label is its
+ * normal, intentional static-text state (LabelComponent.js only overrides
+ * props.text when a bound value actually arrives), not a broken one. Every
+ * other type is left alone too — they either always ship with a real
+ * deliberate demo binding (untouched by the Part 7 items 2/4 seed-neutraling
+ * fix) or use a materially different wiring shape (core.rocker's per-zone
+ * props.zones[].writeEvent) that would need its own dedicated look.
+ *
+ * Deliberately does not attempt to reconcile with validate()'s own
+ * UNWIRED_WRITE_EVENT warning — a component can trip both, and that's fine,
+ * they're complementary surfaces (a passive canvas/tree cue vs. an active
+ * Validate-panel check) not a single source of truth to keep in lockstep.
+ * @param {object} comp
+ * @returns {boolean}
+ */
+export function isComponentUnconfigured(comp) {
+  const b = comp.binding || {};
+  switch (comp.type) {
+    case 'core.display':
+    case 'core.indicator':
+      return !b.readSimVar && !b.stateVar;
+    case 'core.input':
+      return !b.readSimVar && !b.writeEvent && !b.stateVar;
+    case 'core.button':
+      return !b.stateRef && !b.sublabelStateRef && (comp.interactions || []).length === 0;
+    default:
+      return false;
+  }
+}
+
+/**
  * Wave 0b (V20 export block), moved here Part 5a so both StudioMenuBar's
  * export-time "Wire this up" flow AND the Connect dialog can propose the
  * same correct trigger(s) — only for component types where a single

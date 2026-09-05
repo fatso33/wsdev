@@ -3,7 +3,7 @@
  * Interactive Grid Canvas & WYSIWYG Editor for Flight Deck Widget Studio
  */
 
-import { StudioValidator } from './StudioValidator.js';
+import { StudioValidator, isComponentUnconfigured } from './StudioValidator.js';
 import { resolveThemedColor, resolveThemedColors, resolveThemedBackground } from '../widgets/components/ThemeColor.js';
 
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -541,6 +541,17 @@ export class StudioCanvas {
         badge.textContent = severity === 'error' ? '!' : '?';
         badge.title = [...issues.errors, ...issues.warnings].join('\n');
         node.appendChild(badge);
+      }
+
+      // Wave 3, Part 7 item 3 (V15): a dashed "not connected" cue so a fresh,
+      // neutral-seeded component (Part 7 items 2/4) doesn't look identical to
+      // one that's actually wired up.
+      if (isComponentUnconfigured(comp)) {
+        node.classList.add('unconfigured');
+        const unconfiguredTag = document.createElement('div');
+        unconfiguredTag.className = 'comp-unconfigured-tag';
+        unconfiguredTag.textContent = 'UNCONFIGURED';
+        node.appendChild(unconfiguredTag);
       }
 
       // Selection Frame & 8-point Resize Handles

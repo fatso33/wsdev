@@ -661,6 +661,29 @@ body, html {
 .tree-validation-badge.error { background-color: #ef4444; }
 .tree-validation-badge.warning { background-color: #f59e0b; }
 
+/* Wave 3, Part 7 item 3 (V15): layer-tree twin of .comp-unconfigured-tag —
+   dashed rather than the validation badges' solid circle, same gray tone. */
+.tree-component-row.unconfigured .comp-name {
+  color: var(--text-dim, #888);
+  font-style: italic;
+}
+
+.tree-unconfigured-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 3px;
+  border: 1px dashed var(--text-dim, #888);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim, #888);
+  cursor: help;
+}
+
 .tree-comp-meta {
   display: flex;
   align-items: center;
@@ -1288,6 +1311,30 @@ body, html {
 
 .comp-validation-badge.error { background-color: #ef4444; }
 .comp-validation-badge.warning { background-color: #f59e0b; }
+
+/* Wave 3, Part 7 item 3 (V15): dashed "not connected" cue for a component
+   with no binding/interaction wired — deliberately gray/dashed, never the
+   validation badges' red/amber solid circle, so it never reads as an error. */
+.studio-component-node.unconfigured {
+  outline: 1.5px dashed var(--text-dim, #888);
+}
+
+.comp-unconfigured-tag {
+  position: absolute;
+  bottom: -16px;
+  left: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-dim, #888);
+  background-color: transparent;
+  border: 1px dashed var(--text-dim, #888);
+  padding: 1px 4px;
+  border-radius: 2px;
+  pointer-events: none;
+  white-space: nowrap;
+}
 
 /* 8-Point Resize Handles */
 .resize-handle {
