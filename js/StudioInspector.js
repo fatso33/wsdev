@@ -558,10 +558,12 @@ export class StudioInspector {
       <div class="inspector-title-row">
         <span class="inspector-badge">WIDGET</span>
         <h3 class="inspector-title">${def.meta?.name || 'Untitled Widget'}</h3>
+        ${this.uiTier === 'full' ? '<button type="button" class="bar-btn" id="btn-full-json">{ } Full JSON</button>' : ''}
       </div>
       <div class="inspector-sub">${def.id || 'com.flightdeck.widget'} (FDWS v${def.fdws || '1.1'})</div>
     `;
     this.container.appendChild(header);
+    header.querySelector('#btn-full-json')?.addEventListener('click', () => this.openFullJsonPanel());
 
     // Group 1: Metadata & Identification
     this.container.appendChild(this.buildAccordionGroup('METADATA & SPECIFICATION', true, (body) => {
@@ -1034,6 +1036,47 @@ export class StudioInspector {
         if (block) body.appendChild(block);
       }));
     }
+  }
+
+  /**
+   * Wave 4, G10: the full whole-widget JSON read/apply panel — the bigger,
+   * editable sibling of Wave 2's per-section read-only JSON view
+   * (applySectionJsonViews() above). Built entirely on setWidgetDef(), which
+   * was already the complete, safe "apply a whole new widget definition"
+   * primitive (full clone, no allowlist stripping, auto-defaults missing
+   * optional arrays, resets selectedComponentId, records undo history) —
+   * confirmed twice this Wave via Import's own round-trip. No new
+   * state-layer code needed, this is purely a new UI surface.
+   */
+  async openFullJsonPanel() {
+    const currentJson = JSON.stringify(this.state.widgetDef, null, 2);
+    const result = await openModal({
+      title: 'Full Widget JSON (Read & Apply)',
+      wide: true,
+      bodyHtml: `
+        <p class="modal-confirm-text">Edit the widget's complete JSON definition
+        directly. Apply re-validates the JSON and replaces the current widget's
+        whole definition — this participates in Undo (Ctrl+Z) like any other edit.</p>
+        <textarea id="full-json-textarea" class="prop-textarea full-json-textarea" spellcheck="false">${escapeHtmlAttr(currentJson)}</textarea>
+      `,
+      submitLabel: 'Apply',
+      onSubmit: (card) => {
+        const raw = card.querySelector('#full-json-textarea').value;
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (err) {
+          return { error: `Invalid JSON: ${err.message}` };
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return { error: 'Must be a JSON object (a widget definition), not an array or a bare value.' };
+        }
+        return { value: parsed };
+      }
+    });
+    if (!result) return;
+    this.state.setWidgetDef(result, true, 'Apply Full JSON');
+    showToast('Applied — Undo (Ctrl+Z) to revert if something looks wrong.');
   }
 
   // ==========================================

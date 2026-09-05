@@ -2007,6 +2007,16 @@ body, html {
   border-color: var(--accent-cyan);
 }
 
+/* Wave 4, G10: full whole-widget JSON read/apply panel — .prop-textarea's base
+   has no height set, far too small for a whole widget definition. */
+.full-json-textarea {
+  min-height: 420px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre;
+  resize: vertical;
+}
+
 /* G10 (Wave 2): Full tier's per-section "View JSON" — a read-only view, so a
    <pre>, not an editable prop-input/prop-textarea. */
 .section-json-toggle {
