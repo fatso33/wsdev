@@ -223,6 +223,15 @@ export class StudioCanvas {
       if (!this.state.selectedComponentId) return;
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
 
+      // Review follow-up item 3: Ctrl+D duplicates the whole multi-selection
+      // (or the primary selection alone) as one undo step. preventDefault()
+      // stops the browser's own Ctrl+D bookmark dialog.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        this.state.duplicateMultiSelection();
+        return;
+      }
+
       const comp = this.state.getComponent(this.state.selectedComponentId);
       if (!comp) return;
 

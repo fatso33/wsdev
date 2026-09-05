@@ -747,6 +747,45 @@ export class StudioState {
     this.notify('COMPONENT_DELETED', { componentIds: ids });
   }
 
+  /**
+   * Review follow-up item 3: Ctrl+D. Modeled on deleteMultiSelection() —
+   * one combined undo step for the whole multi-selection, not one per
+   * component, matching Delete/the align toolbar's own "the whole selection
+   * is one action" convention. Falls back to the single selection when
+   * nothing is multi-selected. duplicateComponent() below is untouched and
+   * still used by the Layers panel's own single Duplicate button.
+   */
+  duplicateMultiSelection() {
+    const ids = this.multiSelectedIds.size > 0
+      ? [...this.multiSelectedIds]
+      : (this.selectedComponentId ? [this.selectedComponentId] : []);
+    if (ids.length === 0) return [];
+
+    this.saveHistory(ids.length > 1 ? `Duplicate ${ids.length} Components` : 'Duplicate Component');
+    const maxCols = this.widgetDef.layout?.grid?.columns || 12;
+    const maxRows = this.widgetDef.layout?.grid?.rows || 6;
+    const existingIds = new Set(this.widgetDef.components.map((c) => c.id));
+    const clones = ids.map((id) => {
+      const comp = this.getComponent(id);
+      if (!comp) return null;
+      const clone = JSON.parse(JSON.stringify(comp));
+      clone.id = `${comp.id}_copy`;
+      let counter = 2;
+      while (existingIds.has(clone.id)) clone.id = `${comp.id}_copy${counter++}`;
+      existingIds.add(clone.id);
+      if (clone.layout.col + 1 <= maxCols) clone.layout.col += 1;
+      if (clone.layout.row + 1 <= maxRows) clone.layout.row += 1;
+      this.widgetDef.components.push(clone);
+      return clone;
+    }).filter(Boolean);
+
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.multiSelectedIds = new Set(clones.map((c) => c.id));
+    this.selectedComponentId = clones.length ? clones[clones.length - 1].id : this.selectedComponentId;
+    this.notify('COMPONENT_ADDED', { components: clones });
+    return clones;
+  }
+
   duplicateComponent(id) {
     const comp = this.getComponent(id);
     if (!comp) return null;
