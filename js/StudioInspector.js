@@ -181,6 +181,10 @@ export class StudioInspector {
     // affordance. Keyed by group title, same persists-across-renders pattern
     // as expandedGroups/knownGroupTitles above.
     this.tierOverrideGroups = new Set();
+    // G10 (Wave 2): per-section "View JSON" open/closed state, Full tier only
+    // — see applySectionJsonViews(). Keyed by group title, same
+    // persists-across-renders pattern as expandedGroups/tierOverrideGroups.
+    this.jsonViewOpenTitles = new Set();
 
     this.initDOM();
     this.render();
@@ -232,6 +236,10 @@ export class StudioInspector {
 
   renderInner() {
     this.container.innerHTML = '';
+    // G10: reset each render — every buildAccordionGroup() call below repopulates
+    // it fresh, so a section removed between renders (e.g. deselecting a component)
+    // can't leave a stale entry behind.
+    this._sectionJsonData = {};
     this.container.appendChild(this.buildModeToggle());
 
     // Widget Studio 2.0, Phase 3: a 2+ multi-selection gets its own bulk-edit
@@ -243,6 +251,7 @@ export class StudioInspector {
       this.renderMultiSelectInspector();
       this.applyUiMode();
       this.applyTierMoreBadges();
+      this.applySectionJsonViews();
       return;
     }
 
@@ -258,6 +267,7 @@ export class StudioInspector {
 
     this.applyUiMode();
     this.applyTierMoreBadges();
+    this.applySectionJsonViews();
   }
 
   /**
@@ -480,6 +490,49 @@ export class StudioInspector {
     });
   }
 
+  /**
+   * G10 (Wave 2): Full tier's promised "per-section JSON" — a read-only view of
+   * each accordion section's own underlying data, for verification (Ingrid: "I
+   * know the shape, I want to see the raw JSON, not a translated form"). Not an
+   * editing surface — the full read/apply panel is separate, later, Wave-4 work.
+   * Full tier only, per the proposal's own tier table. Must run AFTER the whole
+   * panel has finished rendering, same requirement (and same reason) as
+   * applyTierMoreBadges() above — appending from inside buildAccordionGroup()
+   * itself would land this block BEFORE the APPEARANCE/DATA & CONTENT sections'
+   * real content, which populates their body afterward (see buildAccordionGroup()'s
+   * own comment) — landing the JSON block above the fields on 2 of 10 sections and
+   * below on the other 8.
+   */
+  applySectionJsonViews() {
+    if (this.uiTier !== 'full') return;
+    this.container.querySelectorAll('.inspector-group').forEach((group) => {
+      const title = group.querySelector('.group-title')?.textContent;
+      const data = title ? this._sectionJsonData[title] : undefined;
+      if (data === undefined) return;
+      const body = group.querySelector('.inspector-group-body');
+      if (!body) return;
+      const isOpen = this.jsonViewOpenTitles.has(title);
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'bar-btn section-json-toggle';
+      toggleBtn.textContent = isOpen ? 'Hide JSON' : 'View JSON';
+      body.appendChild(toggleBtn);
+
+      const pre = document.createElement('pre');
+      pre.className = `section-json-block ${isOpen ? '' : 'hidden'}`;
+      pre.textContent = JSON.stringify(data, null, 2);
+      body.appendChild(pre);
+
+      toggleBtn.addEventListener('click', () => {
+        const nowOpen = !this.jsonViewOpenTitles.has(title);
+        if (nowOpen) this.jsonViewOpenTitles.add(title); else this.jsonViewOpenTitles.delete(title);
+        toggleBtn.textContent = nowOpen ? 'Hide JSON' : 'View JSON';
+        pre.classList.toggle('hidden', !nowOpen);
+      });
+    });
+  }
+
   // ==========================================
   // --- WIDGET ROOT INSPECTOR ---
   // ==========================================
@@ -548,6 +601,12 @@ export class StudioInspector {
       body.querySelector('#w-revision')?.addEventListener('change', (e) => this.state.updateWidgetMeta({ revision: parseInt(e.target.value, 10) || 1 }));
       body.querySelector('#w-author')?.addEventListener('change', (e) => this.state.updateWidgetMeta({ author: e.target.value }));
       body.querySelector('#w-desc')?.addEventListener('change', (e) => this.state.updateWidgetMeta({ description: e.target.value }));
+    }, undefined, {
+      // G10: id/revision live on `def` directly, everything else under `def.meta` —
+      // see StudioState.updateWidgetMeta(), which lifts only those two out of the
+      // meta spread. Mirroring that split here rather than showing `def.meta` alone.
+      name: def.meta?.name, shortName: def.meta?.shortName, category: def.meta?.category,
+      id: def.id, revision: def.revision, author: def.meta?.author, description: def.meta?.description
     }));
 
     // Group 2: Grid Layout & Sizing
@@ -609,7 +668,10 @@ export class StudioInspector {
       body.querySelector('#w-min-h')?.addEventListener('change', (e) => this.state.updateWidgetLayout({ minH: parseInt(e.target.value, 10) || 2 }));
       body.querySelector('#w-max-w')?.addEventListener('change', (e) => this.state.updateWidgetLayout({ maxW: parseInt(e.target.value, 10) || 44 }));
       body.querySelector('#w-max-h')?.addEventListener('change', (e) => this.state.updateWidgetLayout({ maxH: parseInt(e.target.value, 10) || 44 }));
-    }));
+    // G10: def.layout can itself be undefined (this section's own body above
+    // already guards with `const layout = def.layout || {};`) — normalized the
+    // same way, same reasoning as DECK EVENTS' jsonData above.
+    }, undefined, def.layout || {}));
 
     // Group 3: Widget Canvas Appearance & Border
     this.container.appendChild(this.buildAccordionGroup('CANVAS APPEARANCE & BORDER', false, (body) => {
@@ -729,7 +791,10 @@ export class StudioInspector {
       } else {
         body.querySelector('#w-bg-val')?.addEventListener('change', (e) => bgValApplyFn(e.target.value));
       }
-    }));
+    // G10: def.style can itself be undefined (this section's own body above
+    // already guards with `const style = def.style || {};`) — same reasoning
+    // as DECK EVENTS'/GRID & DIMENSIONS' jsonData above.
+    }, undefined, def.style || {}));
 
     // Group 3.5: Theme (FDWS v1.18) — which theme style.* was authored for,
     // and whether the OTHER theme is auto-derived (default) or manually
@@ -772,7 +837,7 @@ export class StudioInspector {
           : `${otherTheme === 'light' ? 'Light' : 'Dark'} theme is auto-derived again.`);
         this.render();
       });
-    }));
+    }, undefined, { baseTheme: def.baseTheme, themeMode: def.themeMode }));
 
     // Group 3b: FDWS v1.27 (1.0-A) — Deck Events this widget declares, with the
     // binding each one should default to. Authoring UI ships with the spec
@@ -902,7 +967,13 @@ export class StudioInspector {
         showToast(`Declared "${result.name}".`);
         this.render();
       });
-    }));
+    // G10: def.deckEvents is legitimately undefined when nothing's declared
+    // (setDeckEvents() deletes the key rather than storing []) — normalized to
+    // [] here (matching this section's own `const events = def.deckEvents || [];`
+    // above) so the View JSON toggle still appears and shows "[]" rather than
+    // silently vanishing, which buildAccordionGroup()'s jsonData!==undefined
+    // recording check would otherwise treat as "no data for this section."
+    }, undefined, def.deckEvents || []));
 
     // Group 4: Capabilities Summary (§11 Rule 5)
     this.container.appendChild(this.buildAccordionGroup('CAPABILITIES MATRIX (§11)', false, (body) => {
@@ -932,7 +1003,10 @@ export class StudioInspector {
         this.state.notify('WIDGET_META_UPDATED');
         showToast('Capabilities synchronized with components.');
       });
-    }));
+    // G10: def.capabilities can itself be undefined (this section's own body
+    // above already guards with a default) — same reasoning as the other root
+    // sections' jsonData above.
+    }, undefined, def.capabilities || { readSimVars: [], writeEvents: [] }));
   }
 
   // ==========================================
@@ -1111,7 +1185,7 @@ export class StudioInspector {
       body.querySelector('#c-layout-w')?.addEventListener('change', (e) => updateLayout({ w: parseInt(e.target.value, 10) || 1 }));
       body.querySelector('#c-layout-h')?.addEventListener('change', (e) => updateLayout({ h: parseInt(e.target.value, 10) || 1 }));
     })(outerBody.appendChild(document.createElement('div')));
-    }, this.buildLayoutBadge(comp)));
+    }, this.buildLayoutBadge(comp), { label: comp.label, id: comp.id, type: comp.type, layer: comp.layer, layout: comp.layout }));
 
     // 2 & 3. Appearance, and Data & Content — Phase 6 merges "Visual Styling &
     // Typography" + "Conditional Formatting" into Appearance (conditional
@@ -1126,8 +1200,11 @@ export class StudioInspector {
     // original section is reached in turn — appending to a body div later in
     // this function doesn't change WHERE inside that div it lands, only the
     // order of appends to that SAME div does.
-    const appearanceGroup = this.buildAccordionGroup('APPEARANCE', false, () => {}, this.buildAppearanceBadge(comp));
-    const dataGroup = this.buildAccordionGroup('DATA & CONTENT', false, () => {}, this.buildDataBadge(comp));
+    // G10: comp.style can itself be undefined for a component with no style
+    // customization at all — normalized so the View JSON toggle still shows
+    // "{}" rather than silently vanishing, same reasoning as the root sections.
+    const appearanceGroup = this.buildAccordionGroup('APPEARANCE', false, () => {}, this.buildAppearanceBadge(comp), comp.style || {});
+    const dataGroup = this.buildAccordionGroup('DATA & CONTENT', false, () => {}, this.buildDataBadge(comp), { props: comp.props, binding: comp.binding });
     this.container.appendChild(appearanceGroup);
     this.container.appendChild(dataGroup);
     const appearanceBody = appearanceGroup.querySelector('.inspector-group-body');
@@ -2006,7 +2083,7 @@ export class StudioInspector {
     // setupGuard) but previously had zero authoring UI — a user wanting either
     // had to hand-edit exported JSON outside the tool entirely.
     this.renderVisibilityAndGuard(comp, def, outerBody.appendChild(document.createElement('div')));
-    }, this.buildBehaviorBadge(comp)));
+    }, this.buildBehaviorBadge(comp), { interactions: comp.interactions, visibleWhen: comp.visibleWhen, layout: { guard: comp.layout?.guard } }));
 
     // Wave 2 Part B2: Conditional Formatting (style.rules, FDWS v1.15) no
     // longer has its own section here — a rule is now a target-strip chip
@@ -4231,8 +4308,14 @@ export class StudioInspector {
    * siblings below) — not tied to PropertyRegistry field iteration, since
    * most of these sections still hand-build their markup rather than walking
    * the registry (see the file-header comment on why that's deliberate here).
+   * @param {object} [jsonData] — G10 (Wave 2): this section's own underlying data,
+   * for Full tier's "View JSON" affordance — see applySectionJsonViews(). Just
+   * recorded here (keyed by title, into this._sectionJsonData); the actual
+   * rendering happens in that separate deferred pass, not here, for the same
+   * "must run after the whole panel renders" reason the "N more" badge does.
    */
-  buildAccordionGroup(title, isOpenDefault, renderFn, badge) {
+  buildAccordionGroup(title, isOpenDefault, renderFn, badge, jsonData) {
+    if (jsonData !== undefined) this._sectionJsonData[title] = jsonData;
     // Only seed from isOpenDefault the first time this title is ever seen;
     // afterwards, the user's own expand/collapse choice (tracked in
     // this.expandedGroups) wins on every re-render.

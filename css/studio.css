@@ -1953,6 +1953,27 @@ body, html {
   border-color: var(--accent-cyan);
 }
 
+/* G10 (Wave 2): Full tier's per-section "View JSON" — a read-only view, so a
+   <pre>, not an editable prop-input/prop-textarea. */
+.section-json-toggle {
+  margin-top: 10px;
+}
+.section-json-block {
+  margin-top: 6px;
+  padding: 8px;
+  background-color: var(--studio-input-bg);
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  color: var(--text-white);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .prop-section-subtitle {
   font-family: var(--font-mono);
   font-size: 10px;
