@@ -9,7 +9,7 @@
  */
 
 import { STUDIO_TEMPLATES } from './StudioTemplates.js';
-import { openModal, confirmModal, showToast } from './StudioModal.js';
+import { openModal, confirmModal, showToast, confirmAndSwitchWidget } from './StudioModal.js';
 import { StudioValidator, isComponentUnconfigured } from './StudioValidator.js';
 import { DECK_EVENT_NAMES, getDeckEventsByKind } from '../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
@@ -1535,8 +1535,8 @@ export class StudioLayersPanel {
           </div>
         `;
 
-        card.querySelector('.btn-load-template')?.addEventListener('click', () => {
-          this.state.setWidgetDef(w, true, `Open ${w.meta?.name || w.id}`);
+        card.querySelector('.btn-load-template')?.addEventListener('click', async () => {
+          await confirmAndSwitchWidget(this.state, w, w.meta?.name || w.id);
         });
 
         card.querySelector('.btn-del-saved')?.addEventListener('click', async () => {

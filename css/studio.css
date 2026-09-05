@@ -2521,6 +2521,22 @@ body, html {
   color: var(--accent-cyan);
 }
 
+/* Recent Widgets Quick-Switch (Wave 4, Part 8) — shares .export-menu-dropdown/
+   .export-menu-dropdown-top/.export-item, just a differently-named wrapper. */
+.recent-dropdown-wrap {
+  position: relative;
+}
+
+.recent-item-current {
+  padding: 8px 12px;
+  color: var(--text-white);
+  opacity: 0.5;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: default;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 /* ==========================================
    --- TELEMETRY TEST BENCH DRAWER ---
    ========================================== */

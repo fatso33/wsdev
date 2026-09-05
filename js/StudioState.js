@@ -205,6 +205,10 @@ export class StudioState {
     // LocalStorage library of saved widgets
     this.savedWidgets = this.loadSavedWidgets();
 
+    // Wave 4, Part 8: most-recently-opened widgets/popovers (by id, saved-library
+    // entries only — see touchRecentWidget), for the menu bar's Recent quick-switch.
+    this.recentWidgets = this.loadRecentWidgets();
+
     // Check if previous session exists in localStorage
     this.restoreSession();
   }
@@ -291,6 +295,13 @@ export class StudioState {
     this.hiddenInEditorIds = new Set();
     this.hiddenLayerGroupIds = new Set();
     this.liveStateValues = new Map();
+    // Wave 4, Part 8: only touch Recent for a def that already has a stable
+    // library identity (opened from Templates/Recent itself) — a brand-new
+    // New/New Popover/built-in-template/Import draft has nothing to switch
+    // back to until it's actually saved (see saveCurrentWidgetToLibrary below).
+    if (this.savedWidgets.some((w) => w.id === this.widgetDef.id)) {
+      this.touchRecentWidget(this.widgetDef);
+    }
     this.notify('WIDGET_DEF_LOADED', { widgetDef: this.widgetDef });
     this.persistSession();
   }
@@ -1022,6 +1033,10 @@ export class StudioState {
       localStorage.setItem('fdws_saved_widgets', JSON.stringify(saved));
       this.savedWidgets = saved;
       this.isDirty = false;
+      // Wave 4, Part 8: a freshly-saved widget/popover appears in Recent right
+      // away — the common "just built the popover, now switch back to the
+      // host" moment shouldn't require re-opening it first.
+      this.touchRecentWidget(this.widgetDef);
       this.notify('WIDGET_SAVED', { id: this.widgetDef.id });
       return true;
     } catch (e) {
@@ -1050,6 +1065,49 @@ export class StudioState {
     } catch (e) {
       console.error('[StudioState] Failed to delete saved widget:', e);
     }
+    // Wave 4, Part 8: don't leave a dead Recent entry pointing at a widget
+    // that no longer exists — same "no fake affordance" precedent as
+    // Part 2's "N more" badges and Part 5a's Test-tab hand-off button.
+    if (this.recentWidgets.some((r) => r.id === id)) {
+      this.recentWidgets = this.recentWidgets.filter((r) => r.id !== id);
+      this.persistRecentWidgets();
+    }
+  }
+
+  loadRecentWidgets() {
+    try {
+      const raw = localStorage.getItem('fdws_recent_widgets');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  persistRecentWidgets() {
+    try {
+      localStorage.setItem('fdws_recent_widgets', JSON.stringify(this.recentWidgets));
+    } catch {
+      // Ignore quota error, same as persistSession()
+    }
+    this.notify('RECENT_WIDGETS_UPDATED', { recentWidgets: this.recentWidgets });
+  }
+
+  /**
+   * Wave 4, Part 8: record `def` as the most-recently-opened widget/popover, for
+   * the menu bar's Recent quick-switch. Only ever called with a def that already
+   * has a stable saved-library identity — see the two call sites (setWidgetDef,
+   * saveCurrentWidgetToLibrary).
+   * @param {object} def
+   */
+  touchRecentWidget(def) {
+    if (!def?.id) return;
+    const entry = {
+      id: def.id,
+      name: def.meta?.name || def.id,
+      kind: def.kind === 'popover' ? 'popover' : 'widget'
+    };
+    this.recentWidgets = [entry, ...this.recentWidgets.filter((r) => r.id !== entry.id)].slice(0, 8);
+    this.persistRecentWidgets();
   }
 
   persistSession() {

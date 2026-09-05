@@ -7,7 +7,7 @@
 
 import { StudioValidator, proposeWireUp } from './StudioValidator.js';
 import { STUDIO_TEMPLATES } from './StudioTemplates.js';
-import { openModal, confirmModal, showToast } from './StudioModal.js';
+import { openModal, confirmModal, showToast, confirmAndSwitchWidget } from './StudioModal.js';
 import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
 
 const LATEST_FDWS_VERSION = FDWS_VERSIONS[FDWS_VERSIONS.length - 1];
@@ -43,7 +43,7 @@ export class StudioMenuBar {
     this.render();
 
     this.state.subscribe((changeType) => {
-      if (['HISTORY_CHANGE', 'WIDGET_DEF_LOADED', 'WIDGET_SAVED', 'COMPONENT_UPDATED', 'COMPONENT_ADDED', 'COMPONENT_DELETED'].includes(changeType)) {
+      if (['HISTORY_CHANGE', 'WIDGET_DEF_LOADED', 'WIDGET_SAVED', 'COMPONENT_UPDATED', 'COMPONENT_ADDED', 'COMPONENT_DELETED', 'RECENT_WIDGETS_UPDATED'].includes(changeType)) {
         this.render();
       }
     });
@@ -64,6 +64,14 @@ export class StudioMenuBar {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="12" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
           New Popover
         </button>
+
+        <div class="recent-dropdown-wrap">
+          <button id="btn-recent-dropdown" class="bar-btn" title="Recently Opened Widgets &amp; Popovers">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 16 14"></polyline></svg>
+            Recent ▾
+          </button>
+          <div id="recent-menu" class="export-menu-dropdown export-menu-dropdown-top hidden"></div>
+        </div>
 
         <div class="bar-divider"></div>
 
@@ -154,8 +162,18 @@ export class StudioMenuBar {
       exportMenu.classList.toggle('hidden');
     });
 
+    // Recent Widgets Quick-Switch (Wave 4, Part 8)
+    const btnRecent = this.container.querySelector('#btn-recent-dropdown');
+    const recentMenu = this.container.querySelector('#recent-menu');
+
+    btnRecent?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      recentMenu.classList.toggle('hidden');
+    });
+
     window.addEventListener('click', () => {
       exportMenu?.classList.add('hidden');
+      recentMenu?.classList.add('hidden');
     });
 
     this.container.querySelector('#btn-export-fdwidget')?.addEventListener('click', () => this.confirmExport('fdwidget'));
@@ -198,6 +216,45 @@ export class StudioMenuBar {
         dirtyInd.querySelector('.dirty-label').textContent = 'Saved';
       }
     }
+
+    this.renderRecentMenu();
+  }
+
+  /**
+   * Wave 4, Part 8: populate the Recent dropdown from state.recentWidgets. The
+   * currently-open entry renders as a plain non-interactive row (no fake
+   * affordance — same precedent as Part 2's "N more" badges) rather than a
+   * disabled button.
+   */
+  renderRecentMenu() {
+    const recentMenu = this.container.querySelector('#recent-menu');
+    if (!recentMenu) return;
+
+    if (this.state.recentWidgets.length === 0) {
+      recentMenu.innerHTML = `<div class="caps-empty" style="padding:8px 12px;">No recently opened widgets yet.</div>`;
+      return;
+    }
+
+    recentMenu.innerHTML = this.state.recentWidgets.map((entry) => {
+      const badge = entry.kind === 'popover' ? ' <span class="tmpl-badge">Popover</span>' : '';
+      if (entry.id === this.state.widgetDef.id) {
+        return `<div class="export-item recent-item-current">${escapeHtml(entry.name)}${badge} <span class="tmpl-badge">Current</span></div>`;
+      }
+      return `<button class="export-item recent-item" data-recent-id="${escapeHtml(entry.id)}">${escapeHtml(entry.name)}${badge}</button>`;
+    }).join('');
+
+    recentMenu.querySelectorAll('.recent-item').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const entry = this.state.recentWidgets.find((r) => r.id === btn.dataset.recentId);
+        const fullDef = this.state.savedWidgets.find((w) => w.id === btn.dataset.recentId);
+        recentMenu.classList.add('hidden');
+        if (!fullDef) {
+          this.showToast(`"${entry?.name || btn.dataset.recentId}" no longer exists in your saved library.`);
+          return;
+        }
+        await confirmAndSwitchWidget(this.state, fullDef, entry.name);
+      });
+    });
   }
 
   /**
