@@ -2150,7 +2150,7 @@ export class StudioInspector {
    *        called with the next ready-to-store value (or undefined to clear)
    * @returns {{ html: string, wire: (mountEl: HTMLElement) => void }}
    */
-  renderConditionListEditor(comp, def, expr, idPrefix, onCommit) {
+  renderConditionListEditor(comp, def, expr, idPrefix, onCommit, options = {}) {
     const stateVars = def.state || [];
 
     // A compound expression is normalized to a flat condition list under one
@@ -2257,8 +2257,14 @@ export class StudioInspector {
             if (!simVar) return;
             const name = this.state.resolveSyncFromVarName(simVar);
             stateCustomInput?.classList.add('hidden');
-            this.state.saveHistory("Use This Component's Own Value");
-            this.state.ensureSyncFromVar(simVar);
+            // G6 slice 2: a deferred (Save/Cancel-transactional) caller
+            // derives and applies the syncFrom var itself, once, at real
+            // Submit time — resolveSyncFromVarName() above is already pure,
+            // so the row still shows the right name either way.
+            if (!options.deferred) {
+              this.state.saveHistory("Use This Component's Own Value");
+              this.state.ensureSyncFromVar(simVar);
+            }
             applyRowChange(false, name);
           } else if (stateSelect.value === CUSTOM_OPTION_VALUE) {
             // Just reveal the text field — don't commit yet. Committing here
@@ -3626,21 +3632,19 @@ export class StudioInspector {
       ? existingAction.type
       : ACTION_TYPES[0].type;
 
-    // FDWS v1.23: interaction.condition — single-leaf {state, op, value} UI only
-    // (same scope decision as style.rules' Conditional Formatting rows above: a
-    // leaf condition covers the target use cases, a hand-authored compound
-    // allOf/anyOf isn't offered here). Best-effort seed from an existing compound
-    // condition's first sub-clause so re-editing a hand-authored one doesn't just
-    // silently drop it into nothing.
-    const CONDITION_OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
-    const seedCond = existing?.condition?.allOf?.[0] || existing?.condition?.anyOf?.[0] || existing?.condition || null;
-    const condition = seedCond
-      ? { state: seedCond.state || '', op: CONDITION_OPS.find((o) => seedCond[o] !== undefined) || 'notEquals', value: (() => { const op = CONDITION_OPS.find((o) => seedCond[o] !== undefined); return op ? (op === 'between' ? (seedCond.between || []).join(',') : seedCond[op]) : ''; })() }
-      : { state: '', op: 'notEquals', value: '' };
-    // V14: set when "Use This Component's Own Value" is picked for the
-    // condition's state — the syncFrom var isn't created until Submit (this
-    // modal's commit is deferred), unlike the two condition editors that
-    // commit immediately on every change.
+    // G6 slice 2: interaction.condition now uses the same shared compound
+    // editor as visibleWhen/style.rules (renderConditionListEditor(),
+    // { deferred: true } since this modal's commit is Save/Cancel, not
+    // immediate). Fixes a real lossy bug the old single-leaf UI had: it used
+    // to seed from ONLY a hand-authored compound condition's first sub-clause
+    // (existing?.condition?.allOf?.[0] || .anyOf?.[0] || existing.condition),
+    // silently dropping every other sub-clause on the next Save. Keeping the
+    // full raw value here means nothing is lost.
+    let conditionExpr = existing?.condition || null;
+    // V14: set (derived at Submit, below) when the final condition actually
+    // uses "Use This Component's Own Value" — the syncFrom var isn't created
+    // until Submit (this modal's commit is deferred), unlike the two
+    // condition editors that commit immediately on every change.
     let ownValueSimVar = null;
 
     let contextRows = (existingAction?.type === 'core.openWidgetPopover' && existingAction.context)
@@ -3831,46 +3835,21 @@ export class StudioInspector {
 
         wireDynamicFields();
 
-        // FDWS v1.23: condition row (Only Run If)
+        // G6 slice 2: "Only Run If" now uses the same shared compound
+        // condition editor as visibleWhen/style.rules, deferred (nothing
+        // mutates real state until Submit, below).
         const conditionToggle = card.querySelector('#im-condition-on');
         const conditionMount = card.querySelector('#im-condition-row');
-        const stateVars = this.state.widgetDef.state || [];
 
-        const renderConditionRow = () => {
-          const isCustomState = !ownValueSimVar && !!condition.state && !stateVars.some((s) => s.name === condition.state);
-          conditionMount.innerHTML = `
-            <div class="row-field-grid">
-              <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
-                <select class="prop-select cond-state">
-                  ${conditionStateOptionsHtml(stateVars, condition.state, !!ownValueSimVar, comp.binding?.readSimVar)}
-                </select>
-                <input type="text" class="prop-input cond-state-custom ${isCustomState ? '' : 'hidden'}" value="${isCustomState ? condition.state : ''}" placeholder="e.g. presets[0].freq" />
-                ${ownValueSimVar ? `<div class="prop-hint-block" style="font-size:10px;opacity:0.7;">Will create/reuse state var "${escapeHtmlAttr(condition.state)}" on Save.</div>` : ''}
-              </div>
-              <select class="prop-select cond-op">
-                ${CONDITION_OPS.map((op) => `<option value="${op}" ${condition.op === op ? 'selected' : ''}>${op}</option>`).join('')}
-              </select>
-              <input type="text" class="prop-input cond-val" value="${condition.op === 'between' ? condition.value : condition.value}" placeholder="${condition.op === 'between' ? 'lo,hi' : 'value'}" />
-            </div>
-          `;
-          conditionMount.querySelector('.cond-state')?.addEventListener('change', (e) => {
-            if (e.target.value === OWN_VALUE_OPTION) {
-              const simVar = comp.binding?.readSimVar;
-              if (!simVar) return;
-              ownValueSimVar = simVar;
-              condition.state = this.state.resolveSyncFromVarName(simVar);
-              renderConditionRow();
-              return;
-            }
-            ownValueSimVar = null;
-            condition.state = e.target.value === CUSTOM_OPTION_VALUE ? '' : e.target.value;
-            conditionMount.querySelector('.cond-state-custom')?.classList.toggle('hidden', e.target.value !== CUSTOM_OPTION_VALUE);
-          });
-          conditionMount.querySelector('.cond-state-custom')?.addEventListener('change', (e) => { condition.state = e.target.value.trim(); ownValueSimVar = null; });
-          conditionMount.querySelector('.cond-op')?.addEventListener('change', (e) => { condition.op = e.target.value; renderConditionRow(); });
-          conditionMount.querySelector('.cond-val')?.addEventListener('change', (e) => { condition.value = e.target.value; });
+        const renderConditionEditor = () => {
+          const editor = this.renderConditionListEditor(comp, this.state.widgetDef, conditionExpr, 'imcond', (nextValue) => {
+            conditionExpr = nextValue;
+            renderConditionEditor();
+          }, { deferred: true });
+          conditionMount.innerHTML = editor.html;
+          editor.wire(conditionMount);
         };
-        renderConditionRow();
+        renderConditionEditor();
 
         conditionToggle?.addEventListener('change', (e) => {
           conditionMount.classList.toggle('hidden', !e.target.checked);
@@ -3944,20 +3923,25 @@ export class StudioInspector {
         if (haptic) feedback.haptic = haptic;
         if (sound) feedback.sound = sound;
 
-        // FDWS v1.23: interaction.condition — omitted entirely unless the
-        // author actually enabled it AND gave it a state var, matching every
-        // other optional-field pattern in this form (empty/unchecked means
-        // "not declared", not "declared as always-false").
-        let conditionObj;
-        if (card.querySelector('#im-condition-on')?.checked && condition.state) {
-          conditionObj = { state: condition.state };
-          if (condition.op === 'between') {
-            const [lo, hi] = String(condition.value).split(',').map((s) => Number(s.trim()));
-            conditionObj.between = [lo || 0, hi || 0];
-          } else if (['gt', 'gte', 'lt', 'lte'].includes(condition.op)) {
-            conditionObj[condition.op] = Number(condition.value) || 0;
-          } else {
-            conditionObj[condition.op] = condition.value;
+        // G6 slice 2: interaction.condition — omitted entirely unless the
+        // author actually enabled it AND it has at least one condition,
+        // matching every other optional-field pattern in this form
+        // (empty/unchecked means "not declared", not "declared as
+        // always-false"). conditionExpr is already in ready-to-store shape
+        // (renderConditionListEditor's own onCommit contract).
+        const conditionObj = card.querySelector('#im-condition-on')?.checked ? conditionExpr : null;
+
+        // Derive whether the FINAL condition actually uses "Use This
+        // Component's Own Value" by checking every leaf, rather than tracking
+        // it incrementally per-keystroke (the old single-leaf code's
+        // approach) — correctly handles even two different rows both picking
+        // it, and doesn't need resetting on every unrelated row change.
+        if (conditionObj) {
+          const simVar = comp.binding?.readSimVar;
+          const ownValueVarName = simVar ? this.state.resolveSyncFromVarName(simVar) : null;
+          const leaves = conditionObj.allOf || conditionObj.anyOf || (conditionObj.state ? [conditionObj] : []);
+          if (ownValueVarName && leaves.some((c) => c.state === ownValueVarName)) {
+            ownValueSimVar = simVar;
           }
         }
 
