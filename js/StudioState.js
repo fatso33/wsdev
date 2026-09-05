@@ -841,7 +841,7 @@ export class StudioState {
     if (existing) return existing.name;
     const bare = simVar.replace(/^[ALHK]:/i, '').trim();
     const camel = bare.split(/[^a-zA-Z0-9]+/).filter(Boolean)
-      .map((w, i) => (i === 0 ? w[0].toLowerCase() + w.slice(1) : w[0].toUpperCase() + w.slice(1).toLowerCase()))
+      .map((w, i) => (i === 0 ? w[0].toLowerCase() + w.slice(1).toLowerCase() : w[0].toUpperCase() + w.slice(1).toLowerCase()))
       .join('') || 'ownValue';
     const taken = new Set((this.widgetDef.state || []).map((s) => s.name));
     let name = camel;
