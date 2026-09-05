@@ -592,20 +592,21 @@ export const STUDIO_TEMPLATES = [
         }
       },
       {
+        // Wave 3, Part 7 item 4: used to ship pre-wired to a live dispatchEvent
+        // CUSTOM_EVENT interaction — the same junk-wiring pattern item 2 killed
+        // for a freshly-placed palette button, just baked into this saved
+        // template instead. Now arrives with no interaction.
         id: 'btn_sample',
         type: 'core.button',
         label: 'Action Button',
         layout: { col: 4, row: 3, w: 6, h: 3 },
         layer: { group: 'content', z: 20, pointerEvents: 'auto' },
-        props: { variant: 'momentary', label: 'ACTIVATE' },
-        interactions: [
-          { trigger: 'tap', action: { type: 'core.dispatchEvent', event: 'CUSTOM_EVENT', value: 1 } }
-        ]
+        props: { variant: 'momentary', label: 'ACTIVATE' }
       }
     ],
     capabilities: {
       readSimVars: [],
-      writeEvents: ['CUSTOM_EVENT']
+      writeEvents: []
     }
   },
 

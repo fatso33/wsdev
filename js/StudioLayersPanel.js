@@ -467,13 +467,16 @@ export class StudioLayersPanel {
         defaultLayout: { col: 1, row: 1, w: 6, h: 1 }
       },
       {
+        // Wave 3, Part 7 item 2 (V15): used to arrive pre-bound to
+        // com1ActFreq/FREQ_COM/"ACT"/"MHz" — a real SimVar that has nothing to
+        // do with the author's actual intent, propagating as silent junk
+        // through Duplicate. Now arrives neutral: no binding, a generic format.
         type: 'core.display',
         title: 'Display Box',
         desc: 'Formatted numeric / frequency readout value box',
         category: 'Text & Display',
         icon: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 10h4v4H7z"/>',
-        defaultProps: { format: 'FREQ_COM', prefix: 'ACT', suffix: 'MHz' },
-        defaultBinding: { readSimVar: 'com1ActFreq' },
+        defaultProps: { format: 'RAW_INT' },
         defaultLayout: { col: 1, row: 2, w: 6, h: 3 }
       },
       {
@@ -506,13 +509,17 @@ export class StudioLayersPanel {
         defaultLayout: { col: 1, row: 1, w: 12, h: 6 }
       },
       {
+        // Wave 3, Part 7 item 2 (V15): used to arrive pre-wired to a live
+        // dispatchEvent CUSTOM_EVENT interaction — a generic, collision-prone
+        // placeholder that looks wired but isn't wired to anything the author
+        // meant. Marcus's four preset buttons all ended up non-functional this
+        // way after Duplicate. Now arrives with no interaction at all.
         type: 'core.button',
         title: 'Button Control',
         desc: 'Momentary, toggle, swap, or preset push-button',
         category: 'Buttons & Inputs',
         icon: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/>',
         defaultProps: { variant: 'momentary', label: 'ACTIVATE' },
-        defaultInteractions: [{ trigger: 'tap', action: { type: 'core.dispatchEvent', event: 'CUSTOM_EVENT', value: 1 } }],
         defaultLayout: { col: 1, row: 1, w: 4, h: 2 }
       },
       {
