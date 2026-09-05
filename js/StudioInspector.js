@@ -1337,16 +1337,19 @@ export class StudioInspector {
       // ever non-null via an explicit chip click or "+ Rule".
       const activeTab = activeRuleIndex !== null ? 'rule' : ((stateCfg && this._styleTab === 'state') ? 'state' : 'normal');
 
-      // Wave 2 Part B2: the active rule's condition, read for the
-      // condition-editor block below — same grammar/fields as
-      // renderVisibilityAndGuard's visibleWhen row, deliberately not
-      // genericized (Part 4 widens what a rule can STYLE, not how its
-      // CONDITION is authored — see ConditionEvaluator.js).
-      const RULE_OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
-      const ruleCond = activeRule?.when || {};
-      const ruleCondIsCustom = !!ruleCond.state && !stateVars.some((s) => s.name === ruleCond.state);
-      const ruleCondOp = RULE_OPS.find((o) => ruleCond[o] !== undefined) || 'equals';
-      const ruleCondVal = ruleCondOp === 'between' ? (ruleCond.between || []).join(',') : (ruleCond[ruleCondOp] ?? '');
+      // Wave 3, G6 slice 1: the active rule's condition now uses the same
+      // shared one-level compound editor visibleWhen already had (extracted
+      // to renderConditionListEditor()) instead of a single-leaf-only block —
+      // this also gives a rule condition the JSON fallback it never had
+      // before for a hand-authored/imported nested `when`.
+      const ruleCondEditor = activeTab === 'rule' && activeRule ? this.renderConditionListEditor(
+        comp, def, activeRule.when || null, 'rulecond',
+        (nextValue, recordHistory = true) => {
+          const nextRules = [...rules];
+          nextRules[activeRuleIndex] = { ...nextRules[activeRuleIndex], when: nextValue };
+          this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, recordHistory);
+        }
+      ) : null;
       const ruleJsonOpen = activeRuleIndex !== null && !!this._conditionalStyleJsonOpen?.[activeRuleIndex];
       // Wave 2 Part B3: the Theme chip toggles StudioState.previewTheme itself
       // (the canvas header's own sun/moon control) rather than introducing a
@@ -1402,25 +1405,7 @@ export class StudioInspector {
         ${activeTab === 'rule' ? `
         <div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style whenever this rule's condition is true — first matching rule wins over lower rules and over Normal. Dimmed fields are inherited from the Normal style, same as a state.</div>
         <div class="prop-section-subtitle" style="margin-top:0;">Condition <span class="prop-hint" title="Same condition grammar as Visible When — a rule here only changes the STYLE, never whether the component shows at all.">ⓘ</span></div>
-        <div class="prop-row-2">
-          <div class="prop-field">
-            <label>State Var</label>
-            <select id="c-rule-cond-state" class="prop-select">
-              ${conditionStateOptionsHtml(stateVars, ruleCond.state, false, comp.binding?.readSimVar)}
-            </select>
-            <input type="text" id="c-rule-cond-state-custom" class="prop-input ${ruleCondIsCustom ? '' : 'hidden'}" value="${ruleCondIsCustom ? escapeHtmlAttr(ruleCond.state) : ''}" placeholder="e.g. presets[0].label" style="margin-top:4px;" />
-          </div>
-          <div class="prop-field">
-            <label>Operator</label>
-            <select id="c-rule-cond-op" class="prop-select">
-              ${RULE_OPS.map((op) => `<option value="${op}" ${ruleCondOp === op ? 'selected' : ''}>${op}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-        <div class="prop-field">
-          <label>Value</label>
-          <input type="text" id="c-rule-cond-val" class="prop-input" value="${escapeHtmlAttr(ruleCondVal)}" placeholder="${ruleCondOp === 'between' ? 'lo,hi' : 'value'}" />
-        </div>
+        ${ruleCondEditor.html}
         <div class="prop-row-2" style="margin-bottom:8px;">
           <button type="button" id="c-rule-remove" class="bar-btn">Remove This Rule</button>
           <button type="button" id="c-rule-json-toggle" class="bar-btn">${ruleJsonOpen ? 'Hide' : 'Advanced'} JSON</button>
@@ -1511,55 +1496,7 @@ export class StudioInspector {
       });
 
       if (activeTab === 'rule' && activeRule) {
-        // V14: `stateOverride` lets the "Use This Component's Own Value" branch
-        // below reuse this same op/value-reading logic instead of duplicating
-        // it, supplying the resolved syncFrom var name in place of whatever
-        // the (sentinel-valued) select currently reads.
-        const commitRuleCondition = (recordHistory = true, stateOverride = undefined) => {
-          const stateSelect = body.querySelector('#c-rule-cond-state');
-          const stateCustom = body.querySelector('#c-rule-cond-state-custom');
-          const state = stateOverride !== undefined ? stateOverride
-            : stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustom.value.trim() : stateSelect.value;
-          const op = body.querySelector('#c-rule-cond-op').value;
-          const rawVal = body.querySelector('#c-rule-cond-val').value;
-          const when = { state };
-          if (op === 'between') {
-            const [lo, hi] = rawVal.split(',').map((s) => Number(s.trim()));
-            when.between = [lo || 0, hi || 0];
-          } else if (['gt', 'gte', 'lt', 'lte'].includes(op)) {
-            when[op] = Number(rawVal) || 0;
-          } else {
-            when[op] = rawVal;
-          }
-          // Only `when` is ever touched here — `style` is read-only from this
-          // block's perspective, written solely by the generic field engine
-          // (or the Advanced JSON textarea below). Unlike the old row-list
-          // UI's readCurrentRow(), there is no shared-mutation hazard to
-          // guard against (V18): nothing here can accidentally drop a style
-          // sub-field, because nothing here ever touches style at all.
-          const nextRules = [...rules];
-          nextRules[activeRuleIndex] = { ...nextRules[activeRuleIndex], when };
-          this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, recordHistory);
-        };
-        body.querySelector('#c-rule-cond-state')?.addEventListener('change', (e) => {
-          if (e.target.value === OWN_VALUE_OPTION) {
-            const simVar = comp.binding?.readSimVar;
-            if (!simVar) return;
-            const name = this.state.resolveSyncFromVarName(simVar);
-            body.querySelector('#c-rule-cond-state-custom')?.classList.add('hidden');
-            this.state.saveHistory("Use This Component's Own Value");
-            this.state.ensureSyncFromVar(simVar);
-            commitRuleCondition(false, name);
-          } else if (e.target.value === CUSTOM_OPTION_VALUE) {
-            body.querySelector('#c-rule-cond-state-custom')?.classList.remove('hidden');
-          } else {
-            body.querySelector('#c-rule-cond-state-custom')?.classList.add('hidden');
-            commitRuleCondition();
-          }
-        });
-        body.querySelector('#c-rule-cond-state-custom')?.addEventListener('change', commitRuleCondition);
-        body.querySelector('#c-rule-cond-op')?.addEventListener('change', commitRuleCondition);
-        body.querySelector('#c-rule-cond-val')?.addEventListener('change', commitRuleCondition);
+        ruleCondEditor.wire(body);
 
         body.querySelector('#c-rule-remove')?.addEventListener('click', async () => {
           const ok = await confirmModal(`Remove this rule (${summarizeRuleCondition(activeRule.when)})?`, { title: 'Remove Rule', danger: true });
@@ -2127,65 +2064,16 @@ export class StudioInspector {
   }
 
   renderVisibilityAndGuard(comp, def, body) {
-    const stateVars = def.state || [];
     const assets = def.assets || [];
-    const visibleWhen = comp.visibleWhen || null;
     const guard = comp.layout?.guard || {};
 
-    // visibleWhen is normalized to a flat condition list under one combinator
-    // (allOf/anyOf) for the visual editor — arbitrary nested compound
-    // expressions remain possible but must be hand-edited via the JSON
-    // escape hatch below, since that shape has no bounded visual form.
-    const combinator = visibleWhen?.anyOf ? 'anyOf' : 'allOf';
-    const conditions = visibleWhen ? (visibleWhen[combinator] || (visibleWhen.state ? [visibleWhen] : [])) : [];
-    const isNestedOrComplex = visibleWhen && !(visibleWhen.allOf || visibleWhen.anyOf || visibleWhen.state);
-
-    const OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
-
-    // FDWS v1.13: a condition's `state` can address a nested/indexed path
-    // (e.g. "presets[0].label"), not just a declared state[] var — same
-    // grammar as binding.stateRef (v1.11). Any name not in the declared
-    // list is treated as a custom/path value, same "Custom…" pattern used
-    // elsewhere in this panel (bindings, event pickers).
-    const stateIsCustomPath = (name) => !!name && !stateVars.some((s) => s.name === name);
-
-    const conditionRowHtml = (cond, idx) => {
-      const isCustom = stateIsCustomPath(cond.state);
-      return `
-      <div class="row-list-item" data-idx="${idx}">
-        <div class="vw-state-wrap" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;">
-          <select class="row-field vw-state prop-select" data-field="state">
-            ${conditionStateOptionsHtml(stateVars, cond.state, false, comp.binding?.readSimVar)}
-          </select>
-          <input type="text" class="row-field vw-state-custom prop-input ${isCustom ? '' : 'hidden'}" value="${isCustom ? cond.state : ''}" placeholder="e.g. presets[0].label" title="FDWS v1.13: 'name[index].field' path into an array/object state var — same grammar as a component's Bind to Local State Path." />
-        </div>
-        <select class="row-field vw-op prop-select" data-field="op">
-          ${OPS.map((op) => `<option value="${op}" ${OPS.find((o) => cond[o] !== undefined) === op ? 'selected' : ''}>${op}</option>`).join('')}
-        </select>
-        <input type="text" class="row-field vw-val" data-field="val" value="${(() => { const op = OPS.find((o) => cond[o] !== undefined); return op ? (op === 'between' ? (cond.between || []).join(',') : cond[op]) : ''; })()}" placeholder="${(OPS.find((o) => cond[o] !== undefined) === 'between') ? 'lo,hi' : 'value'}" />
-        <button type="button" class="btn-mini-close vw-remove" title="Remove">✕</button>
-      </div>
-    `;
-    };
+    const vwEditor = this.renderConditionListEditor(comp, def, comp.visibleWhen || null, 'vw', (nextValue, recordHistory = true) => {
+      this.state.updateComponent(comp.id, { visibleWhen: nextValue }, recordHistory);
+    });
 
     body.innerHTML = `
       <div class="prop-section-subtitle">Conditional Visibility (visibleWhen) <span class="prop-hint" title="FDWS v1.13: each condition's state can be a declared state[] var, or — via the 'Custom / nested path…' option — a nested/indexed path like presets[0].label, addressing one specific array-slot field instead of a whole variable.">ⓘ</span></div>
-      ${isNestedOrComplex ? `
-        <div class="caps-empty">This component has a hand-authored compound visibleWhen expression too complex for the visual editor. Edit it as JSON below, or clear it to start over with the visual editor.</div>
-        <textarea id="vw-raw-json" class="prop-input" rows="4">${JSON.stringify(visibleWhen, null, 0)}</textarea>
-        <div id="vw-raw-error" class="prop-json-error hidden"></div>
-        <button type="button" id="vw-clear" class="bar-btn">Clear & Use Visual Editor</button>
-      ` : `
-        <div class="prop-field">
-          <label>Show this component when…</label>
-          <select id="vw-combinator" class="prop-select" ${conditions.length === 0 ? 'disabled' : ''}>
-            <option value="allOf" ${combinator === 'allOf' ? 'selected' : ''}>ALL of these are true</option>
-            <option value="anyOf" ${combinator === 'anyOf' ? 'selected' : ''}>ANY of these are true</option>
-          </select>
-        </div>
-        <div id="vw-conditions">${conditions.map(conditionRowHtml).join('') || '<div class="caps-empty">Always visible — no conditions set.</div>'}</div>
-        <button type="button" id="vw-add-condition" class="bar-btn row-add">+ Add Condition</button>
-      `}
+      ${vwEditor.html}
 
       <div class="prop-section-subtitle" style="margin-top:14px;">Guard Overlay (layout.guard §2.2)</div>
       <div class="prop-field">
@@ -2215,82 +2103,7 @@ export class StudioInspector {
       ` : ''}
     `;
 
-    // --- visibleWhen wiring ---
-    const commitVisibleWhen = (nextConditions, nextCombinator, recordHistory = true) => {
-      const value = nextConditions.length === 0 ? undefined : { [nextCombinator]: nextConditions };
-      this.state.updateComponent(comp.id, { visibleWhen: value }, recordHistory);
-    };
-
-    body.querySelector('#vw-combinator')?.addEventListener('change', (e) => commitVisibleWhen(conditions, e.target.value));
-
-    body.querySelectorAll('#vw-conditions .row-list-item').forEach((rowEl) => {
-      const idx = Number(rowEl.dataset.idx);
-      const stateSelect = rowEl.querySelector('.vw-state');
-      const stateCustomInput = rowEl.querySelector('.vw-state-custom');
-
-      // V14: `stateOverride` lets the "Use This Component's Own Value" branch
-      // below reuse this same op/value-reading logic rather than duplicating it.
-      const applyRowChange = (recordHistory = true, stateOverride = undefined) => {
-        const state = stateOverride !== undefined ? stateOverride
-          : stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustomInput.value.trim() : stateSelect.value;
-        const op = rowEl.querySelector('.vw-op').value;
-        const rawVal = rowEl.querySelector('.vw-val').value;
-        const next = [...conditions];
-        const cond = { state };
-        if (op === 'between') {
-          const [lo, hi] = rawVal.split(',').map((s) => Number(s.trim()));
-          cond.between = [lo || 0, hi || 0];
-        } else if (['gt', 'gte', 'lt', 'lte'].includes(op)) {
-          cond[op] = Number(rawVal) || 0;
-        } else {
-          cond[op] = rawVal;
-        }
-        next[idx] = cond;
-        commitVisibleWhen(next, combinator, recordHistory);
-      };
-      stateSelect?.addEventListener('change', () => {
-        if (stateSelect.value === OWN_VALUE_OPTION) {
-          const simVar = comp.binding?.readSimVar;
-          if (!simVar) return;
-          const name = this.state.resolveSyncFromVarName(simVar);
-          stateCustomInput?.classList.add('hidden');
-          this.state.saveHistory("Use This Component's Own Value");
-          this.state.ensureSyncFromVar(simVar);
-          applyRowChange(false, name);
-        } else if (stateSelect.value === CUSTOM_OPTION_VALUE) {
-          // Just reveal the text field — don't commit yet. Committing here
-          // with the still-empty custom input would trigger a synchronous
-          // re-render (no debounce) that rebuilds this row from that empty
-          // value, snapping the select back to "— state var —" and hiding
-          // the field before the user can type anything into it — same
-          // "reveal, don't write yet" pattern used for every other
-          // Custom… dropdown in this panel.
-          stateCustomInput?.classList.remove('hidden');
-        } else {
-          stateCustomInput?.classList.add('hidden');
-          if (stateCustomInput) stateCustomInput.value = '';
-          applyRowChange();
-        }
-      });
-      stateCustomInput?.addEventListener('change', applyRowChange);
-      rowEl.querySelector('.vw-op')?.addEventListener('change', applyRowChange);
-      rowEl.querySelector('.vw-val')?.addEventListener('change', applyRowChange);
-      rowEl.querySelector('.vw-remove')?.addEventListener('click', () => {
-        commitVisibleWhen(conditions.filter((_, i) => i !== idx), combinator);
-      });
-    });
-
-    body.querySelector('#vw-add-condition')?.addEventListener('click', () => {
-      commitVisibleWhen([...conditions, { state: stateVars[0]?.name || '', equals: '' }], combinator);
-    });
-
-    body.querySelector('#vw-clear')?.addEventListener('click', () => {
-      this.state.updateComponent(comp.id, { visibleWhen: undefined });
-    });
-
-    body.querySelector('#vw-raw-json')?.addEventListener('change', (e) => {
-      this.updateVisibleWhenJson(comp, e.target.value, body.querySelector('#vw-raw-error'));
-    });
+    vwEditor.wire(body);
 
     // --- guard wiring ---
     body.querySelector('#guard-enabled')?.addEventListener('change', (e) => {
@@ -2315,17 +2128,185 @@ export class StudioInspector {
   // render every rule's style through the same generic field engine
   // Normal/State already use. See renderAppearanceSection()'s doc comment.
 
-  updateVisibleWhenJson(comp, rawValue, errorEl) {
-    try {
-      const parsed = JSON.parse(rawValue);
-      this.state.updateComponent(comp.id, { visibleWhen: parsed });
-      if (errorEl) errorEl.classList.add('hidden');
-    } catch (err) {
-      if (errorEl) {
-        errorEl.textContent = `Invalid JSON — edit not applied: ${err.message}`;
-        errorEl.classList.remove('hidden');
-      }
-    }
+  /**
+   * Wave 3, G6 slice 1: shared one-level compound condition editor —
+   * combinator (ALL/ANY) + N leaf condition rows (state/op/value, with the
+   * declared-var/custom-path/"use this component's own value" options every
+   * condition-source dropdown in this file already shares via
+   * conditionStateOptionsHtml()) — plus a JSON-textarea fallback for a
+   * genuinely nested/complex expression, so a hand-authored two-level
+   * condition is never silently destroyed by an editor that can't render it
+   * (same "don't destroy what you can't render" principle as V18's rule-style
+   * fix). Originally hand-built only for visibleWhen (renderVisibilityAndGuard);
+   * extracted here so style.rules[].when (this slice) and, later,
+   * interactions[].condition can reach the same one-level compound capability
+   * instead of staying single-leaf-only.
+   * @param {object} comp
+   * @param {object} def widgetDef
+   * @param {object|null} expr the raw stored condition value
+   * @param {string} idPrefix DOM id prefix, so two instances on one panel
+   *        never collide (e.g. 'vw' vs 'rulecond')
+   * @param {(next: object|undefined, recordHistory?: boolean) => void} onCommit
+   *        called with the next ready-to-store value (or undefined to clear)
+   * @returns {{ html: string, wire: (mountEl: HTMLElement) => void }}
+   */
+  renderConditionListEditor(comp, def, expr, idPrefix, onCommit) {
+    const stateVars = def.state || [];
+
+    // A compound expression is normalized to a flat condition list under one
+    // combinator (allOf/anyOf) for the visual editor — arbitrary nested
+    // compound expressions remain possible but must be hand-edited via the
+    // JSON escape hatch below, since that shape has no bounded visual form.
+    const combinator = expr?.anyOf ? 'anyOf' : 'allOf';
+    const conditions = expr ? (expr[combinator] || (expr.state ? [expr] : [])) : [];
+    // Bug found live during G6 slice 1 verification, pre-existing (not
+    // introduced here — this was visibleWhen's own original check, copied
+    // verbatim before this fix): the old check only looked at the OUTERMOST
+    // shape, so a genuinely two-level expression like `{allOf: [{anyOf:
+    // [...]}, {state:'c', ...}]}` — exactly the case G6 is about — passed as
+    // "simple" because the top level has `allOf`. Each array member must
+    // itself be a flat leaf (has `state`, isn't itself an allOf/anyOf group)
+    // or this falls back to the JSON escape hatch instead of silently
+    // destroying the nested group on the next row edit.
+    const isLeafCondition = (c) => !!c && typeof c === 'object' && typeof c.state === 'string' && !('allOf' in c) && !('anyOf' in c);
+    const isNestedOrComplex = !!expr && (!(expr.allOf || expr.anyOf || expr.state) || !conditions.every(isLeafCondition));
+
+    const OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
+
+    // FDWS v1.13: a condition's `state` can address a nested/indexed path
+    // (e.g. "presets[0].label"), not just a declared state[] var — same
+    // grammar as binding.stateRef (v1.11). Any name not in the declared
+    // list is treated as a custom/path value, same "Custom…" pattern used
+    // elsewhere in this panel (bindings, event pickers).
+    const stateIsCustomPath = (name) => !!name && !stateVars.some((s) => s.name === name);
+
+    const conditionRowHtml = (cond, idx) => {
+      const isCustom = stateIsCustomPath(cond.state);
+      return `
+      <div class="row-list-item" data-idx="${idx}">
+        <div class="${idPrefix}-state-wrap" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;">
+          <select class="row-field ${idPrefix}-state prop-select" data-field="state">
+            ${conditionStateOptionsHtml(stateVars, cond.state, false, comp.binding?.readSimVar)}
+          </select>
+          <input type="text" class="row-field ${idPrefix}-state-custom prop-input ${isCustom ? '' : 'hidden'}" value="${isCustom ? escapeHtmlAttr(cond.state) : ''}" placeholder="e.g. presets[0].label" title="FDWS v1.13: 'name[index].field' path into an array/object state var — same grammar as a component's Bind to Local State Path." />
+        </div>
+        <select class="row-field ${idPrefix}-op prop-select" data-field="op">
+          ${OPS.map((op) => `<option value="${op}" ${OPS.find((o) => cond[o] !== undefined) === op ? 'selected' : ''}>${op}</option>`).join('')}
+        </select>
+        <input type="text" class="row-field ${idPrefix}-val" data-field="val" value="${(() => { const op = OPS.find((o) => cond[o] !== undefined); return op ? (op === 'between' ? (cond.between || []).join(',') : cond[op]) : ''; })()}" placeholder="${(OPS.find((o) => cond[o] !== undefined) === 'between') ? 'lo,hi' : 'value'}" />
+        <button type="button" class="btn-mini-close ${idPrefix}-remove" title="Remove">✕</button>
+      </div>
+    `;
+    };
+
+    const html = `
+      ${isNestedOrComplex ? `
+        <div class="caps-empty">This condition is too complex for the visual editor (hand-authored/nested). Edit it as JSON below, or clear it to start over with the visual editor.</div>
+        <textarea id="${idPrefix}-raw-json" class="prop-input" rows="4">${escapeHtmlAttr(JSON.stringify(expr, null, 0))}</textarea>
+        <div id="${idPrefix}-raw-error" class="prop-json-error hidden"></div>
+        <button type="button" id="${idPrefix}-clear" class="bar-btn">Clear & Use Visual Editor</button>
+      ` : `
+        <div class="prop-field">
+          <label>Match when…</label>
+          <select id="${idPrefix}-combinator" class="prop-select" ${conditions.length === 0 ? 'disabled' : ''}>
+            <option value="allOf" ${combinator === 'allOf' ? 'selected' : ''}>ALL of these are true</option>
+            <option value="anyOf" ${combinator === 'anyOf' ? 'selected' : ''}>ANY of these are true</option>
+          </select>
+        </div>
+        <div id="${idPrefix}-conditions">${conditions.map(conditionRowHtml).join('') || '<div class="caps-empty">No conditions set.</div>'}</div>
+        <button type="button" id="${idPrefix}-add-condition" class="bar-btn row-add">+ Add Condition</button>
+      `}
+    `;
+
+    const wire = (mountEl) => {
+      const commit = (nextConditions, nextCombinator, recordHistory = true) => {
+        const value = nextConditions.length === 0 ? undefined : { [nextCombinator]: nextConditions };
+        onCommit(value, recordHistory);
+      };
+
+      mountEl.querySelector(`#${idPrefix}-combinator`)?.addEventListener('change', (e) => commit(conditions, e.target.value));
+
+      mountEl.querySelectorAll(`#${idPrefix}-conditions .row-list-item`).forEach((rowEl) => {
+        const idx = Number(rowEl.dataset.idx);
+        const stateSelect = rowEl.querySelector(`.${idPrefix}-state`);
+        const stateCustomInput = rowEl.querySelector(`.${idPrefix}-state-custom`);
+
+        // V14: `stateOverride` lets the "Use This Component's Own Value" branch
+        // below reuse this same op/value-reading logic rather than duplicating it.
+        const applyRowChange = (recordHistory = true, stateOverride = undefined) => {
+          const state = stateOverride !== undefined ? stateOverride
+            : stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustomInput.value.trim() : stateSelect.value;
+          const op = rowEl.querySelector(`.${idPrefix}-op`).value;
+          const rawVal = rowEl.querySelector(`.${idPrefix}-val`).value;
+          const next = [...conditions];
+          const cond = { state };
+          if (op === 'between') {
+            const [lo, hi] = rawVal.split(',').map((s) => Number(s.trim()));
+            cond.between = [lo || 0, hi || 0];
+          } else if (['gt', 'gte', 'lt', 'lte'].includes(op)) {
+            cond[op] = Number(rawVal) || 0;
+          } else {
+            cond[op] = rawVal;
+          }
+          next[idx] = cond;
+          commit(next, combinator, recordHistory);
+        };
+        stateSelect?.addEventListener('change', () => {
+          if (stateSelect.value === OWN_VALUE_OPTION) {
+            const simVar = comp.binding?.readSimVar;
+            if (!simVar) return;
+            const name = this.state.resolveSyncFromVarName(simVar);
+            stateCustomInput?.classList.add('hidden');
+            this.state.saveHistory("Use This Component's Own Value");
+            this.state.ensureSyncFromVar(simVar);
+            applyRowChange(false, name);
+          } else if (stateSelect.value === CUSTOM_OPTION_VALUE) {
+            // Just reveal the text field — don't commit yet. Committing here
+            // with the still-empty custom input would trigger a synchronous
+            // re-render (no debounce) that rebuilds this row from that empty
+            // value, snapping the select back to "— state var —" and hiding
+            // the field before the user can type anything into it — same
+            // "reveal, don't write yet" pattern used for every other
+            // Custom… dropdown in this panel.
+            stateCustomInput?.classList.remove('hidden');
+          } else {
+            stateCustomInput?.classList.add('hidden');
+            if (stateCustomInput) stateCustomInput.value = '';
+            applyRowChange();
+          }
+        });
+        stateCustomInput?.addEventListener('change', applyRowChange);
+        rowEl.querySelector(`.${idPrefix}-op`)?.addEventListener('change', applyRowChange);
+        rowEl.querySelector(`.${idPrefix}-val`)?.addEventListener('change', applyRowChange);
+        rowEl.querySelector(`.${idPrefix}-remove`)?.addEventListener('click', () => {
+          commit(conditions.filter((_, i) => i !== idx), combinator);
+        });
+      });
+
+      mountEl.querySelector(`#${idPrefix}-add-condition`)?.addEventListener('click', () => {
+        commit([...conditions, { state: stateVars[0]?.name || '', equals: '' }], combinator);
+      });
+
+      mountEl.querySelector(`#${idPrefix}-clear`)?.addEventListener('click', () => {
+        onCommit(undefined);
+      });
+
+      mountEl.querySelector(`#${idPrefix}-raw-json`)?.addEventListener('change', (e) => {
+        try {
+          const parsed = JSON.parse(e.target.value);
+          onCommit(parsed);
+          mountEl.querySelector(`#${idPrefix}-raw-error`)?.classList.add('hidden');
+        } catch (err) {
+          const errEl = mountEl.querySelector(`#${idPrefix}-raw-error`);
+          if (errEl) {
+            errEl.textContent = `Invalid JSON — edit not applied: ${err.message}`;
+            errEl.classList.remove('hidden');
+          }
+        }
+      });
+    };
+
+    return { html, wire };
   }
 
   renderTypeSpecificProps(comp, body) {
