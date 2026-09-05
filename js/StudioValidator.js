@@ -27,7 +27,8 @@ import {
   VALUE_FORMATS as REGISTRY_VALUE_FORMATS,
   ALLOWED_ASSET_MIME_TYPES,
   getComponentTypes,
-  getStateStyleConfig
+  getStateStyleConfig,
+  getFieldsForType
 } from '../widgets/PropertyRegistry.js';
 
 // A gradient CSS value pasted into a *.color field (background.color most
@@ -102,6 +103,81 @@ export function isComponentUnconfigured(comp) {
     default:
       return false;
   }
+}
+
+// Wave 4, §10.4: component-root keys that are real and known but never
+// FIELDS-declared, because a wholly bespoke editor owns them entirely
+// (interactions via the Add/Edit Interaction modal, layout via canvas
+// drag/resize + the Grid Position & Size panel, layer via hand-coded fields).
+// visibleWhen IS registry-declared (one atomic path) so it's covered by the
+// exact-path check below without needing to be listed here.
+const COMPONENT_KNOWN_STRUCTURAL_KEYS = new Set(['id', 'type', 'label', 'interactions', 'layout', 'layer', 'visibleWhen']);
+
+// Every top-level `def` key that exists today, across every UI surface that
+// owns one (the 6 widget-root Inspector accordions plus StudioLayersPanel's
+// Layers/State/Assets tabs) — see project docs for the per-section census.
+const DEF_KNOWN_TOP_LEVEL_KEYS = new Set([
+  'fdws', 'schemaVersion', 'id', 'revision', 'kind', 'meta', 'layout', 'style',
+  'baseTheme', 'themeMode', 'deckEvents', 'capabilities', 'layerGroups', 'state',
+  'components', 'assets'
+]);
+
+/**
+ * Wave 4, §10.4: finds JSON keys on a component that this build's registry
+ * doesn't declare — imported from a newer Studio, or hand-authored — so they
+ * can be surfaced instead of silently doing nothing. Deep-scans only
+ * `props`/`binding`/`style`, since that's where FDWS has actually grown new
+ * fields historically; `style.rules`/`style.states` are each declared as ONE
+ * atomic path even though their own contents are dynamically-keyed by design,
+ * so the walk stops the instant it hits a declared path — it never recurses
+ * past one, or every real rule/state would false-positive as "unrecognised."
+ * @param {object} comp
+ * @returns {{props: Array<{path,value}>, binding: Array<{path,value}>, style: Array<{path,value}>, other: Array<{path,value}>}}
+ */
+export function findUnrecognisedComponentPaths(comp) {
+  const fields = getFieldsForType(comp.type);
+  const exact = new Set(fields.map((f) => f.path));
+  const prefixes = new Set();
+  exact.forEach((p) => {
+    const segs = p.split('.');
+    for (let i = 1; i < segs.length; i++) prefixes.add(segs.slice(0, i).join('.'));
+  });
+
+  const walk = (obj, prefix, out) => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+    Object.keys(obj).forEach((key) => {
+      const path = `${prefix}.${key}`;
+      if (exact.has(path)) return;
+      if (prefixes.has(path)) { walk(obj[key], path, out); return; }
+      out.push({ path, value: obj[key] });
+    });
+  };
+
+  const result = { props: [], binding: [], style: [], other: [] };
+  ['props', 'binding', 'style'].forEach((key) => walk(comp[key], key, result[key]));
+  Object.keys(comp).forEach((key) => {
+    if (!COMPONENT_KNOWN_STRUCTURAL_KEYS.has(key) && key !== 'props' && key !== 'binding' && key !== 'style') {
+      result.other.push({ path: key, value: comp[key] });
+    }
+  });
+  return result;
+}
+
+/**
+ * Wave 4, §10.4: same idea as findUnrecognisedComponentPaths but for the
+ * widget-root definition object — shallow, top-level-keys-only. Unlike
+ * component fields, def.meta/def.style/def.layout's own internals are
+ * hand-coded in renderWidgetInspector() with no registry backing, so a real
+ * deep diff would mean hand-maintaining a second, undrift-checked allowlist
+ * for marginal benefit (widget-root style has grown far less than component
+ * style historically) — a deliberate scope boundary, not an oversight.
+ * @param {object} def
+ * @returns {Array<{path,value}>}
+ */
+export function findUnrecognisedDefPaths(def) {
+  return Object.keys(def)
+    .filter((k) => !DEF_KNOWN_TOP_LEVEL_KEYS.has(k))
+    .map((k) => ({ path: k, value: def[k] }));
 }
 
 /**

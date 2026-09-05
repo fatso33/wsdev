@@ -4,7 +4,7 @@
  * Organized into intuitive, structured accordion property groups adhering strictly to FDWS v1.4
  */
 
-import { StudioValidator, isWriteEventConsumed, proposeWireUp, SELF_DISPATCHING_WRITE_EVENT_TYPES } from './StudioValidator.js';
+import { StudioValidator, isWriteEventConsumed, proposeWireUp, SELF_DISPATCHING_WRITE_EVENT_TYPES, findUnrecognisedComponentPaths, findUnrecognisedDefPaths } from './StudioValidator.js';
 import { SecurityValidator } from '../core/SecurityValidator.js';
 import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_NAMES } from '../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
@@ -1019,6 +1019,21 @@ export class StudioInspector {
     // above already guards with a default) — same reasoning as the other root
     // sections' jsonData above.
     }, undefined, def.capabilities || { readSimVars: [], writeEvents: [] }));
+
+    // Wave 4, §10.4: a wholly new top-level def key this build's registry
+    // doesn't recognise — no existing section is a "relevant group" for that
+    // (we can't know what it's for), so it gets its own, appended only when
+    // non-empty. No data-tier — a data-safety guarantee, not a tier-hideable
+    // convenience.
+    const unrecognisedDef = findUnrecognisedDefPaths(def);
+    if (unrecognisedDef.length > 0) {
+      this.container.appendChild(this.buildAccordionGroup('UNRECOGNISED PROPERTIES', true, (body) => {
+        const block = this.renderUnrecognisedPropertiesBlock(unrecognisedDef, def.fdws, 'wroot', (path, value) => {
+          this.state.updateWidgetRawField(path, value);
+        });
+        if (block) body.appendChild(block);
+      }));
+    }
   }
 
   // ==========================================
@@ -1239,6 +1254,12 @@ export class StudioInspector {
     // "{}" rather than silently vanishing, same reasoning as the root sections.
     const appearanceGroup = this.buildAccordionGroup('APPEARANCE', false, () => {}, this.buildAppearanceBadge(comp), comp.style || {});
     const dataGroup = this.buildAccordionGroup('DATA & CONTENT', false, () => {}, this.buildDataBadge(comp), { props: comp.props, binding: comp.binding });
+    // Wave 4, §10.4: computed once, appended at the bottom of the two
+    // relevant sections below (props+binding into Data & Content, style into
+    // Appearance) plus a standalone catch-all section for a wholly
+    // unclassified component-root key, if any.
+    const unrecognised = findUnrecognisedComponentPaths(comp);
+    const commitUnrecognised = (path, value) => this.commitField(comp, path, value);
     this.container.appendChild(appearanceGroup);
     this.container.appendChild(dataGroup);
     const appearanceBody = appearanceGroup.querySelector('.inspector-group-body');
@@ -1534,6 +1555,9 @@ export class StudioInspector {
         : { kind: 'base' };
       this.renderAppearanceSection(comp, body.querySelector('#c-appearance-fields'), target, { themeEdit, effTypoColor, effBorderColor, effBg, effStrokeColor, effGlowColor, effBorderGlowColor, assets });
     })(appearanceBody.appendChild(document.createElement('div')));
+
+    const unrecStyleBlock = this.renderUnrecognisedPropertiesBlock(unrecognised.style, def.fdws, `${comp.id}-style`, commitUnrecognised);
+    if (unrecStyleBlock) appearanceBody.appendChild(unrecStyleBlock);
 
     const bindDivider = document.createElement('div');
     bindDivider.className = 'prop-section-subtitle';
@@ -1981,6 +2005,9 @@ export class StudioInspector {
       });
     })(dataBody.appendChild(document.createElement('div')));
 
+    const unrecDataBlock = this.renderUnrecognisedPropertiesBlock([...unrecognised.props, ...unrecognised.binding], def.fdws, `${comp.id}-data`, commitUnrecognised);
+    if (unrecDataBlock) dataBody.appendChild(unrecDataBlock);
+
     // 4. Behavior — Phase 6 merges "Interaction Triggers" + "Visibility &
     // Guard" (visibility-by-state is itself a reactive behavior). Both
     // sections are adjacent in the original file order, so this group merges
@@ -2061,6 +2088,19 @@ export class StudioInspector {
     // in the Appearance panel's main IIFE above, alongside Normal/State,
     // rendered through the same generic field engine. See
     // renderAppearanceSection()'s doc comment.
+
+    // Wave 4, §10.4: a wholly unclassified component-root key (not props/
+    // binding/style, not one of the known structural keys either) — no
+    // historical precedent for this actually occurring, but kept for honesty
+    // rather than silently dropping it. No existing accordion is a "relevant
+    // group" for something structurally outside props/binding/style, so it
+    // gets its own, appended only when non-empty.
+    if (unrecognised.other.length > 0) {
+      this.container.appendChild(this.buildAccordionGroup('UNRECOGNISED PROPERTIES', true, (body) => {
+        const block = this.renderUnrecognisedPropertiesBlock(unrecognised.other, def.fdws, `${comp.id}-other`, commitUnrecognised);
+        if (block) body.appendChild(block);
+      }));
+    }
   }
 
   renderVisibilityAndGuard(comp, def, body) {
@@ -2993,6 +3033,17 @@ export class StudioInspector {
   commitField(comp, path, value) {
     const segs = path.split('.');
     const topKey = segs[0];
+    // Wave 4, §10.4: a bare top-level path (no dots) — never exercised before
+    // this slice, since every prior call site committed a nested field. The
+    // multi-segment branch below clones the OLD top-level value and only ever
+    // splices into it, so it would silently re-commit the unchanged value for
+    // a single-segment path instead of applying `value` at all. Caught while
+    // wiring up the "wholly unclassified component-root key" bucket, which by
+    // definition produces exactly this shape.
+    if (segs.length === 1) {
+      this.state.updateComponent(comp.id, { [topKey]: value });
+      return;
+    }
     // Wave 2 Part B2: style.rules is an ARRAY — {...arr} produces a plain
     // object with numeric string keys, silently corrupting Array.isArray()
     // and .length for every downstream consumer (resolveActiveRuleStyle(),
@@ -3005,8 +3056,104 @@ export class StudioInspector {
       cur[segs[i]] = cloneLevel(cur[segs[i]]);
       cur = cur[segs[i]];
     }
-    if (segs.length > 1) cur[segs[segs.length - 1]] = value;
+    cur[segs[segs.length - 1]] = value;
     this.state.updateComponent(comp.id, { [topKey]: topVal });
+  }
+
+  /**
+   * Wave 4, §10.4: renders a small "Unrecognised properties" block for
+   * entries found by StudioValidator's findUnrecognisedComponentPaths()/
+   * findUnrecognisedDefPaths() — JSON keys this build's registry doesn't
+   * declare, so they'd otherwise be invisible even though they already
+   * survive round-trip untouched. Returns null when there's nothing to show
+   * (no dead/empty block, same precedent as every other empty-state in this
+   * file). Builds and wires a standalone element in one pass — unlike
+   * renderConditionListEditor's {html, wire} split, every call site here has
+   * a direct element to appendChild onto, so there's no larger template
+   * string this needs to be embedded inside first.
+   * @param {Array<{path:string,value:*}>} items
+   * @param {string} fdwsVersion
+   * @param {string} idPrefix
+   * @param {(path:string, value:*) => void} onCommit
+   * @returns {HTMLElement|null}
+   */
+  renderUnrecognisedPropertiesBlock(items, fdwsVersion, idPrefix, onCommit) {
+    if (!items || items.length === 0) return null;
+
+    const isScalar = (v) => ['number', 'string', 'boolean'].includes(typeof v);
+
+    const rowHtml = (item, idx) => {
+      const rid = `${idPrefix}-unrec-${idx}`;
+      const badge = `<span class="tmpl-badge">FDWS v${escapeHtmlAttr(fdwsVersion || '?')}</span>`;
+      if (!isScalar(item.value)) {
+        return `
+          <div class="unrec-props-row">
+            <div class="unrec-props-path">${escapeHtmlAttr(item.path)} ${badge}</div>
+            <pre class="unrec-props-readonly">${escapeHtmlAttr(JSON.stringify(item.value, null, 2))}</pre>
+          </div>
+        `;
+      }
+      const valueType = typeof item.value;
+      const inputHtml = valueType === 'boolean'
+        ? `<input type="checkbox" id="${rid}-input" ${item.value ? 'checked' : ''} />`
+        : `<input type="${valueType === 'number' ? 'number' : 'text'}" id="${rid}-input" class="prop-input" value="${escapeHtmlAttr(item.value)}" />`;
+      return `
+        <div class="unrec-props-row">
+          <div class="unrec-props-path">${escapeHtmlAttr(item.path)} ${badge}</div>
+          <div class="unrec-props-value-line">
+            <span class="unrec-props-value" id="${rid}-display">${escapeHtmlAttr(JSON.stringify(item.value))}</span>
+            <button type="button" class="bar-btn" id="${rid}-toggle">✎ Edit (unvalidated)</button>
+          </div>
+          <div class="unrec-props-edit hidden" id="${rid}-panel">
+            <div class="text-amber unrec-props-warning">⚠ Unrecognised field — this build doesn't know what this value means. Editing it is not validated against any schema.</div>
+            ${inputHtml}
+            <div class="saved-card-btns">
+              <button type="button" class="bar-btn primary" id="${rid}-save">Save</button>
+              <button type="button" class="bar-btn" id="${rid}-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+      `;
+    };
+
+    const wrap = document.createElement('div');
+    wrap.className = 'unrec-props-block';
+    wrap.innerHTML = `
+      <div class="unrec-props-header">⚠ UNRECOGNISED PROPERTIES <span class="prop-hint" title="Fields present in this widget's saved data that this build's registry doesn't declare — likely from a newer Studio version, or hand-authored. Always preserved on save, never dropped.">ⓘ</span></div>
+      ${items.map(rowHtml).join('')}
+    `;
+
+    items.forEach((item, idx) => {
+      if (!isScalar(item.value)) return;
+      const rid = `${idPrefix}-unrec-${idx}`;
+      const toggleBtn = wrap.querySelector(`#${rid}-toggle`);
+      const panel = wrap.querySelector(`#${rid}-panel`);
+      const cancelBtn = wrap.querySelector(`#${rid}-cancel`);
+      const saveBtn = wrap.querySelector(`#${rid}-save`);
+      const inputEl = wrap.querySelector(`#${rid}-input`);
+
+      toggleBtn?.addEventListener('click', () => panel.classList.toggle('hidden'));
+      cancelBtn?.addEventListener('click', () => {
+        if (typeof item.value === 'boolean') inputEl.checked = item.value;
+        else inputEl.value = item.value;
+        panel.classList.add('hidden');
+      });
+      saveBtn?.addEventListener('click', () => {
+        const valueType = typeof item.value;
+        let next;
+        if (valueType === 'boolean') {
+          next = inputEl.checked;
+        } else if (valueType === 'number') {
+          next = Number(inputEl.value);
+          if (Number.isNaN(next)) { showToast('Not a valid number.'); return; }
+        } else {
+          next = inputEl.value;
+        }
+        onCommit(item.path, next);
+      });
+    });
+
+    return wrap;
   }
 
   /**

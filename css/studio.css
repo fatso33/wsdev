@@ -2864,6 +2864,83 @@ body, html {
 .text-red { color: #ef4444; }
 .text-amber { color: #f59e0b; }
 
+/* Wave 4, §10.4: Unrecognised Properties — reuses .prop-input/.bar-btn/
+   .tmpl-badge/.prop-hint/.text-amber for everything but the row shell itself,
+   which needs vertical stacking (path, value+toggle, collapsible edit panel)
+   rather than .row-list-item's horizontal flex layout. */
+.unrec-props-block { margin-top: 12px; }
+
+.unrec-props-header {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-amber);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.unrec-props-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background-color: #090d14;
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 6px;
+}
+
+.unrec-props-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-white);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.unrec-props-value-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.unrec-props-value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-cyan);
+  word-break: break-all;
+  flex: 1 1 auto;
+}
+
+.unrec-props-readonly {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 4px;
+  padding: 6px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.unrec-props-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.unrec-props-edit.hidden { display: none; }
+
+.unrec-props-warning { font-size: 11px; }
+
 .val-list {
   padding-left: 18px;
   font-size: 12px;

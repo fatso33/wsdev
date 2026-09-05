@@ -386,6 +386,20 @@ export class StudioState {
   }
 
   /**
+   * Wave 4, §10.4: raw, unvalidated write-back for a top-level def key this
+   * build's registry doesn't recognise (see StudioValidator.findUnrecognisedDefPaths).
+   * Only ever called with a single top-level key — unrecognised-property
+   * detection is deliberately shallow at the widget-root level.
+   * @param {string} key
+   * @param {*} value
+   */
+  updateWidgetRawField(key, value) {
+    this.saveHistory('Edit Unrecognised Property');
+    this.widgetDef[key] = value;
+    this.notify('WIDGET_META_UPDATED', {});
+  }
+
+  /**
    * FDWS v1.18: sets the widget's baseTheme ('dark'|'light') and/or themeMode
    * ('auto'|'manual'). Flipping themeMode auto -> manual seeds every
    * component's (and the widget root's) style.themeOverride with whatever
