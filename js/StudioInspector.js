@@ -1589,13 +1589,17 @@ export class StudioInspector {
       });
 
       body.querySelector('#c-style-copy')?.addEventListener('click', () => {
-        this.state.copyComponentStyle(comp.id);
-        showToast(`Copied style from "${comp.label || comp.id}".`);
+        const stateKey = activeTab === 'state' ? stateCfg.name : undefined;
+        this.state.copyComponentStyle(comp.id, stateKey);
+        const stateLabel = stateKey ? ` (${stateCfg.tabLabel})` : '';
+        showToast(`Copied${stateLabel} style from "${comp.label || comp.id}".`);
         this.render();
       });
       body.querySelector('#c-style-paste')?.addEventListener('click', () => {
-        this.state.pasteStyleToComponent(comp.id);
-        showToast(`Pasted style onto "${comp.label || comp.id}".`);
+        const stateKey = activeTab === 'state' ? stateCfg.name : undefined;
+        this.state.pasteStyleToComponent(comp.id, stateKey);
+        const stateLabel = stateKey ? ` (${stateCfg.tabLabel})` : '';
+        showToast(`Pasted${stateLabel} style onto "${comp.label || comp.id}".`);
       });
 
       // FDWS v1.25: Normal/<state> tab toggle. Wave 2 Part B1: now re-renders
@@ -1645,6 +1649,9 @@ export class StudioInspector {
             this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, true, 'Reorder Rule');
             this.render();
           }
+        });
+        btn.addEventListener('dragend', () => {
+          body.querySelectorAll('[data-rule-chip]').forEach((chip) => { chip.style.opacity = ''; });
         });
       });
       body.querySelector('#c-styletab-addrule')?.addEventListener('click', () => {
