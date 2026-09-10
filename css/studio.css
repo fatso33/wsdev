@@ -2013,6 +2013,65 @@ body, html {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  position: relative;
+}
+
+/* 03: Override indicator — accent-colored left border for overridden fields in state/rule tabs */
+.prop-field.is-overridden {
+  border-left: 2px solid var(--accent-cyan, #00d8f6);
+  padding-left: 8px;
+  margin-left: -10px;
+}
+
+/* 03: Clear override button — hidden by default, revealed on hover */
+.override-clear-icon {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  background: none;
+  border: none;
+  color: var(--accent-cyan, #00d8f6);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  transition: opacity 0.15s;
+}
+
+.prop-field.is-overridden:hover .override-clear-icon {
+  opacity: 1;
+}
+
+.override-clear-icon:hover {
+  color: var(--accent-magenta, #ff2ee0);
+}
+
+/* 03: Group-level override indicator for sub-objects (Outline/Glow/Border Glow) */
+.prop-field.is-overridden-group {
+  border-left: 2px solid var(--accent-cyan, #00d8f6);
+  padding: 8px 8px 8px 8px;
+  margin-left: -10px;
+  margin-bottom: 4px;
+  background-color: rgba(0, 216, 246, 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.override-group-clear-icon {
+  background: none;
+  border: none;
+  color: var(--accent-cyan, #00d8f6);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  flex-shrink: 0;
+}
+
+.override-group-clear-icon:hover {
+  color: var(--accent-magenta, #ff2ee0);
 }
 
 .prop-custom-block {

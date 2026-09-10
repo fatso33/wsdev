@@ -1539,7 +1539,7 @@ export class StudioInspector {
 
         <div class="prop-row-2" style="margin:10px 0 12px;flex-wrap:wrap;gap:6px;">
           <button type="button" class="mode-toggle-btn ${activeTab === 'normal' ? 'active' : ''}" id="c-styletab-normal" style="flex:0 1 auto;">Normal</button>
-          ${stateCfg ? `<button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="c-styletab-state" style="flex:0 1 auto;">${stateCfg.tabLabel}</button>` : ''}
+          ${stateCfg ? `<button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="c-styletab-state" data-testid="style-state-tab-${stateCfg.name}" style="flex:0 1 auto;">${stateCfg.tabLabel}</button>` : ''}
           ${rules.map((r, i) => `<button type="button" class="mode-toggle-btn ${activeRuleIndex === i ? 'active' : ''}" data-rule-chip="${i}" style="flex:0 1 auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="Rule ${i + 1} of ${rules.length} — ${escapeHtmlAttr(summarizeCondition(r.when))} (first matching rule wins)">${i + 1}. ${escapeHtmlAttr(summarizeCondition(r.when))}</button>`).join('')}
           <button type="button" class="mode-toggle-btn" id="c-styletab-addrule" style="flex:0 1 auto;" title="Add a conditional style rule">+ Rule</button>
           <span style="width:1px;align-self:stretch;background:var(--studio-panel-border);margin:0 2px;"></span>
@@ -1566,7 +1566,7 @@ export class StudioInspector {
           </div>
           `;
         }).join('')}
-        ${activeTab === 'state' ? `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style while this component is ${stateCfg.tabLabel.toLowerCase()}. Dimmed fields are inherited from the Normal style — edit one to override it just for this state, or (for Outline/Glow/Border Glow) check its own "Clear (don't inherit)" box to turn it off regardless of Base.</div>` : ''}
+        ${activeTab === 'state' ? `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style while this component is ${stateCfg.tabLabel.toLowerCase()}. Fields with an accent left border are overridden for this state; click the 'x' icon to clear an override.</div>` : ''}
         ${activeTab === 'rule' ? `
         <div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style whenever this rule's condition is true — first matching rule wins over lower rules and over Normal. Dimmed fields are inherited from the Normal style, same as a state.</div>
         <div class="prop-section-subtitle" style="margin-top:0;">Condition <span class="prop-hint" title="Same condition grammar as Visible When — a rule here only changes the STYLE, never whether the component shows at all.">ⓘ</span></div>
@@ -3491,6 +3491,7 @@ export class StudioInspector {
     if (target.kind === 'base') return fields;
     return fields.map((f) => ({
       ...f,
+      originalPath: f.path,  // 03: Store original path for testid
       path: this.remapAppearancePath(f.path, target),
       showWhen: f.showWhen ? { ...f.showWhen, path: this.remapAppearancePath(f.showWhen.path, target) } : undefined,
       inheritedValue: this.getFieldValue(comp, f.path)
@@ -3560,62 +3561,61 @@ export class StudioInspector {
       subtitle.textContent = groupName;
       mount.appendChild(subtitle);
       const groupMount = mount.appendChild(document.createElement('div'));
-      // Separate child mounts: renderRegistryFields() clears its own mount's
-      // innerHTML on entry, which would otherwise wipe out the clear-toggle
-      // checkboxes appended before it if they shared one mount.
+
+      // 03: Add group-level override indicator for sub-objects (Outline/Glow/Border Glow)
       const isOverridable = target.kind === 'state' || target.kind === 'rule';
       if (isOverridable) {
-        const togglesMount = groupMount.appendChild(document.createElement('div'));
-        (CLEARABLE_SUB_OBJECTS[groupName] || []).forEach(([basePath, label]) => {
-          this.renderClearInheritedToggle(comp, basePath, label, target, togglesMount);
+        const subObjsForGroup = CLEARABLE_SUB_OBJECTS[groupName] || [];
+        const overriddenSubObjs = [];
+
+        subObjsForGroup.forEach(([basePath, label, leafPaths]) => {
+          const targetPath = this.remapAppearancePath(basePath, target);
+          const isOverridden = this.getFieldValue(comp, targetPath) !== undefined;
+          if (isOverridden) {
+            overriddenSubObjs.push({ basePath, label, targetPath, leafPaths });
+          }
+        });
+
+        // Render group-level override indicators
+        overriddenSubObjs.forEach(({ basePath, label, targetPath, leafPaths }) => {
+          const groupIndicator = document.createElement('div');
+          groupIndicator.className = 'prop-field is-overridden-group';
+          groupIndicator.setAttribute('data-testid', `override-indicator-group-${basePath.replace(/\./g, '-')}`);
+
+          const labelSpan = document.createElement('span');
+          labelSpan.style.fontWeight = '600';
+          labelSpan.style.fontSize = '10px';
+          labelSpan.style.color = 'var(--text-label)';
+          labelSpan.textContent = `${label}`;
+
+          const clearBtn = document.createElement('button');
+          clearBtn.type = 'button';
+          clearBtn.className = 'override-group-clear-icon';
+          clearBtn.setAttribute('data-testid', `clear-override-group-${basePath.replace(/\./g, '-')}`);
+          clearBtn.innerHTML = '✕';
+          clearBtn.title = `Clear ${label} override`;
+          clearBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.commitField(comp, targetPath, undefined);
+          });
+
+          groupIndicator.appendChild(labelSpan);
+          groupIndicator.appendChild(clearBtn);
+          groupMount.appendChild(groupIndicator);
         });
       }
+
       const fieldsMount = groupMount.appendChild(document.createElement('div'));
       if (groupFields.length) {
-        this.renderRegistryFields(comp, fieldsMount, this.retargetAppearanceFields(comp, groupFields, target));
+        this.renderRegistryFields(comp, fieldsMount, this.retargetAppearanceFields(comp, groupFields, target), target);
       }
       if (target.kind === 'base' && (groupName === 'Typography' || groupName === 'Border' || groupName === 'Background')) {
         this.renderBaseThemeAwareAppearanceFields(comp, groupName, groupMount.appendChild(document.createElement('div')), baseThemeCtx);
       }
-      if (isOverridable) {
-        (CLEARABLE_SUB_OBJECTS[groupName] || []).forEach(([basePath, , leafPaths]) => {
-          this.applyClearedFieldState(comp, basePath, leafPaths, target, fieldsMount);
-        });
-      }
     });
   }
 
-  /** Wave 2 Part A's per-sub-object "Clear (don't inherit)" checkbox — writes the V24 `null` sentinel. State/Rule targets only; Base has nothing to inherit from. */
-  renderClearInheritedToggle(comp, basePath, label, target, mount) {
-    const targetPath = this.remapAppearancePath(basePath, target);
-    const isCleared = this.getFieldValue(comp, targetPath) === null;
-    const id = `${this.fieldDomId(targetPath)}-clear`;
-    const div = document.createElement('div');
-    div.className = 'prop-field';
-    div.innerHTML = `
-      <label style="display:flex;align-items:center;gap:6px;" title="Turns ${escapeHtmlAttr(label.toLowerCase())} off for this state regardless of what Base sets — different from leaving these blank, which inherits Base's ${escapeHtmlAttr(label.toLowerCase())}.">
-        <input type="checkbox" id="${id}" ${isCleared ? 'checked' : ''} /> ${escapeHtmlAttr(label)}: Clear (don't inherit)
-      </label>
-    `;
-    mount.appendChild(div);
-    div.querySelector(`#${id}`)?.addEventListener('change', (e) => {
-      this.commitField(comp, targetPath, e.target.checked ? null : undefined);
-    });
-  }
-
-  /** Disables+dims a cleared sub-object's own leaf inputs (and color-pick swatch), matching the old hand-coded state tab's behavior. */
-  applyClearedFieldState(comp, basePath, leafPaths, target, mount) {
-    const targetPath = this.remapAppearancePath(basePath, target);
-    if (this.getFieldValue(comp, targetPath) !== null) return;
-    leafPaths.forEach((p) => {
-      const retargeted = this.remapAppearancePath(p, target);
-      const id = this.fieldDomId(retargeted);
-      const el = mount.querySelector(`#${id}`);
-      const pickEl = mount.querySelector(`#${id}-pick`);
-      if (el) { el.disabled = true; el.style.opacity = '0.4'; }
-      if (pickEl) pickEl.disabled = true;
-    });
-  }
 
   /**
    * Wave 2 Part B1 (widened FDWS v1.29): the Base-tab color fields kept out
@@ -3820,7 +3820,7 @@ export class StudioInspector {
    * dedicated hand-built panels elsewhere in this file, and rendering them
    * again here would duplicate those, not replace them.
    */
-  renderRegistryFields(comp, mount, fields) {
+  renderRegistryFields(comp, mount, fields, target) {
     mount.innerHTML = '';
     fields.forEach((field) => {
       if (field.control === null) return; // deprecated/hidden, e.g. props.align
@@ -3840,6 +3840,9 @@ export class StudioInspector {
       // again the moment you left Full).
       const raw = this.getFieldValue(comp, field.path);
       const isAuthored = raw !== undefined && raw !== field.default;
+      // 03: Override indicator — check if this field is overridden in a state/rule tab
+      const isOverridable = target && (target.kind === 'state' || target.kind === 'rule');
+      const isOverridden = isOverridable && raw !== undefined;
 
       // A showWhen-false field is normally skipped entirely, but a
       // GENUINELY AUTHORED value (raw, stored, and different from the
@@ -3857,6 +3860,17 @@ export class StudioInspector {
       }
       const wrap = document.createElement('div');
       wrap.className = 'prop-field';
+      // 03: Add data-testid for style fields to support test assertions (use originalPath if available)
+      const testidPath = field.originalPath || field.path;
+      if (testidPath.startsWith('style.')) {
+        // Remove 'style.' prefix from the path for the testid
+        const testidSuffix = testidPath.substring(6); // 'style.'.length === 6
+        wrap.setAttribute('data-testid', `style-field-${testidSuffix}`);
+      }
+      // 03: Add is-overridden class
+      if (isOverridden) {
+        wrap.classList.add('is-overridden');
+      }
       // Part 2: 'advanced' fields stay Full-only, unchanged. A 'simple' field
       // not in the curated Guided allowlist (field.guided) is Build+Full —
       // hidden only in Guided. A curated Guided field gets no data-tier
@@ -3885,6 +3899,21 @@ export class StudioInspector {
         renderer(comp, field, fieldMount);
       } else {
         renderer(comp, field, wrap);
+      }
+      // 03: Add clear icon after renderer has populated the wrap (so it doesn't get overwritten)
+      if (isOverridden) {
+        const clearIcon = document.createElement('button');
+        clearIcon.type = 'button';
+        clearIcon.className = 'override-clear-icon';
+        clearIcon.setAttribute('data-testid', 'clear-override');
+        clearIcon.innerHTML = '✕';
+        clearIcon.title = 'Clear this override';
+        clearIcon.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.commitField(comp, field.path, undefined);
+        });
+        wrap.appendChild(clearIcon);
       }
     });
   }
@@ -3929,7 +3958,7 @@ export class StudioInspector {
     const { value, dimmed } = this.resolveEffectiveValue(comp, field);
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <input type="${inputType}" id="${id}" class="prop-input" style="${dimmed ? 'opacity:0.55;' : ''}" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}" />
+      <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}" />
     `;
     mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
       const raw = e.target.value;
@@ -3943,7 +3972,7 @@ export class StudioInspector {
     const id = this.fieldDomId(field.path);
     const { value, dimmed } = this.resolveEffectiveValue(comp, field);
     mount.innerHTML = `
-      <label title="${escapeHtmlAttr(field.tooltip || '')}" style="display:flex;align-items:center;gap:6px;${dimmed ? 'opacity:0.55;' : ''}">
+      <label title="${escapeHtmlAttr(field.tooltip || '')}" style="display:flex;align-items:center;gap:6px;">
         <input type="checkbox" id="${id}" ${value ? 'checked' : ''} /> ${escapeHtmlAttr(label)}
       </label>
     `;
@@ -3964,7 +3993,7 @@ export class StudioInspector {
     }).join('');
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <select id="${id}" class="prop-select" style="${dimmed ? 'opacity:0.55;' : ''}">${optionHtml}</select>
+      <select id="${id}" class="prop-select">${optionHtml}</select>
     `;
     mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
       // Options are always rendered from string/number literals above (never
@@ -3985,7 +4014,7 @@ export class StudioInspector {
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
       <div class="color-picker-wrap">
         <input type="color" id="${id}-pick" value="${this.toHexColor(value) || '#000000'}" />
-        <input type="text" id="${id}" class="prop-input" style="${dimmed ? 'opacity:0.55;' : ''}" value="${escapeHtmlAttr(value || '')}" placeholder="${dimmed ? 'inherit' : ''}" />
+        <input type="text" id="${id}" class="prop-input" value="${escapeHtmlAttr(value || '')}" placeholder="" />
       </div>
     `;
     this.wireColorPair(mount, `${id}-pick`, id, (v) => this.commitField(comp, field.path, v));
@@ -4037,7 +4066,7 @@ export class StudioInspector {
     const assets = this.state.widgetDef.assets || [];
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <select id="${id}" class="prop-select" style="${dimmed ? 'opacity:0.55;' : ''}">
+      <select id="${id}" class="prop-select">
         <option value="" ${!value ? 'selected' : ''}>None</option>
         ${assets.map((a) => `<option value="${escapeHtmlAttr(a.id)}" ${value === a.id ? 'selected' : ''}>${escapeHtmlAttr(a.id)} (${escapeHtmlAttr(a.mimeType)})</option>`).join('')}
       </select>
