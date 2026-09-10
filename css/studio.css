@@ -32,7 +32,6 @@
   --inspector-spacing-md: 12px;
   --inspector-spacing-lg: 16px;
   --inspector-font-size-label: 12px;
-  --inspector-font-size-heading: 11px;
   --inspector-border-width: 1px;
   --inspector-border-color: var(--studio-panel-border);
   --inspector-focus-ring: 1px solid var(--accent-cyan);
@@ -2007,44 +2006,6 @@ body, html {
 
 .inspector-panel.active {
   display: flex;
-}
-
-/* Tab sections (non-collapsible content) */
-.inspector-tab-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--inspector-spacing-md);
-}
-
-.tab-section-header {
-  display: flex;
-  align-items: center;
-  gap: var(--inspector-spacing-md);
-  padding-bottom: var(--inspector-spacing-sm);
-  border-bottom: var(--inspector-border-width) solid var(--inspector-border-color);
-}
-
-.section-title {
-  font-family: var(--font-mono);
-  font-size: var(--inspector-font-size-heading);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--accent-cyan);
-  text-transform: uppercase;
-}
-
-.section-badge {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--text-dim);
-  margin-left: auto;
-}
-
-.tab-section-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--inspector-spacing-md);
 }
 
 /* Form Controls */

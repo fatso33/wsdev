@@ -1131,27 +1131,6 @@ export class StudioInspector {
   // --- COMPONENT INSPECTOR ---
   // ==========================================
 
-  // Build a section in a tab without accordion wrapper (no collapsible header)
-  buildTabSection(title, renderFn, badge) {
-    const section = document.createElement('div');
-    section.className = 'inspector-tab-section';
-    if (badge) {
-      section.innerHTML = `
-        <div class="tab-section-header">
-          <span class="section-title">${title}</span>
-          <span class="section-badge">${badge}</span>
-        </div>
-      `;
-    } else {
-      section.innerHTML = `<div class="tab-section-header"><span class="section-title">${title}</span></div>`;
-    }
-    const body = document.createElement('div');
-    body.className = 'tab-section-body';
-    renderFn(body);
-    section.appendChild(body);
-    return section;
-  }
-
   buildInspectorTabShell() {
     const tabBar = document.createElement('div');
     tabBar.className = 'inspector-tab-bar';
