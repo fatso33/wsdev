@@ -194,7 +194,9 @@ export class StudioState {
     // Widget Studio 2.0, Phase 3: one-slot style clipboard (session-only, not
     // persisted) — copy one component's full `style` object, paste it onto
     // another, or onto every multi-selected component at once.
+    // Ticket 04: copiedStateKey tracks which state key was copied (null for base style).
     this.copiedStyle = null;
+    this.copiedStateKey = null;
 
     // Undo / Redo Stacks
     this.undoStack = [];
@@ -623,12 +625,24 @@ export class StudioState {
    * BaseComponent.applyStyles() cascades) onto the session-only clipboard.
    * Deep-cloned so later edits to the source component can't retroactively
    * change what a subsequent paste applies.
+   * Ticket 04: optional stateKey parameter — when provided (and not 'normal'),
+   * copies only that state's style override instead of the whole tree.
    * @param {string} id
+   * @param {string} [stateKey] - optional state key; 'normal' or omitted = base style
    */
-  copyComponentStyle(id) {
+  copyComponentStyle(id, stateKey) {
     const comp = this.getComponent(id);
     if (!comp) return;
-    this.copiedStyle = JSON.parse(JSON.stringify(comp.style || {}));
+
+    if (stateKey && stateKey !== 'normal') {
+      // Copy only the state-specific style
+      this.copiedStyle = JSON.parse(JSON.stringify(comp.style?.states?.[stateKey] || {}));
+      this.copiedStateKey = stateKey;
+    } else {
+      // Copy the full style tree
+      this.copiedStyle = JSON.parse(JSON.stringify(comp.style || {}));
+      this.copiedStateKey = null;
+    }
     this.notify('STYLE_CLIPBOARD_UPDATED', {});
   }
 
@@ -637,11 +651,31 @@ export class StudioState {
    * existing style (unlike applyStyleToSelection's per-field merge — a
    * paste means "make this look exactly like the copied one," not "layer
    * one more field on top"). One undo step. No-ops if nothing's copied yet.
+   * Ticket 04: optional stateKey parameter — when provided (and not 'normal'),
+   * pastes only into that state's style override, leaving the target's base
+   * style and other states untouched. Creates the states object/key if needed.
    * @param {string} id
+   * @param {string} [stateKey] - optional state key; 'normal' or omitted = base style
    */
-  pasteStyleToComponent(id) {
+  pasteStyleToComponent(id, stateKey) {
     if (!this.copiedStyle) return;
-    this.updateComponent(id, { style: JSON.parse(JSON.stringify(this.copiedStyle)) }, true, 'Paste Style');
+
+    if (stateKey && stateKey !== 'normal') {
+      // Paste only into the state-specific style
+      const comp = this.getComponent(id);
+      if (!comp) return;
+
+      this.saveHistory('Paste Style');
+      if (!comp.style) comp.style = {};
+      if (!comp.style.states) comp.style.states = {};
+      comp.style.states[stateKey] = JSON.parse(JSON.stringify(this.copiedStyle));
+
+      StudioValidator.syncCapabilities(this.widgetDef);
+      this.notify('COMPONENT_UPDATED', { componentId: id, component: comp });
+    } else {
+      // Paste the full style tree
+      this.updateComponent(id, { style: JSON.parse(JSON.stringify(this.copiedStyle)) }, true, 'Paste Style');
+    }
   }
 
   /**
