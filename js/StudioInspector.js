@@ -587,8 +587,13 @@ export class StudioInspector {
     this.container.appendChild(header);
     header.querySelector('#btn-full-json')?.addEventListener('click', () => this.openFullJsonPanel());
 
+    // Build tab shell (reusing ticket 01's mechanism and design tokens)
+    const { tabBar, panelsContainer, panels } = this.buildInspectorTabShell();
+    this.container.appendChild(tabBar);
+    this.container.appendChild(panelsContainer);
+
     // Group 1: Metadata & Identification
-    this.container.appendChild(this.buildAccordionGroup('METADATA & SPECIFICATION', true, (body) => {
+    panels['general'].appendChild(this.buildAccordionGroup('METADATA & SPECIFICATION', true, (body) => {
       body.innerHTML = `
         <div class="prop-field">
           <label>Display Name (Title)</label>
@@ -646,7 +651,7 @@ export class StudioInspector {
     }));
 
     // Group 2: Grid Layout & Sizing
-    this.container.appendChild(this.buildAccordionGroup('GRID & DIMENSIONS', false, (body) => {
+    panels['general'].appendChild(this.buildAccordionGroup('GRID & DIMENSIONS', false, (body) => {
       const layout = def.layout || {};
       const grid = layout.grid || { columns: 12, rows: 6 };
 
@@ -710,7 +715,7 @@ export class StudioInspector {
     }, undefined, def.layout || {}));
 
     // Group 3: Widget Canvas Appearance & Border
-    this.container.appendChild(this.buildAccordionGroup('CANVAS APPEARANCE & BORDER', false, (body) => {
+    panels['style'].appendChild(this.buildAccordionGroup('CANVAS APPEARANCE & BORDER', false, (body) => {
       const style = def.style || {};
       const border = style.border || { width: 1, color: '#1f2937', radius: 10 };
       const bg = style.background || { type: 'color', color: '#0b0f17' };
@@ -835,7 +840,7 @@ export class StudioInspector {
     // Group 3.5: Theme (FDWS v1.18) — which theme style.* was authored for,
     // and whether the OTHER theme is auto-derived (default) or manually
     // authored via each component's style.themeOverride.
-    this.container.appendChild(this.buildAccordionGroup('THEME', false, (body) => {
+    panels['style'].appendChild(this.buildAccordionGroup('THEME', false, (body) => {
       const baseTheme = def.baseTheme === 'light' ? 'light' : 'dark';
       const themeMode = def.themeMode === 'manual' ? 'manual' : 'auto';
       const otherTheme = baseTheme === 'light' ? 'dark' : 'light';
@@ -875,10 +880,17 @@ export class StudioInspector {
       });
     }, undefined, { baseTheme: def.baseTheme, themeMode: def.themeMode }));
 
+    // Add empty Data tab message
+    const dataEmpty = document.createElement('div');
+    dataEmpty.className = 'empty-tree-notice';
+    dataEmpty.style.padding = '16px';
+    dataEmpty.textContent = 'No properties available';
+    panels['data'].appendChild(dataEmpty);
+
     // Group 3b: FDWS v1.27 (1.0-A) — Deck Events this widget declares, with the
     // binding each one should default to. Authoring UI ships with the spec
     // field, per the standing rule that no FDWS addition goes out JSON-only.
-    this.container.appendChild(this.buildAccordionGroup('DECK EVENTS (v1.27)', false, (body) => {
+    panels['events'].appendChild(this.buildAccordionGroup('DECK EVENTS (v1.27)', false, (body) => {
       const events = def.deckEvents || [];
       // Part 2, Slice 3: wholly Full-tier (declaring custom Deck Events for
       // other authors' profile mapping is advanced work, not build-a-widget
@@ -1012,7 +1024,7 @@ export class StudioInspector {
     }, undefined, def.deckEvents || []));
 
     // Group 4: Capabilities Summary (§11 Rule 5)
-    this.container.appendChild(this.buildAccordionGroup('CAPABILITIES MATRIX (§11)', false, (body) => {
+    panels['events'].appendChild(this.buildAccordionGroup('CAPABILITIES MATRIX (§11)', false, (body) => {
       const caps = def.capabilities || { readSimVars: [], writeEvents: [] };
       // Part 2, Slice 3: wholly Full-tier — diagnostic/export-time summary,
       // not build-time work. One wrap around the whole section, same
@@ -1048,10 +1060,10 @@ export class StudioInspector {
     // doesn't recognise — no existing section is a "relevant group" for that
     // (we can't know what it's for), so it gets its own, appended only when
     // non-empty. No data-tier — a data-safety guarantee, not a tier-hideable
-    // convenience.
+    // convenience. (Appended to general tab to keep unrecognised metadata together)
     const unrecognisedDef = findUnrecognisedDefPaths(def);
     if (unrecognisedDef.length > 0) {
-      this.container.appendChild(this.buildAccordionGroup('UNRECOGNISED PROPERTIES', true, (body) => {
+      panels['general'].appendChild(this.buildAccordionGroup('UNRECOGNISED PROPERTIES', true, (body) => {
         const block = this.renderUnrecognisedPropertiesBlock(unrecognisedDef, def.fdws, 'wroot', (path, value) => {
           this.state.updateWidgetRawField(path, value);
         });

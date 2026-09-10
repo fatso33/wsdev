@@ -20,3 +20,11 @@ test('selecting a component shows exclusive General/Style/Data/Events tabs', asy
   await expect(page.getByTestId('inspector-panel-style')).toBeVisible();
   await expect(page.getByTestId('inspector-panel-general')).toBeHidden();
 });
+
+test('widget-root selection shows an empty Data tab', async ({ page }) => {
+  await page.goto('/');
+  // A fresh Studio session with nothing added/selected is already in the
+  // widget-root context — no setup needed beyond navigating to the app.
+  await page.getByTestId('inspector-tab-data').click();
+  await expect(page.getByTestId('inspector-panel-data')).toContainText('No properties available');
+});
