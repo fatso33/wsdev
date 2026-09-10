@@ -2023,12 +2023,20 @@ body, html {
   margin-left: -10px;
 }
 
+/* 03: Reserve space for clear override icon in input fields */
+.prop-field.is-overridden .prop-input,
+.prop-field.is-overridden .prop-select,
+.prop-field.is-overridden .color-picker-wrap {
+  padding-right: 30px;
+}
+
 /* 03: Clear override button — hidden by default, revealed on hover */
 .override-clear-icon {
   position: absolute;
   right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 6px;
+  top: auto;
+  transform: none;
   opacity: 0;
   background: none;
   border: none;

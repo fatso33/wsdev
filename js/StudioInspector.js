@@ -3564,6 +3564,7 @@ export class StudioInspector {
 
       // 03: Add group-level override indicator for sub-objects (Outline/Glow/Border Glow)
       const isOverridable = target.kind === 'state' || target.kind === 'rule';
+      const groupCoveredPaths = new Set(); // Track paths covered by group-level indicators
       if (isOverridable) {
         const subObjsForGroup = CLEARABLE_SUB_OBJECTS[groupName] || [];
         const overriddenSubObjs = [];
@@ -3573,6 +3574,11 @@ export class StudioInspector {
           const isOverridden = this.getFieldValue(comp, targetPath) !== undefined;
           if (isOverridden) {
             overriddenSubObjs.push({ basePath, label, targetPath, leafPaths });
+            // Map leaf paths to their remapped versions and add to covered set
+            leafPaths.forEach((leafPath) => {
+              const remappedLeaf = this.remapAppearancePath(leafPath, target);
+              groupCoveredPaths.add(remappedLeaf);
+            });
           }
         });
 
@@ -3608,7 +3614,7 @@ export class StudioInspector {
 
       const fieldsMount = groupMount.appendChild(document.createElement('div'));
       if (groupFields.length) {
-        this.renderRegistryFields(comp, fieldsMount, this.retargetAppearanceFields(comp, groupFields, target), target);
+        this.renderRegistryFields(comp, fieldsMount, this.retargetAppearanceFields(comp, groupFields, target), target, groupCoveredPaths);
       }
       if (target.kind === 'base' && (groupName === 'Typography' || groupName === 'Border' || groupName === 'Background')) {
         this.renderBaseThemeAwareAppearanceFields(comp, groupName, groupMount.appendChild(document.createElement('div')), baseThemeCtx);
@@ -3820,7 +3826,7 @@ export class StudioInspector {
    * dedicated hand-built panels elsewhere in this file, and rendering them
    * again here would duplicate those, not replace them.
    */
-  renderRegistryFields(comp, mount, fields, target) {
+  renderRegistryFields(comp, mount, fields, target, groupCoveredPaths) {
     mount.innerHTML = '';
     fields.forEach((field) => {
       if (field.control === null) return; // deprecated/hidden, e.g. props.align
@@ -3841,8 +3847,10 @@ export class StudioInspector {
       const raw = this.getFieldValue(comp, field.path);
       const isAuthored = raw !== undefined && raw !== field.default;
       // 03: Override indicator — check if this field is overridden in a state/rule tab
+      // BUT suppress if this field is covered by a group-level override indicator
       const isOverridable = target && (target.kind === 'state' || target.kind === 'rule');
-      const isOverridden = isOverridable && raw !== undefined;
+      const isCoveredByGroup = groupCoveredPaths && groupCoveredPaths.has(field.path);
+      const isOverridden = isOverridable && raw !== undefined && !isCoveredByGroup;
 
       // A showWhen-false field is normally skipped entirely, but a
       // GENUINELY AUTHORED value (raw, stored, and different from the
@@ -3955,7 +3963,7 @@ export class StudioInspector {
   renderPlainField(comp, field, mount, inputType) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
-    const { value, dimmed } = this.resolveEffectiveValue(comp, field);
+    const { value } = this.resolveEffectiveValue(comp, field);
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
       <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}" />
@@ -3970,7 +3978,7 @@ export class StudioInspector {
   renderCheckboxField(comp, field, mount) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
-    const { value, dimmed } = this.resolveEffectiveValue(comp, field);
+    const { value } = this.resolveEffectiveValue(comp, field);
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}" style="display:flex;align-items:center;gap:6px;">
         <input type="checkbox" id="${id}" ${value ? 'checked' : ''} /> ${escapeHtmlAttr(label)}
@@ -3982,7 +3990,7 @@ export class StudioInspector {
   renderSelectField(comp, field, mount) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
-    const { value, dimmed } = this.resolveEffectiveValue(comp, field);
+    const { value } = this.resolveEffectiveValue(comp, field);
     const rawOptions = field.optionsRef === 'VALUE_FORMATS' ? REGISTRY_VALUE_FORMATS : (field.options || []);
     const optionHtml = rawOptions.map((opt) => {
       const optVal = (opt && typeof opt === 'object') ? opt.value : opt;
@@ -4009,7 +4017,7 @@ export class StudioInspector {
   renderColorField(comp, field, mount) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
-    const { value, dimmed } = this.resolveEffectiveValue(comp, field);
+    const { value } = this.resolveEffectiveValue(comp, field);
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
       <div class="color-picker-wrap">
@@ -4062,7 +4070,7 @@ export class StudioInspector {
   renderAssetField(comp, field, mount) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
-    const { value, dimmed } = this.resolveEffectiveValue(comp, field);
+    const { value } = this.resolveEffectiveValue(comp, field);
     const assets = this.state.widgetDef.assets || [];
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
