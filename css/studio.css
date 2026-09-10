@@ -1922,6 +1922,65 @@ body, html {
   display: none;
 }
 
+/* Inspector Tab Shell (t01: Per-component tab shell + design tokens)
+   Replaces accordion sections with a persistent 4-tab layout:
+   General, Style, Data, Events */
+
+.inspector-tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--studio-panel-border);
+  padding: 0;
+  background-color: var(--studio-panel-bg);
+}
+
+.inspector-tab-btn {
+  flex: 1;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s, background-color 0.12s;
+  user-select: none;
+}
+
+.inspector-tab-btn:hover {
+  color: var(--text-white);
+  background-color: rgba(0, 216, 246, 0.05);
+}
+
+.inspector-tab-btn.active {
+  color: var(--accent-cyan);
+  border-bottom-color: var(--accent-cyan);
+}
+
+.inspector-panels {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.inspector-panel {
+  display: none;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 14px;
+  gap: 10px;
+  flex-direction: column;
+}
+
+.inspector-panel.active {
+  display: flex;
+}
+
 /* Form Controls */
 .prop-field {
   display: flex;

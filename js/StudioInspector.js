@@ -216,6 +216,12 @@ export class StudioInspector {
     // persists-across-renders pattern as expandedGroups/tierOverrideGroups.
     this.jsonViewOpenTitles = new Set();
 
+    // t01: Inspector tab shell — outer tab (General/Style/Data/Events)
+    // persists across widget selection, inner state/rule sub-tab resets to
+    // Normal on new selection.
+    this.activeInspectorTab = 'general';
+    this.activeStateRuleTab = 'normal';
+
     this.initDOM();
     this.render();
 
@@ -1126,15 +1132,66 @@ export class StudioInspector {
   // ==========================================
   // --- COMPONENT INSPECTOR ---
   // ==========================================
+
+  // Mapping of accordion group titles to their target tab
+  getSectionTabTarget(title) {
+    const tabMap = {
+      'LAYOUT & LAYERING': 'general',
+      'APPEARANCE': 'style',
+      'DATA & CONTENT': 'data',
+      'BEHAVIOR': 'events',
+      'DECK EVENTS (v1.27)': 'events',
+      'CAPABILITIES MATRIX (§11)': 'events',
+      'UNRECOGNISED PROPERTIES': 'general', // fallback tab
+    };
+    return tabMap[title] || 'general';
+  }
+
+  buildInspectorTabShell() {
+    const tabBar = document.createElement('div');
+    tabBar.className = 'inspector-tab-bar';
+
+    const tabs = ['general', 'style', 'data', 'events'];
+    const tabLabels = { general: 'General', style: 'Style', data: 'Data', events: 'Events' };
+    const panels = {};
+
+    tabs.forEach((tabName) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `inspector-tab-btn ${tabName === this.activeInspectorTab ? 'active' : ''}`;
+      btn.textContent = tabLabels[tabName];
+      btn.setAttribute('data-testid', `inspector-tab-${tabName}`);
+      btn.addEventListener('click', () => {
+        this.activeInspectorTab = tabName;
+        // Reset state/rule sub-tab when switching main tabs
+        if (tabName !== 'style') {
+          this.activeStateRuleTab = 'normal';
+        }
+        this.render();
+      });
+      tabBar.appendChild(btn);
+    });
+
+    const panelsContainer = document.createElement('div');
+    panelsContainer.className = 'inspector-panels';
+
+    tabs.forEach((tabName) => {
+      const panel = document.createElement('div');
+      panel.className = `inspector-panel ${tabName === this.activeInspectorTab ? 'active' : ''}`;
+      panel.setAttribute('data-testid', `inspector-panel-${tabName}`);
+      panelsContainer.appendChild(panel);
+      panels[tabName] = panel;
+    });
+
+    return { tabBar, panelsContainer, panels };
+  }
+
   renderComponentInspector(comp) {
-    // Which Appearance style tab ("normal" vs the one state name this
-    // component type supports) is showing — transient UI state, not part of
-    // the widget, so it's tracked on the inspector instance itself and reset
-    // back to "normal" whenever a different component gets selected (this
-    // method re-runs on every keystroke within the SAME component too, so
-    // this can't just default every time — see below).
+    // t01: Reset inner state/rule tab when component changes
     if (this._styleTabCompId !== comp.id) {
       this._styleTabCompId = comp.id;
+      this.activeStateRuleTab = 'normal';
+      // Legacy style tabs — kept for backward compatibility
       this._styleTab = 'normal';
       // Wave 2 Part B2: which rule chip (by index into style.rules[]) is
       // active, if any — takes precedence over _styleTab when set. Reset
@@ -1169,6 +1226,11 @@ export class StudioInspector {
       this.state.clearSelection();
     });
 
+    // t01: Build tab shell
+    const { tabBar, panelsContainer, panels } = this.buildInspectorTabShell();
+    this.container.appendChild(tabBar);
+    this.container.appendChild(panelsContainer);
+
     // 1. Layout & Layering — Widget Studio 2.0, Phase 6 merges the old
     // "Identification & Layering" + "Sub-Grid Geometry" accordions into one
     // group (an author thinks of "where/how big is this and how does it
@@ -1176,7 +1238,7 @@ export class StudioInspector {
     // -wiring code is left untouched below, just wrapped in its own IIFE so
     // it can render into its own sub-`body` div instead of the group's outer
     // one — see the divider between them.
-    this.container.appendChild(this.buildAccordionGroup('LAYOUT & LAYERING', true, (outerBody) => {
+    panels['general'].appendChild(this.buildAccordionGroup('LAYOUT & LAYERING', true, (outerBody) => {
     ((body) => {
       const layer = comp.layer || {};
       const contentPath = CONTENT_FIELD_BY_TYPE[comp.type];
@@ -1352,8 +1414,9 @@ export class StudioInspector {
     // unclassified component-root key, if any.
     const unrecognised = findUnrecognisedComponentPaths(comp);
     const commitUnrecognised = (path, value) => this.commitField(comp, path, value);
-    this.container.appendChild(appearanceGroup);
-    this.container.appendChild(dataGroup);
+    // t01: Append to appropriate tab panels
+    panels['style'].appendChild(appearanceGroup);
+    panels['data'].appendChild(dataGroup);
     const appearanceBody = appearanceGroup.querySelector('.inspector-group-body');
     const dataBody = dataGroup.querySelector('.inspector-group-body');
 
@@ -2152,7 +2215,8 @@ export class StudioInspector {
     // sections are adjacent in the original file order, so this group merges
     // via simple IIFE wrapping (like Layout & Layering above) rather than the
     // pre-created-shell technique Appearance/Data & Content needed.
-    this.container.appendChild(this.buildAccordionGroup('BEHAVIOR', false, (outerBody) => {
+    // t01: Append to events tab panel
+    panels['events'].appendChild(this.buildAccordionGroup('BEHAVIOR', false, (outerBody) => {
     // 6. Interaction Handlers (interactions[])
     ((body) => {
       const interactions = comp.interactions || [];
