@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reorderRules } from '../js/InspectorLogic.js';
+import { reorderRules, summarizeCondition } from '../js/InspectorLogic.js';
 
 describe('reorderRules', () => {
   it('moves a rule from one index to another, preserving the rest in order', () => {
@@ -68,5 +68,92 @@ describe('reorderRules', () => {
     const result = reorderRules(rules, 2, 0);
     expect(result.map((r) => r.when.state)).toEqual(['speed', 'temp', 'pressure']);
     expect(result[0].style.typography.color).toEqual('#00f');
+  });
+});
+
+describe('summarizeCondition', () => {
+  it('renders a single leaf condition in plain language', () => {
+    const when = { state: 'fuel', lt: 10 };
+    const summary = summarizeCondition(when);
+    expect(summary).toContain('fuel');
+    expect(summary).toContain('10');
+  });
+
+  it('renders an empty/unset condition as a clear empty-state string', () => {
+    expect(summarizeCondition(null)).toBeTruthy();
+    expect(summarizeCondition(undefined)).toBeTruthy();
+    expect(summarizeCondition({})).toBeTruthy();
+  });
+
+  it('renders an AND group with multiple leaves', () => {
+    const when = {
+      allOf: [
+        { state: 'fuel', lt: 10 },
+        { state: 'engineRunning', equals: true }
+      ]
+    };
+    const summary = summarizeCondition(when);
+    expect(summary).toContain('fuel');
+    expect(summary).toContain('10');
+    expect(summary).toContain('engineRunning');
+    expect(summary).toContain('AND');
+  });
+
+  it('renders an OR group with multiple leaves', () => {
+    const when = {
+      anyOf: [
+        { state: 'altitude', gte: 10000 },
+        { state: 'speed', gt: 100 }
+      ]
+    };
+    const summary = summarizeCondition(when);
+    expect(summary).toContain('altitude');
+    expect(summary).toContain('10000');
+    expect(summary).toContain('speed');
+    expect(summary).toContain('100');
+    expect(summary).toContain('OR');
+  });
+
+  it('handles different operators with correct symbols', () => {
+    expect(summarizeCondition({ state: 'x', equals: 5 })).toContain('=');
+    expect(summarizeCondition({ state: 'x', notEquals: 5 })).toContain('≠');
+    expect(summarizeCondition({ state: 'x', lt: 5 })).toContain('<');
+    expect(summarizeCondition({ state: 'x', lte: 5 })).toContain('≤');
+    expect(summarizeCondition({ state: 'x', gt: 5 })).toContain('>');
+    expect(summarizeCondition({ state: 'x', gte: 5 })).toContain('≥');
+  });
+
+  it('handles between operator with range', () => {
+    const when = { state: 'temp', between: [50, 100] };
+    const summary = summarizeCondition(when);
+    expect(summary).toContain('temp');
+    expect(summary).toContain('50');
+    expect(summary).toContain('100');
+  });
+
+  it('handles a leaf with no operator set', () => {
+    const when = { state: 'myVar', equals: '' };
+    const summary = summarizeCondition(when);
+    expect(summary).toContain('myVar');
+  });
+
+  it('handles nested groups recursively', () => {
+    const when = {
+      allOf: [
+        { state: 'fuel', lt: 10 },
+        {
+          anyOf: [
+            { state: 'engineRunning', equals: true },
+            { state: 'auxPower', equals: true }
+          ]
+        }
+      ]
+    };
+    const summary = summarizeCondition(when);
+    expect(summary).toContain('fuel');
+    expect(summary).toContain('engineRunning');
+    expect(summary).toContain('auxPower');
+    expect(summary).toContain('AND');
+    expect(summary).toContain('OR');
   });
 });

@@ -10,6 +10,7 @@ import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_N
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../core/deckEventPacks.js';
 import { openModal, confirmModal, showToast } from './StudioModal.js';
+import { summarizeCondition, reorderRules } from './InspectorLogic.js';
 // Widget Studio 2.0, Phase 1: TRIGGERS/ACTIONS are now read from
 // PropertyRegistry.js instead of being hand-copied arrays here — the exact
 // "UI list is stale relative to runtime" bug class found four times in the
@@ -18,7 +19,6 @@ import { openModal, confirmModal, showToast } from './StudioModal.js';
 import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS as REGISTRY_TYPE_FIELDS, COMMON_FIELDS as REGISTRY_COMMON_FIELDS, VALUE_FORMATS as REGISTRY_VALUE_FORMATS, getFieldsForType, getStateStyleConfig } from '../widgets/PropertyRegistry.js';
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
-import { reorderRules } from './InspectorLogic.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -76,35 +76,8 @@ function resolveStateStyleConfig(comp) {
   return getStateStyleConfig(comp.type, comp.props);
 }
 
-// Wave 2 Part B2: short chip label for a style.rules[] entry's condition —
-// e.g. "oilTempF > 115" — used both as the rule chip's visible text and its
-// title tooltip (chips truncate with ellipsis once there are several).
-const RULE_OP_SYMBOLS = { equals: '=', notEquals: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' };
-function summarizeLeafCondition(leaf) {
-  if (!leaf || typeof leaf.state !== 'string' || !leaf.state) return 'New Rule';
-  const op = Object.keys(RULE_OP_SYMBOLS).find((o) => leaf[o] !== undefined);
-  if (op) return `${leaf.state} ${RULE_OP_SYMBOLS[op]} ${leaf[op]}`;
-  if (Array.isArray(leaf.between)) return `${leaf.state} in [${leaf.between.join(', ')}]`;
-  return leaf.state;
-}
-// Post-implementation review §1 (found live during verification): the visual
-// compound condition editor (renderConditionListEditor) always normalizes a
-// condition to {allOf|anyOf:[...]} — even a single freshly-picked leaf — so
-// this used to keep reading `when.state` directly and show "New Rule"
-// forever, no matter what the author actually set. Unwrap the combinator the
-// same way renderConditionListEditor itself does before falling back to
-// the leaf case.
-function summarizeRuleCondition(when) {
-  if (!when) return 'New Rule';
-  const combinator = when.anyOf ? 'anyOf' : (when.allOf ? 'allOf' : null);
-  if (combinator) {
-    const leaves = when[combinator];
-    if (!Array.isArray(leaves) || leaves.length === 0) return 'New Rule';
-    if (leaves.length === 1) return summarizeRuleCondition(leaves[0]);
-    return leaves.map(summarizeRuleCondition).join(combinator === 'anyOf' ? ' or ' : ' and ');
-  }
-  return summarizeLeafCondition(when);
-}
+// Note: summarizeCondition() is now in InspectorLogic.js as a pure, reusable function
+// (imported above as part of { summarizeCondition, reorderRules })
 
 // Wave 2 Part B1 (Part 4, first slice): the Appearance panel's field set,
 // filtered from COMMON_FIELDS rather than hand-listed, so a future FDWS
@@ -1496,14 +1469,7 @@ export class StudioInspector {
       // to renderConditionListEditor()) instead of a single-leaf-only block —
       // this also gives a rule condition the JSON fallback it never had
       // before for a hand-authored/imported nested `when`.
-      const ruleCondEditor = activeTab === 'rule' && activeRule ? this.renderConditionListEditor(
-        comp, def, activeRule.when || null, 'rulecond',
-        (nextValue, recordHistory = true) => {
-          const nextRules = [...rules];
-          nextRules[activeRuleIndex] = { ...nextRules[activeRuleIndex], when: nextValue };
-          this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, recordHistory);
-        }
-      ) : null;
+      const ruleCondSummary = activeTab === 'rule' && activeRule ? summarizeCondition(activeRule.when) : '';
       const ruleJsonOpen = activeRuleIndex !== null && !!this._conditionalStyleJsonOpen?.[activeRuleIndex];
       // Wave 2 Part B3: the Theme chip toggles StudioState.previewTheme itself
       // (the canvas header's own sun/moon control) rather than introducing a
@@ -1533,7 +1499,7 @@ export class StudioInspector {
         <div class="prop-row-2" style="margin:10px 0 12px;flex-wrap:wrap;gap:6px;">
           <button type="button" class="mode-toggle-btn ${activeTab === 'normal' ? 'active' : ''}" id="c-styletab-normal" style="flex:0 1 auto;">Normal</button>
           ${stateCfg ? `<button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="c-styletab-state" style="flex:0 1 auto;">${stateCfg.tabLabel}</button>` : ''}
-          ${rules.map((r, i) => `<button type="button" class="mode-toggle-btn ${activeRuleIndex === i ? 'active' : ''}" data-rule-chip="${i}" style="flex:0 1 auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="Rule ${i + 1} of ${rules.length} — ${escapeHtmlAttr(summarizeRuleCondition(r.when))} (first matching rule wins)">${i + 1}. ${escapeHtmlAttr(summarizeRuleCondition(r.when))}</button>`).join('')}
+          ${rules.map((r, i) => `<button type="button" class="mode-toggle-btn ${activeRuleIndex === i ? 'active' : ''}" data-rule-chip="${i}" style="flex:0 1 auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="Rule ${i + 1} of ${rules.length} — ${escapeHtmlAttr(summarizeCondition(r.when))} (first matching rule wins)">${i + 1}. ${escapeHtmlAttr(summarizeCondition(r.when))}</button>`).join('')}
           <button type="button" class="mode-toggle-btn" id="c-styletab-addrule" style="flex:0 1 auto;" title="Add a conditional style rule">+ Rule</button>
           <span style="width:1px;align-self:stretch;background:var(--studio-panel-border);margin:0 2px;"></span>
           <button type="button" class="mode-toggle-btn ${themeEdit.isOverrideEdit ? 'active' : ''}" id="c-styletab-theme" style="flex:0 1 auto;" ${
@@ -1563,7 +1529,10 @@ export class StudioInspector {
         ${activeTab === 'rule' ? `
         <div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style whenever this rule's condition is true — first matching rule wins over lower rules and over Normal. Dimmed fields are inherited from the Normal style, same as a state.</div>
         <div class="prop-section-subtitle" style="margin-top:0;">Condition <span class="prop-hint" title="Same condition grammar as Visible When — a rule here only changes the STYLE, never whether the component shows at all.">ⓘ</span></div>
-        ${ruleCondEditor.html}
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <div style="flex:1;padding:6px 8px;background:var(--studio-panel-bg);border:1px solid var(--studio-panel-border);border-radius:3px;font-size:12px;color:var(--studio-text-secondary);">${escapeHtmlAttr(ruleCondSummary)}</div>
+          <button type="button" id="rule-edit-condition" class="bar-btn" title="Edit condition in popover">Edit</button>
+        </div>
         <div class="prop-row-2" style="margin-bottom:8px;flex-wrap:wrap;">
           <button type="button" id="c-rule-move-up" class="bar-btn" ${activeRuleIndex === 0 ? 'disabled' : ''} title="Move this rule earlier — first matching rule wins, so earlier rules take priority">▲ Move Up</button>
           <button type="button" id="c-rule-move-down" class="bar-btn" ${activeRuleIndex === rules.length - 1 ? 'disabled' : ''} title="Move this rule later">▼ Move Down</button>
@@ -1691,7 +1660,36 @@ export class StudioInspector {
       });
 
       if (activeTab === 'rule' && activeRule) {
-        ruleCondEditor.wire(body);
+        // Wire up the rule condition edit button to open the popover
+        body.querySelector('#rule-edit-condition')?.addEventListener('click', async () => {
+          const ruleCondEditor = this.renderConditionListEditor(
+            comp, def, activeRule.when || null, 'rulecond',
+            (nextValue, recordHistory = true) => {
+              const nextRules = [...rules];
+              nextRules[activeRuleIndex] = { ...nextRules[activeRuleIndex], when: nextValue };
+              this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, recordHistory);
+            }
+          );
+
+          const result = await openModal({
+            title: 'Edit Rule Condition',
+            bodyHtml: ruleCondEditor.html,
+            onMount: (card) => {
+              ruleCondEditor.wire(card.querySelector('.modal-body'));
+            },
+            submitLabel: 'Done',
+            cancelLabel: 'Cancel',
+            onSubmit: () => {
+              // Just close the modal; changes are committed immediately via onCommit
+              return { value: true };
+            }
+          });
+
+          // After the modal closes, re-render to update the summary line
+          if (result) {
+            this.render();
+          }
+        });
 
         // Post-implementation review §1: rules are first-match-wins
         // (resolveActiveRuleStyle) but had no reorder control at all — a
@@ -1713,7 +1711,7 @@ export class StudioInspector {
         body.querySelector('#c-rule-move-down')?.addEventListener('click', () => moveRule(1));
 
         body.querySelector('#c-rule-remove')?.addEventListener('click', async () => {
-          const ok = await confirmModal(`Remove this rule (${summarizeRuleCondition(activeRule.when)})?`, { title: 'Remove Rule', danger: true });
+          const ok = await confirmModal(`Remove this rule (${summarizeCondition(activeRule.when)})?`, { title: 'Remove Rule', danger: true });
           if (!ok) return;
           const nextRules = rules.filter((_, i) => i !== activeRuleIndex);
           this._styleTabRuleIndex = null;
@@ -2323,14 +2321,14 @@ export class StudioInspector {
   renderVisibilityAndGuard(comp, def, body) {
     const assets = def.assets || [];
     const guard = comp.layout?.guard || {};
-
-    const vwEditor = this.renderConditionListEditor(comp, def, comp.visibleWhen || null, 'vw', (nextValue, recordHistory = true) => {
-      this.state.updateComponent(comp.id, { visibleWhen: nextValue }, recordHistory);
-    });
+    const conditionSummary = summarizeCondition(comp.visibleWhen);
 
     body.innerHTML = `
       <div class="prop-section-subtitle">Conditional Visibility (visibleWhen) <span class="prop-hint" title="FDWS v1.13: each condition's state can be a declared state[] var, or — via the 'Custom / nested path…' option — a nested/indexed path like presets[0].label, addressing one specific array-slot field instead of a whole variable.">ⓘ</span></div>
-      ${vwEditor.html}
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+        <div style="flex:1;padding:6px 8px;background:var(--studio-panel-bg);border:1px solid var(--studio-panel-border);border-radius:3px;font-size:12px;color:var(--studio-text-secondary);">${escapeHtmlAttr(conditionSummary)}</div>
+        <button type="button" id="vw-edit-condition" class="bar-btn" title="Edit condition in popover">Edit</button>
+      </div>
 
       <div class="prop-section-subtitle" style="margin-top:14px;">Guard Overlay (layout.guard §2.2)</div>
       <div class="prop-field">
@@ -2360,7 +2358,31 @@ export class StudioInspector {
       ` : ''}
     `;
 
-    vwEditor.wire(body);
+    // Wire up the edit button to open the popover
+    body.querySelector('#vw-edit-condition')?.addEventListener('click', async () => {
+      const vwEditor = this.renderConditionListEditor(comp, def, comp.visibleWhen || null, 'vw', (nextValue, recordHistory = true) => {
+        this.state.updateComponent(comp.id, { visibleWhen: nextValue }, recordHistory);
+      });
+
+      const result = await openModal({
+        title: 'Edit Conditional Visibility',
+        bodyHtml: vwEditor.html,
+        onMount: (card) => {
+          vwEditor.wire(card.querySelector('.modal-body'));
+        },
+        submitLabel: 'Done',
+        cancelLabel: 'Cancel',
+        onSubmit: () => {
+          // Just close the modal; changes are committed immediately via onCommit
+          return { value: true };
+        }
+      });
+
+      // After the modal closes, re-render to update the summary line
+      if (result) {
+        this.render();
+      }
+    });
 
     // --- guard wiring ---
     body.querySelector('#guard-enabled')?.addEventListener('change', (e) => {
