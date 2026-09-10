@@ -18,6 +18,7 @@ import { openModal, confirmModal, showToast } from './StudioModal.js';
 import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS as REGISTRY_TYPE_FIELDS, COMMON_FIELDS as REGISTRY_COMMON_FIELDS, VALUE_FORMATS as REGISTRY_VALUE_FORMATS, getFieldsForType, getStateStyleConfig } from '../widgets/PropertyRegistry.js';
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
+import { reorderRules } from './InspectorLogic.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -1616,6 +1617,34 @@ export class StudioInspector {
         btn.addEventListener('click', () => {
           this._styleTabRuleIndex = Number(btn.dataset.ruleChip);
           this.render();
+        });
+        // Drag-and-drop reordering for rule tabs — allows users to directly
+        // control rule precedence via the first-match-wins rendering logic.
+        btn.draggable = true;
+        btn.addEventListener('dragstart', (e) => {
+          const fromIndex = Number(btn.dataset.ruleChip);
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(fromIndex));
+        });
+        btn.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          btn.style.opacity = '0.7';
+        });
+        btn.addEventListener('dragleave', () => {
+          btn.style.opacity = '';
+        });
+        btn.addEventListener('drop', (e) => {
+          e.preventDefault();
+          const fromIndex = Number(e.dataTransfer.getData('text/plain'));
+          const toIndex = Number(btn.dataset.ruleChip);
+          btn.style.opacity = '';
+          if (fromIndex !== toIndex && fromIndex >= 0 && toIndex >= 0) {
+            const nextRules = reorderRules(rules, fromIndex, toIndex);
+            this._styleTabRuleIndex = toIndex;
+            this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, true, 'Reorder Rule');
+            this.render();
+          }
         });
       });
       body.querySelector('#c-styletab-addrule')?.addEventListener('click', () => {
