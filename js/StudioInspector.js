@@ -336,8 +336,8 @@ export class StudioInspector {
       body.innerHTML = `
         <div class="empty-tree-notice">Applies to all ${comps.length} selected components. Each field starts blank — only fields you actually set here are changed; everything else on each component is left as-is.</div>
 
-        <button type="button" id="bulk-paste-style" class="panel-full-btn" style="margin-top:8px;" ${this.state.copiedStyle ? '' : 'disabled'}>
-          ${this.state.copiedStyle ? `Paste Copied Style onto All ${comps.length} (replaces each one's full style)` : 'Paste Style — copy a style from a single component\'s panel first'}
+        <button type="button" id="bulk-paste-style" class="panel-full-btn" style="margin-top:8px;" ${this.state.copiedStyle && !this.state.copiedStateKey ? '' : 'disabled'}>
+          ${this.state.copiedStyle && !this.state.copiedStateKey ? `Paste Copied Style onto All ${comps.length} (replaces each one's full style)` : this.state.copiedStateKey ? 'Paste Style — state-scoped copy cannot be pasted to all (use single-component Paste Style instead)' : 'Paste Style — copy a style from a single component\'s panel first'}
         </button>
 
         <div class="prop-section-subtitle" style="margin-top:10px;">Typography</div>

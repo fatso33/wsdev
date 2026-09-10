@@ -682,9 +682,15 @@ export class StudioState {
    * Pastes the clipboard style onto every multi-selected component at once,
    * wholesale-replacing each one's existing style. One combined undo step.
    * No-ops below 2 selected or with nothing copied.
+   * Ticket 04: Guards against pasting state-scoped clipboard fragments to
+   * all components — bulk paste only applies to base-style copies (full
+   * style tree), not state-scoped overrides which should be pasted
+   * individually via pasteStyleToComponent(id, stateKey).
    */
   pasteStyleToSelection() {
     if (!this.copiedStyle) return;
+    // Guard: don't paste state-scoped fragments to all selected components
+    if (this.copiedStateKey) return;
     const ids = [...this.multiSelectedIds];
     if (ids.length < 2) return;
     const comps = ids.map((id) => this.getComponent(id)).filter(Boolean);
