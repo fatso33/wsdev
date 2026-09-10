@@ -76,6 +76,11 @@ export function summarizeCondition(when) {
   if (typeof when === 'object' && typeof when.state === 'string') {
     const varName = when.state;
 
+    // If state var name is empty, treat as unset condition
+    if (!varName) {
+      return 'No condition set';
+    }
+
     // Special case: 'between' operator (has array value)
     if (Array.isArray(when.between)) {
       return `${varName} in [${when.between.join(', ')}]`;

@@ -1101,6 +1101,35 @@ export class StudioInspector {
     showToast('Applied — Undo (Ctrl+Z) to revert if something looks wrong.');
   }
 
+  /**
+   * Opens a condition editor (rule condition or visibility condition) in a popover modal.
+   * Shared logic extracted from duplicate handlers in renderStyleTab and renderVisibilityAndGuard.
+   *
+   * @param {string} title - Modal title (e.g., 'Edit Rule Condition')
+   * @param {object} editor - Editor object with {html, wire(card)} structure
+   * @returns {Promise<void>} Resolves after modal closes
+   */
+  async openConditionEditorPopover(title, editor) {
+    const result = await openModal({
+      title,
+      bodyHtml: editor.html,
+      onMount: (card) => {
+        editor.wire(card.querySelector('.modal-body'));
+      },
+      submitLabel: 'Done',
+      cancelLabel: 'Cancel',
+      onSubmit: () => {
+        // Just close the modal; changes are committed immediately via onCommit in the editor
+        return { value: true };
+      }
+    });
+
+    // After the modal closes, re-render to update the summary line
+    if (result) {
+      this.render();
+    }
+  }
+
   // ==========================================
   // --- COMPONENT INSPECTOR ---
   // ==========================================
@@ -1671,24 +1700,7 @@ export class StudioInspector {
             }
           );
 
-          const result = await openModal({
-            title: 'Edit Rule Condition',
-            bodyHtml: ruleCondEditor.html,
-            onMount: (card) => {
-              ruleCondEditor.wire(card.querySelector('.modal-body'));
-            },
-            submitLabel: 'Done',
-            cancelLabel: 'Cancel',
-            onSubmit: () => {
-              // Just close the modal; changes are committed immediately via onCommit
-              return { value: true };
-            }
-          });
-
-          // After the modal closes, re-render to update the summary line
-          if (result) {
-            this.render();
-          }
+          await this.openConditionEditorPopover('Edit Rule Condition', ruleCondEditor);
         });
 
         // Post-implementation review §1: rules are first-match-wins
@@ -2364,24 +2376,7 @@ export class StudioInspector {
         this.state.updateComponent(comp.id, { visibleWhen: nextValue }, recordHistory);
       });
 
-      const result = await openModal({
-        title: 'Edit Conditional Visibility',
-        bodyHtml: vwEditor.html,
-        onMount: (card) => {
-          vwEditor.wire(card.querySelector('.modal-body'));
-        },
-        submitLabel: 'Done',
-        cancelLabel: 'Cancel',
-        onSubmit: () => {
-          // Just close the modal; changes are committed immediately via onCommit
-          return { value: true };
-        }
-      });
-
-      // After the modal closes, re-render to update the summary line
-      if (result) {
-        this.render();
-      }
+      await this.openConditionEditorPopover('Edit Conditional Visibility', vwEditor);
     });
 
     // --- guard wiring ---

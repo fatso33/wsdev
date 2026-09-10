@@ -137,6 +137,22 @@ describe('summarizeCondition', () => {
     expect(summary).toContain('myVar');
   });
 
+  it('handles empty state var name in a leaf condition', () => {
+    const when = { state: '', equals: '' };
+    const summary = summarizeCondition(when);
+    expect(summary).toBe('No condition set');
+    // Verify it's not a blank/whitespace-only string like " = "
+    expect(summary).not.toMatch(/^\s*=\s*$/);
+  });
+
+  it('handles a group with empty-state leaves', () => {
+    const when = { allOf: [{ state: '', equals: '' }] };
+    const summary = summarizeCondition(when);
+    expect(summary).toBe('No condition set');
+    // Verify it's not a blank/whitespace-only string like " AND  = "
+    expect(summary).not.toMatch(/\s*AND\s*/);
+  });
+
   it('handles nested groups recursively', () => {
     const when = {
       allOf: [
