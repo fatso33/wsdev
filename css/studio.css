@@ -11,7 +11,7 @@
   --studio-surface-hover: #1b263b;
   --studio-input-bg: #0a0e17;
   --studio-input-border: #233047;
-  
+
   --accent-cyan: #00d8f6;
   --accent-cyan-glow: rgba(0, 216, 246, 0.25);
   --accent-magenta: #ff2ee0;
@@ -25,6 +25,17 @@
   --text-dim: #64748b;
   --font-mono: 'Chakra Petch', 'JetBrains Mono', monospace;
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* t01: Inspector design tokens — 4px spacing scale, 12px+ typography */
+  --inspector-spacing-xs: 4px;
+  --inspector-spacing-sm: 8px;
+  --inspector-spacing-md: 12px;
+  --inspector-spacing-lg: 16px;
+  --inspector-font-size-label: 12px;
+  --inspector-font-size-heading: 11px;
+  --inspector-border-width: 1px;
+  --inspector-border-color: var(--studio-panel-border);
+  --inspector-focus-ring: 1px solid var(--accent-cyan);
 }
 
 /* Widget-content color contract — mirrors flight-deck-pwa/css/main.css's
@@ -1853,6 +1864,17 @@ body, html {
   background-color: rgba(0, 216, 246, 0.12);
 }
 
+/* Non-collapsible section header (for tab content) */
+.inspector-tab-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--inspector-spacing-sm) 0;
+  border-bottom: var(--inspector-border-width) solid var(--inspector-border-color);
+  cursor: default;
+  user-select: none;
+}
+
 .group-title-cluster {
   display: flex;
   align-items: center;
@@ -1929,19 +1951,19 @@ body, html {
 .inspector-tab-bar {
   display: flex;
   gap: 0;
-  border-bottom: 1px solid var(--studio-panel-border);
+  border-bottom: var(--inspector-border-width) solid var(--inspector-border-color);
   padding: 0;
   background-color: var(--studio-panel-bg);
 }
 
 .inspector-tab-btn {
   flex: 1;
-  padding: 10px 14px;
+  padding: var(--inspector-spacing-sm) var(--inspector-spacing-lg);
   border: none;
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--inspector-font-size-label);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1955,6 +1977,11 @@ body, html {
   background-color: rgba(0, 216, 246, 0.05);
 }
 
+.inspector-tab-btn:focus-visible {
+  outline: var(--inspector-focus-ring);
+  outline-offset: -2px;
+}
+
 .inspector-tab-btn.active {
   color: var(--accent-cyan);
   border-bottom-color: var(--accent-cyan);
@@ -1965,6 +1992,7 @@ body, html {
   flex-direction: column;
   flex: 1;
   overflow: hidden;
+  height: 100%;
 }
 
 .inspector-panel {
@@ -1972,13 +2000,51 @@ body, html {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px 14px;
-  gap: 10px;
+  padding: var(--inspector-spacing-md) var(--inspector-spacing-lg);
+  gap: var(--inspector-spacing-md);
   flex-direction: column;
 }
 
 .inspector-panel.active {
   display: flex;
+}
+
+/* Tab sections (non-collapsible content) */
+.inspector-tab-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--inspector-spacing-md);
+}
+
+.tab-section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--inspector-spacing-md);
+  padding-bottom: var(--inspector-spacing-sm);
+  border-bottom: var(--inspector-border-width) solid var(--inspector-border-color);
+}
+
+.section-title {
+  font-family: var(--font-mono);
+  font-size: var(--inspector-font-size-heading);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+}
+
+.section-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+.tab-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--inspector-spacing-md);
 }
 
 /* Form Controls */

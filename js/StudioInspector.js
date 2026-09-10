@@ -217,10 +217,8 @@ export class StudioInspector {
     this.jsonViewOpenTitles = new Set();
 
     // t01: Inspector tab shell — outer tab (General/Style/Data/Events)
-    // persists across widget selection, inner state/rule sub-tab resets to
-    // Normal on new selection.
+    // persists across widget selection.
     this.activeInspectorTab = 'general';
-    this.activeStateRuleTab = 'normal';
 
     this.initDOM();
     this.render();
@@ -1133,18 +1131,25 @@ export class StudioInspector {
   // --- COMPONENT INSPECTOR ---
   // ==========================================
 
-  // Mapping of accordion group titles to their target tab
-  getSectionTabTarget(title) {
-    const tabMap = {
-      'LAYOUT & LAYERING': 'general',
-      'APPEARANCE': 'style',
-      'DATA & CONTENT': 'data',
-      'BEHAVIOR': 'events',
-      'DECK EVENTS (v1.27)': 'events',
-      'CAPABILITIES MATRIX (§11)': 'events',
-      'UNRECOGNISED PROPERTIES': 'general', // fallback tab
-    };
-    return tabMap[title] || 'general';
+  // Build a section in a tab without accordion wrapper (no collapsible header)
+  buildTabSection(title, renderFn, badge) {
+    const section = document.createElement('div');
+    section.className = 'inspector-tab-section';
+    if (badge) {
+      section.innerHTML = `
+        <div class="tab-section-header">
+          <span class="section-title">${title}</span>
+          <span class="section-badge">${badge}</span>
+        </div>
+      `;
+    } else {
+      section.innerHTML = `<div class="tab-section-header"><span class="section-title">${title}</span></div>`;
+    }
+    const body = document.createElement('div');
+    body.className = 'tab-section-body';
+    renderFn(body);
+    section.appendChild(body);
+    return section;
   }
 
   buildInspectorTabShell() {
@@ -1163,10 +1168,6 @@ export class StudioInspector {
       btn.setAttribute('data-testid', `inspector-tab-${tabName}`);
       btn.addEventListener('click', () => {
         this.activeInspectorTab = tabName;
-        // Reset state/rule sub-tab when switching main tabs
-        if (tabName !== 'style') {
-          this.activeStateRuleTab = 'normal';
-        }
         this.render();
       });
       tabBar.appendChild(btn);
@@ -1187,11 +1188,8 @@ export class StudioInspector {
   }
 
   renderComponentInspector(comp) {
-    // t01: Reset inner state/rule tab when component changes
     if (this._styleTabCompId !== comp.id) {
       this._styleTabCompId = comp.id;
-      this.activeStateRuleTab = 'normal';
-      // Legacy style tabs — kept for backward compatibility
       this._styleTab = 'normal';
       // Wave 2 Part B2: which rule chip (by index into style.rules[]) is
       // active, if any — takes precedence over _styleTab when set. Reset
@@ -1388,7 +1386,7 @@ export class StudioInspector {
       body.querySelector('#c-layout-w')?.addEventListener('change', (e) => updateLayout({ w: parseInt(e.target.value, 10) || 1 }));
       body.querySelector('#c-layout-h')?.addEventListener('change', (e) => updateLayout({ h: parseInt(e.target.value, 10) || 1 }));
     })(outerBody.appendChild(document.createElement('div')));
-    }, this.buildLayoutBadge(comp), { label: comp.label, id: comp.id, type: comp.type, layer: comp.layer, layout: comp.layout }));
+    }, this.buildLayoutBadge(comp), { label: comp.label, id: comp.id, type: comp.type, layer: comp.layer, layout: comp.layout }, true));
 
     // 2 & 3. Appearance, and Data & Content — Phase 6 merges "Visual Styling &
     // Typography" + "Conditional Formatting" into Appearance (conditional
@@ -1406,8 +1404,8 @@ export class StudioInspector {
     // G10: comp.style can itself be undefined for a component with no style
     // customization at all — normalized so the View JSON toggle still shows
     // "{}" rather than silently vanishing, same reasoning as the root sections.
-    const appearanceGroup = this.buildAccordionGroup('APPEARANCE', false, () => {}, this.buildAppearanceBadge(comp), comp.style || {});
-    const dataGroup = this.buildAccordionGroup('DATA & CONTENT', false, () => {}, this.buildDataBadge(comp), { props: comp.props, binding: comp.binding });
+    const appearanceGroup = this.buildAccordionGroup('APPEARANCE', false, () => {}, this.buildAppearanceBadge(comp), comp.style || {}, true);
+    const dataGroup = this.buildAccordionGroup('DATA & CONTENT', false, () => {}, this.buildDataBadge(comp), { props: comp.props, binding: comp.binding }, true);
     // Wave 4, §10.4: computed once, appended at the bottom of the two
     // relevant sections below (props+binding into Data & Content, style into
     // Appearance) plus a standalone catch-all section for a wholly
@@ -2284,7 +2282,7 @@ export class StudioInspector {
     // setupGuard) but previously had zero authoring UI — a user wanting either
     // had to hand-edit exported JSON outside the tool entirely.
     this.renderVisibilityAndGuard(comp, def, outerBody.appendChild(document.createElement('div')));
-    }, this.buildBehaviorBadge(comp), { interactions: comp.interactions, visibleWhen: comp.visibleWhen, layout: { guard: comp.layout?.guard } }));
+    }, this.buildBehaviorBadge(comp), { interactions: comp.interactions, visibleWhen: comp.visibleWhen, layout: { guard: comp.layout?.guard } }, true));
 
     // Wave 2 Part B2: Conditional Formatting (style.rules, FDWS v1.15) no
     // longer has its own section here — a rule is now a target-strip chip
@@ -2299,7 +2297,8 @@ export class StudioInspector {
     // group" for something structurally outside props/binding/style, so it
     // gets its own, appended only when non-empty.
     if (unrecognised.other.length > 0) {
-      this.container.appendChild(this.buildAccordionGroup('UNRECOGNISED PROPERTIES', true, (body) => {
+      // t01: Append to general tab panel
+      panels['general'].appendChild(this.buildAccordionGroup('UNRECOGNISED PROPERTIES', true, (body) => {
         const block = this.renderUnrecognisedPropertiesBlock(unrecognised.other, def.fdws, `${comp.id}-other`, commitUnrecognised);
         if (block) body.appendChild(block);
       }));
@@ -4798,7 +4797,7 @@ export class StudioInspector {
    * rendering happens in that separate deferred pass, not here, for the same
    * "must run after the whole panel renders" reason the "N more" badge does.
    */
-  buildAccordionGroup(title, isOpenDefault, renderFn, badge, jsonData) {
+  buildAccordionGroup(title, isOpenDefault, renderFn, badge, jsonData, nonCollapsible = false) {
     if (jsonData !== undefined) this._sectionJsonData[title] = jsonData;
     // Only seed from isOpenDefault the first time this title is ever seen;
     // afterwards, the user's own expand/collapse choice (tracked in
@@ -4811,20 +4810,44 @@ export class StudioInspector {
     const isTierOverridden = this.tierOverrideGroups.has(title);
 
     const group = document.createElement('div');
-    group.className = `inspector-group${isTierOverridden ? ' tier-override' : ''}`;
+    group.className = `inspector-group${isTierOverridden ? ' tier-override' : ''}${nonCollapsible ? ' non-collapsible' : ''}`;
 
-    const header = document.createElement('div');
-    header.className = 'inspector-group-header';
-    header.innerHTML = `
-      <span class="group-title-cluster">
-        <span class="group-title">${title}</span>
-        ${badge ? `<span class="group-badge">${badge}</span>` : ''}
-      </span>
-      <svg class="group-chevron ${isOpen ? 'open' : ''}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-    `;
+    // t01: For non-collapsible sections (inside tabs), render simplified header without chevron
+    if (nonCollapsible) {
+      const header = document.createElement('div');
+      header.className = 'inspector-tab-section-header';
+      header.innerHTML = `
+        <span class="group-title-cluster">
+          <span class="group-title">${title}</span>
+          ${badge ? `<span class="group-badge">${badge}</span>` : ''}
+        </span>
+      `;
+      group.appendChild(header);
+    } else {
+      const header = document.createElement('div');
+      header.className = 'inspector-group-header';
+      header.innerHTML = `
+        <span class="group-title-cluster">
+          <span class="group-title">${title}</span>
+          ${badge ? `<span class="group-badge">${badge}</span>` : ''}
+        </span>
+        <svg class="group-chevron ${isOpen ? 'open' : ''}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      `;
+
+      header.addEventListener('click', () => {
+        const nowOpen = !body.classList.contains('open');
+        body.classList.toggle('open', nowOpen);
+        body.classList.toggle('collapsed', !nowOpen);
+        header.querySelector('.group-chevron')?.classList.toggle('open', nowOpen);
+        if (nowOpen) this.expandedGroups.add(title);
+        else this.expandedGroups.delete(title);
+      });
+
+      group.appendChild(header);
+    }
 
     const body = document.createElement('div');
-    body.className = `inspector-group-body ${isOpen ? 'open' : 'collapsed'}`;
+    body.className = nonCollapsible ? 'inspector-group-body open' : `inspector-group-body ${isOpen ? 'open' : 'collapsed'}`;
 
     renderFn(body);
     // Part 2's "⋯ N more" badge is NOT injected here — see
@@ -4837,16 +4860,6 @@ export class StudioInspector {
     // it populates itself) has finished rendering — same timing requirement
     // applyUiMode() already has, and called right alongside it.
 
-    header.addEventListener('click', () => {
-      const nowOpen = !body.classList.contains('open');
-      body.classList.toggle('open', nowOpen);
-      body.classList.toggle('collapsed', !nowOpen);
-      header.querySelector('.group-chevron')?.classList.toggle('open', nowOpen);
-      if (nowOpen) this.expandedGroups.add(title);
-      else this.expandedGroups.delete(title);
-    });
-
-    group.appendChild(header);
     group.appendChild(body);
     return group;
   }
