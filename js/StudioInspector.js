@@ -1118,15 +1118,27 @@ export class StudioInspector {
    * Shared logic extracted from duplicate handlers in renderStyleTab and renderVisibilityAndGuard.
    *
    * @param {string} title - Modal title (e.g., 'Edit Rule Condition')
-   * @param {object} editor - Editor object with {html, wire(card)} structure
+   * @param {(rerender: () => void) => {html: string, wire: (mountEl: HTMLElement) => void}} buildEditor
+   *        Builds a fresh {html, wire} editor from current state. Called once on mount and again
+   *        after every add/remove so the popover's own DOM reflects the change in place — same
+   *        local-recursive-re-render pattern the interaction modal's "Only Run If" editor already
+   *        uses, rather than relying on a close/reopen to pick up the new state.
    * @returns {Promise<void>} Resolves after modal closes
    */
-  async openConditionEditorPopover(title, editor) {
+  async openConditionEditorPopover(title, buildEditor) {
+    let mountEl;
+    const render = () => {
+      const editor = buildEditor(render);
+      mountEl.innerHTML = editor.html;
+      editor.wire(mountEl);
+    };
+
     const result = await openModal({
       title,
-      bodyHtml: editor.html,
+      bodyHtml: '',
       onMount: (card) => {
-        editor.wire(card.querySelector('.modal-body'));
+        mountEl = card.querySelector('.modal-body');
+        render();
       },
       submitLabel: 'Done',
       cancelLabel: 'Cancel',
@@ -1703,16 +1715,17 @@ export class StudioInspector {
       if (activeTab === 'rule' && activeRule) {
         // Wire up the rule condition edit button to open the popover
         body.querySelector('#rule-edit-condition')?.addEventListener('click', async () => {
-          const ruleCondEditor = this.renderConditionListEditor(
-            comp, def, activeRule.when || null, 'rulecond',
-            (nextValue, recordHistory = true) => {
-              const nextRules = [...rules];
-              nextRules[activeRuleIndex] = { ...nextRules[activeRuleIndex], when: nextValue };
-              this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, recordHistory);
-            }
+          await this.openConditionEditorPopover('Edit Rule Condition', (rerender) =>
+            this.renderConditionListEditor(
+              comp, def, (comp.style?.rules || rules)[activeRuleIndex]?.when || null, 'rulecond',
+              (nextValue, recordHistory = true) => {
+                const nextRules = [...(comp.style?.rules || rules)];
+                nextRules[activeRuleIndex] = { ...nextRules[activeRuleIndex], when: nextValue };
+                this.state.updateComponent(comp.id, { style: { ...(comp.style || {}), rules: nextRules } }, recordHistory);
+                rerender();
+              }
+            )
           );
-
-          await this.openConditionEditorPopover('Edit Rule Condition', ruleCondEditor);
         });
 
         // Post-implementation review §1: rules are first-match-wins
@@ -2384,11 +2397,12 @@ export class StudioInspector {
 
     // Wire up the edit button to open the popover
     body.querySelector('#vw-edit-condition')?.addEventListener('click', async () => {
-      const vwEditor = this.renderConditionListEditor(comp, def, comp.visibleWhen || null, 'vw', (nextValue, recordHistory = true) => {
-        this.state.updateComponent(comp.id, { visibleWhen: nextValue }, recordHistory);
-      });
-
-      await this.openConditionEditorPopover('Edit Conditional Visibility', vwEditor);
+      await this.openConditionEditorPopover('Edit Conditional Visibility', (rerender) =>
+        this.renderConditionListEditor(comp, def, comp.visibleWhen || null, 'vw', (nextValue, recordHistory = true) => {
+          this.state.updateComponent(comp.id, { visibleWhen: nextValue }, recordHistory);
+          rerender();
+        })
+      );
     });
 
     // --- guard wiring ---
