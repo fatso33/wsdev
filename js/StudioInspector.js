@@ -1549,17 +1549,25 @@ export class StudioInspector {
             <input type="number" id="c-layout-row" class="prop-input" value="${layout.row || 1}" min="1" max="${maxRows}" />
           </div>
         </div>
-        <div class="prop-field-compound" data-tier="build" data-testid="compound-row-size">
-          <div class="prop-field prop-field-compound-item">
-            <label class="prop-compound-label" title="Width (Span Columns)">W:</label>
-            <input type="number" id="c-layout-w" class="prop-input" value="${layout.w || 1}" min="1" max="${maxCols}" />
-          </div>
-          <div class="prop-field prop-field-compound-item">
-            <label class="prop-compound-label" title="Height (Span Rows)">H:</label>
-            <input type="number" id="c-layout-h" class="prop-input" value="${layout.h || 1}" min="1" max="${maxRows}" />
-          </div>
-        </div>
       `;
+
+      // 10 (review finding, 2026-09-11): built via the SAME assembleCompoundRow()
+      // the registry-driven engine uses for style.offset.x/y and props.min/max,
+      // rather than hand-writing an equivalent '.prop-field-compound' markup
+      // string here — a future change to the shared row shape now only needs
+      // to happen in one place.
+      const wField = document.createElement('div');
+      wField.className = 'prop-field';
+      wField.innerHTML = `<label>Width (Span Columns)</label><input type="number" id="c-layout-w" class="prop-input" value="${layout.w || 1}" min="1" max="${maxCols}" />`;
+      const hField = document.createElement('div');
+      hField.className = 'prop-field';
+      hField.innerHTML = `<label>Height (Span Rows)</label><input type="number" id="c-layout-h" class="prop-input" value="${layout.h || 1}" min="1" max="${maxRows}" />`;
+      const sizeRow = this.assembleCompoundRow('compound-row-size', [
+        { wrap: wField, label: 'W:', tooltip: 'Width (Span Columns)' },
+        { wrap: hField, label: 'H:', tooltip: 'Height (Span Rows)' }
+      ]);
+      sizeRow.setAttribute('data-tier', 'build');
+      body.appendChild(sizeRow);
 
       const updateLayout = (updates) => {
         this.state.updateComponent(comp.id, { layout: { ...comp.layout, ...updates } });
@@ -4035,16 +4043,32 @@ export class StudioInspector {
    */
   renderRegistryFields(comp, mount, fields, target, groupCoveredPaths) {
     mount.innerHTML = '';
-    // 10: Compound input grouping — a field already consumed as a member of
-    // an earlier curated group (see CURATED_COMPOUND_GROUPS) is skipped here
-    // rather than rendered a second time as its own standalone row.
-    const consumedPaths = new Set();
+    // 10: Compound input grouping — CURATED_COMPOUND_GROUPS' paths are always
+    // BASE storage paths (e.g. 'style.offset.x'), but retargetAppearanceFields()
+    // rewrites field.path for a State/Rule target (e.g. to
+    // 'style.states.pressed.offset.x') while preserving the original on
+    // field.originalPath (same convention the testid logic below already
+    // relies on). Match/consume on `fieldKey()`, never on `field.path`
+    // directly, or a compound row silently never renders once you're on a
+    // State/Rule tab (review finding, 2026-09-11).
+    const fieldKey = (f) => f.originalPath || f.path;
+    // A group is "rendered" (or ruled out) the FIRST time any one of its
+    // member fields is reached in `fields`' own iteration order — not tied
+    // to that member being group.paths[0] specifically. Matching only on
+    // paths[0] made the row's appearance depend on which member happened to
+    // be declared/iterated first (review finding, 2026-09-11); tracking by
+    // group.id here instead makes it order-independent regardless of how
+    // `fields` itself is ordered.
+    const renderedGroupIds = new Set();
+    const consumedKeys = new Set();
     fields.forEach((field) => {
-      if (consumedPaths.has(field.path)) return;
-      const group = this.matchCompoundGroup(field.path, fields);
+      const key = fieldKey(field);
+      if (consumedKeys.has(key)) return;
+      const group = CURATED_COMPOUND_GROUPS.find((g) => !renderedGroupIds.has(g.id) && g.paths.includes(key) && g.paths.every((p) => fields.some((f) => fieldKey(f) === p)));
       if (group) {
-        group.paths.forEach((p) => consumedPaths.add(p));
-        this.renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths);
+        renderedGroupIds.add(group.id);
+        group.paths.forEach((p) => consumedKeys.add(p));
+        this.renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths, fieldKey);
         return;
       }
       const wrap = this.buildFieldWrap(comp, field, fields, target, groupCoveredPaths);
@@ -4052,49 +4076,72 @@ export class StudioInspector {
     });
   }
 
-  /** 10: Returns the CURATED_COMPOUND_GROUPS entry whose first path matches
-   * `path`, but only when EVERY member path of that group is actually
-   * present in this render's `fields` array — a group's second field may
-   * not apply to every component type (e.g. props.min/max only co-occur on
-   * core.input/core.slider/core.stepper), and a lone survivor should just
-   * render as a normal standalone field, not a one-item "compound" row. */
-  matchCompoundGroup(path, fields) {
-    return CURATED_COMPOUND_GROUPS.find((g) => g.paths[0] === path && g.paths.every((p) => fields.some((f) => f.path === p)));
-  }
-
   /** 10: Builds every member of a curated group via buildFieldWrap() — so
    * override/suppressed/tier/testid behavior is byte-for-byte identical to a
    * standalone field, including ticket 09's numeric mousewheel/chevron
    * machinery (applied globally post-render, unaffected by DOM position) —
-   * then lays the survivors out as one `.prop-field-compound` row with short
-   * inline prefix labels (group.prefixLabels) replacing each field's own
-   * full descriptive label. Falls back to appending whichever member(s) DID
-   * build individually if fewer than 2 survive (e.g. a group member is an
-   * unauthored showWhen-hidden field on this component type) — a single
-   * field isn't a compound row. */
-  renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths) {
-    const memberFields = group.paths.map((p) => fields.find((f) => f.path === p));
+   * then hands the survivors to assembleCompoundRow() for layout. Falls back
+   * to appending whichever member(s) DID build individually if fewer than 2
+   * survive (e.g. a group member is an unauthored showWhen-hidden field on
+   * this component type) — a single field isn't a compound row.
+   * `fieldKey` is the same base-path resolver renderRegistryFields() uses,
+   * threaded through so a State/Rule-retargeted field is found by its
+   * ORIGINAL path (group.paths are always base paths) rather than its
+   * rewritten one. */
+  renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths, fieldKey) {
+    const memberFields = group.paths.map((p) => fields.find((f) => fieldKey(f) === p));
     const built = memberFields
-      .map((field, i) => ({ field, label: group.prefixLabels[i], wrap: this.buildFieldWrap(comp, field, fields, target, groupCoveredPaths) }))
+      .map((field, i) => ({ wrap: this.buildFieldWrap(comp, field, fields, target, groupCoveredPaths), label: group.prefixLabels[i], tooltip: field?.tooltip }))
       .filter((entry) => entry.wrap);
     if (built.length < 2) {
       built.forEach((entry) => mount.appendChild(entry.wrap));
       return;
     }
+    mount.appendChild(this.assembleCompoundRow(`compound-row-${group.id}`, built));
+  }
+
+  /**
+   * 10: The ONE place that owns the `.prop-field-compound` DOM shape — every
+   * compound row, registry-driven (renderCompoundGroup(), above) or
+   * hand-coded outside the registry engine (Grid Position & Size's
+   * Width/Height row), is assembled here so a future visual change to the
+   * shape itself doesn't have to be kept in sync by hand across both call
+   * sites (review finding, 2026-09-11).
+   *
+   * Each item's `wrap` is an already-built `.prop-field`-style element (from
+   * buildFieldWrap(), or an equivalent hand-built div for a non-registry
+   * field) with its own `<label>` — that label's text/title is swapped for
+   * the short inline prefix here, replacing the field's own full descriptive
+   * label, and `.prop-field-compound-item` is added so studio.css's
+   * row-layout rule (label beside the input, not above it) applies.
+   *
+   * NOTE: none of today's compound-row members carry a `showWhen` (see
+   * CURATED_COMPOUND_GROUPS and the Grid Position & Size fields, neither of
+   * which use it) — a field's `.prop-showwhen-note` block assumes the
+   * column layout `.prop-field` normally has, and studio.css defensively
+   * hides it inside a compound item rather than silently mis-rendering it
+   * (review finding, 2026-09-11). A future curated group whose member DOES
+   * need a visible showWhen note should not use this row layout as-is.
+   *
+   * @param {string} testId - full data-testid value, e.g. 'compound-row-size'
+   * @param {Array<{wrap: HTMLElement, label: string, tooltip?: string}>} items
+   * @returns {HTMLElement} the assembled `.prop-field-compound` row, not yet inserted anywhere
+   */
+  assembleCompoundRow(testId, items) {
     const outer = document.createElement('div');
     outer.className = 'prop-field-compound';
-    outer.setAttribute('data-testid', `compound-row-${group.id}`);
-    built.forEach((entry) => {
-      entry.wrap.classList.add('prop-field-compound-item');
-      const labelEl = entry.wrap.querySelector('label');
+    outer.setAttribute('data-testid', testId);
+    items.forEach(({ wrap, label, tooltip }) => {
+      wrap.classList.add('prop-field-compound-item');
+      const labelEl = wrap.querySelector('label');
       if (labelEl) {
-        labelEl.textContent = entry.label;
+        labelEl.textContent = label;
         labelEl.classList.add('prop-compound-label');
-        if (!labelEl.title) labelEl.title = entry.field.tooltip || '';
+        if (!labelEl.title && tooltip) labelEl.title = tooltip;
       }
-      outer.appendChild(entry.wrap);
+      outer.appendChild(wrap);
     });
-    mount.appendChild(outer);
+    return outer;
   }
 
   /**

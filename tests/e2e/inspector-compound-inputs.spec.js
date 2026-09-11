@@ -41,6 +41,36 @@ test.describe('compound input grouping', () => {
     expect(xBox.x).not.toBe(yBox.x);
   });
 
+  test('offset X/Y still render as a compound row under a State tab (review finding: path retargeting bug)', async ({ page }) => {
+    // Regression test for a confirmed bug: retargetAppearanceFields() rewrites
+    // a State/Rule-target field's `path` (e.g. to 'style.states.pressed.offset.x')
+    // while CURATED_COMPOUND_GROUPS' paths are always base paths
+    // ('style.offset.x') — matching directly on `field.path` meant the
+    // compound row silently never rendered once you left the Base target.
+    await page.goto('/');
+    await page.evaluate(() => {
+      const state = window.__studioApp.state;
+      state.widgetDef.components.push({ id: 'seed-btn', type: 'core.button', style: {}, props: { label: 'Seed' } });
+      state.selectComponent('seed-btn');
+    });
+
+    await page.locator('[data-mode="full"]').click();
+    await page.getByTestId('inspector-tab-style').click();
+    await page.getByTestId('style-state-tab-pressed').click();
+
+    const row = page.getByTestId('compound-row-offset');
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId('style-field-offset.x')).toBeVisible();
+    await expect(row.getByTestId('style-field-offset.y')).toBeVisible();
+
+    const xBox = await row.getByTestId('style-field-offset.x').boundingBox();
+    const yBox = await row.getByTestId('style-field-offset.y').boundingBox();
+    expect(xBox).not.toBeNull();
+    expect(yBox).not.toBeNull();
+    expect(Math.abs(xBox.y - yBox.y)).toBeLessThan(2);
+    expect(xBox.x).not.toBe(yBox.x);
+  });
+
   test('offset compound row inputs use inline short prefix labels, not the full descriptive label', async ({ page }) => {
     await page.goto('/');
     await page.evaluate(() => {

@@ -2177,6 +2177,22 @@ body, html {
   min-width: 16px;
 }
 
+/* Review finding (2026-09-11): .prop-showwhen-note (a suppressed-but-authored
+   field's "why is this hidden" note + Clear button, see buildFieldWrap() in
+   StudioInspector.js) is designed for a normal .prop-field's column layout —
+   it stacks a text span above a button under the field's own label. None of
+   today's curated compound groups (CURATED_COMPOUND_GROUPS: offset x/y,
+   props.min/max; nor the hand-coded Grid Position & Size Width/Height row)
+   have a member with a `showWhen`, so this can't fire today, but a compound
+   item is row-flex (see .prop-field.prop-field-compound-item above) and
+   would badly squash that note's own layout the moment a future curated
+   group DID include a showWhen'd field. Hidden defensively rather than left
+   to silently mis-render — a curated group whose member needs a visible
+   showWhen note should not use this compact row layout as-is. */
+.prop-field-compound-item .prop-showwhen-note {
+  display: none;
+}
+
 .prop-field-compound-item > .prop-number-wrap,
 .prop-field-compound-item > input,
 .prop-field-compound-item > select {
