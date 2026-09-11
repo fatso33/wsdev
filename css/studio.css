@@ -2143,6 +2143,47 @@ body, html {
   gap: 8px;
 }
 
+/* 10: Compound input grouping — a curated set of related fields (see
+   CURATED_COMPOUND_GROUPS in StudioInspector.js, plus the hand-coded Grid
+   Position & Size Width/Height row) rendered as one compact multi-column
+   row with short inline prefix labels, instead of each field stacking as
+   its own full-width row. auto-fit/minmax (not a fixed 2-column grid) so a
+   future 3-4 member group still wraps to a readable width rather than
+   crushing every column, while today's 2-member groups (Position X/Y,
+   Width/Height, Min/Max) simply render as two even columns — same
+   responsiveness note as ticket 01's forward-compatibility callout for a
+   future resizable sidebar. */
+.prop-field-compound {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+  gap: 8px;
+}
+
+/* Each item is still the SAME .prop-field wrap buildFieldWrap() always
+   produces (override indicator, testid, clear icon, chevron gutter all
+   unchanged) — only the internal layout direction and label style change
+   here, from stacked label-above-input to an inline prefix beside it. */
+.prop-field.prop-field-compound-item {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.prop-field-compound-item .prop-compound-label {
+  flex: 0 0 auto;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 11px;
+  min-width: 16px;
+}
+
+.prop-field-compound-item > .prop-number-wrap,
+.prop-field-compound-item > input,
+.prop-field-compound-item > select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .prop-input, .prop-select, .prop-textarea {
   width: 100%;
   padding: 6px 8px;

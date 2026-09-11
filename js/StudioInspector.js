@@ -58,6 +58,38 @@ const NUMBER_STEP_LOOKUP = {
 };
 const NUMBER_STEP_DEFAULT = 1;
 
+// 10: Compound input grouping — an explicit, reviewed list of which field
+// groups render as one compact multi-column row with short inline prefix
+// labels (group.prefixLabels), instead of each field stacking as its own
+// full-width row. Deliberately NOT an automatic "any two adjacent numeric
+// fields" heuristic — the ticket requires a curated, reviewed list, and an
+// automatic heuristic would just as happily glue together two fields that
+// are numeric/adjacent but semantically unrelated (e.g. props.majorEvery
+// next to props.minorTickLength).
+//
+// 'offset' is the ticket's own confirmed seam (style.offset.x/y, the fine
+// pixel-nudge pair under Style > Layout).
+//
+// 'minmax' (props.min/props.max, real on core.input/core.slider/
+// core.stepper's Content group) stands in for the ticket's own "RGBA color
+// channels" / "margin-padding sides" examples — neither actually exists as
+// a field anywhere in PropertyRegistry.js today (no widget exposes separate
+// R/G/B/A channel inputs; color fields are a single hex/rgba control, and
+// FDWS has no margin/padding concept at all). min/max is the closest REAL
+// analogue already in this registry: a paired-bounds numeric group that
+// recurs across multiple component types, the same shape as a margin/
+// padding pair. This substitution is flagged explicitly in the
+// implementation report rather than decided silently.
+//
+// The ticket's "size Width/Height" example is Grid Position & Size's
+// Width/Height row (General tab) — hand-coded outside this registry-driven
+// engine entirely, so it's handled separately at its own render site rather
+// than through this lookup.
+const CURATED_COMPOUND_GROUPS = [
+  { id: 'offset', prefixLabels: ['X:', 'Y:'], paths: ['style.offset.x', 'style.offset.y'] },
+  { id: 'minmax', prefixLabels: ['Min:', 'Max:'], paths: ['props.min', 'props.max'] }
+];
+
 // V14 ("Use This Component's Own Value"): a fourth option shared by every
 // condition-source dropdown (visibleWhen row, style.rules condition, an
 // interaction's "Only Run If"), alongside declared state[] vars and the
@@ -1517,13 +1549,13 @@ export class StudioInspector {
             <input type="number" id="c-layout-row" class="prop-input" value="${layout.row || 1}" min="1" max="${maxRows}" />
           </div>
         </div>
-        <div class="prop-row-2" data-tier="build">
-          <div class="prop-field">
-            <label>Width (Span Columns)</label>
+        <div class="prop-field-compound" data-tier="build" data-testid="compound-row-size">
+          <div class="prop-field prop-field-compound-item">
+            <label class="prop-compound-label" title="Width (Span Columns)">W:</label>
             <input type="number" id="c-layout-w" class="prop-input" value="${layout.w || 1}" min="1" max="${maxCols}" />
           </div>
-          <div class="prop-field">
-            <label>Height (Span Rows)</label>
+          <div class="prop-field prop-field-compound-item">
+            <label class="prop-compound-label" title="Height (Span Rows)">H:</label>
             <input type="number" id="c-layout-h" class="prop-input" value="${layout.h || 1}" min="1" max="${maxRows}" />
           </div>
         </div>
@@ -4003,102 +4035,173 @@ export class StudioInspector {
    */
   renderRegistryFields(comp, mount, fields, target, groupCoveredPaths) {
     mount.innerHTML = '';
+    // 10: Compound input grouping — a field already consumed as a member of
+    // an earlier curated group (see CURATED_COMPOUND_GROUPS) is skipped here
+    // rather than rendered a second time as its own standalone row.
+    const consumedPaths = new Set();
     fields.forEach((field) => {
-      if (field.control === null) return; // deprecated/hidden, e.g. props.align
-      // Step 3 Part A (2026-09-04): 'bespoke' is a DIFFERENT skip reason from null —
-      // the field is real and has working UI, it's just intentionally hand-rendered
-      // outside this engine (e.g. core.list's itemTemplate, which needs JSON.parse
-      // validation this engine's controls don't have). Distinct from null so a future
-      // "which fields have no UI at all" check can tell the two apart.
-      if (field.control === 'bespoke') return;
-      // Part 2, §2.1 (Ingrid's guarantee): "a field holding a non-default
-      // value surfaces regardless of tier and regardless of showWhen."
-      // Computed once, reused for both halves of that guarantee — post-
-      // implementation review §5 found only the showWhen half was actually
-      // wired: a field with no showWhen at all (the common case) still
-      // vanished below Full purely because of its own field.tier, authored
-      // or not (e.g. core.button's props.hasLed set true, then invisible
-      // again the moment you left Full).
-      const raw = this.getFieldValue(comp, field.path);
-      const isAuthored = raw !== undefined && raw !== field.default;
-      // 03: Override indicator — check if this field is overridden in a state/rule tab
-      // BUT suppress if this field is covered by a group-level override indicator
-      const isOverridable = target && (target.kind === 'state' || target.kind === 'rule');
-      const isCoveredByGroup = groupCoveredPaths && groupCoveredPaths.has(field.path);
-      const isOverridden = isOverridable && raw !== undefined && !isCoveredByGroup;
-
-      // A showWhen-false field is normally skipped entirely, but a
-      // GENUINELY AUTHORED value (raw, stored, and different from the
-      // field's own default — not just "happens to be set to its own
-      // default") must never silently vanish, at any tier. Render it
-      // anyway, dimmed, with why it's hidden and a one-click clear.
-      let suppressed = false;
-      if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen, fields)) {
-        if (!isAuthored) return; // unchanged: nothing authored, skip as before
-        suppressed = true;
+      if (consumedPaths.has(field.path)) return;
+      const group = this.matchCompoundGroup(field.path, fields);
+      if (group) {
+        group.paths.forEach((p) => consumedPaths.add(p));
+        this.renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths);
+        return;
       }
-      const renderer = this.FIELD_RENDERERS[field.control];
-      if (!renderer) {
-        throw new Error(`[StudioInspector] No FIELD_RENDERERS entry for control "${field.control}" (path "${field.path}") — register one before declaring a field with this control.`);
-      }
-      const wrap = document.createElement('div');
-      wrap.className = 'prop-field';
-      // 03: Add data-testid for style fields to support test assertions (use originalPath if available)
-      const testidPath = field.originalPath || field.path;
-      if (testidPath.startsWith('style.')) {
-        // Remove 'style.' prefix from the path for the testid
-        const testidSuffix = testidPath.substring(6); // 'style.'.length === 6
-        wrap.setAttribute('data-testid', `style-field-${testidSuffix}`);
-      }
-      // 03: Add is-overridden class
-      if (isOverridden) {
-        wrap.classList.add('is-overridden');
-      }
-      // Part 2: 'advanced' fields stay Full-only, unchanged. A 'simple' field
-      // not in the curated Guided allowlist (field.guided) is Build+Full —
-      // hidden only in Guided. A curated Guided field gets no data-tier
-      // attribute at all, same as every field before Part 2 existed: always
-      // visible, at every tier. A suppressed-but-authored field, OR any
-      // other authored field regardless of showWhen, ALSO gets no data-tier
-      // — §2.1's full guarantee, both axes.
-      if (!suppressed && !isAuthored) {
-        if (field.tier === 'advanced') wrap.setAttribute('data-tier', 'advanced');
-        else if (field.tier === 'simple' && !field.guided) wrap.setAttribute('data-tier', 'build');
-      }
-      mount.appendChild(wrap);
-      if (suppressed) {
-        const raw = this.getFieldValue(comp, field.path);
-        const note = document.createElement('div');
-        note.className = 'prop-showwhen-note';
-        note.innerHTML = `
-          <span>${escapeHtmlAttr(this.formatShowWhenReason(field.showWhen))} — still set to "${escapeHtmlAttr(String(raw))}"</span>
-          <button type="button" class="prop-showwhen-clear">Clear</button>
-        `;
-        note.querySelector('.prop-showwhen-clear')?.addEventListener('click', () => this.commitField(comp, field.path, undefined));
-        wrap.appendChild(note);
-        const fieldMount = document.createElement('div');
-        fieldMount.style.opacity = '0.55';
-        wrap.appendChild(fieldMount);
-        renderer(comp, field, fieldMount);
-      } else {
-        renderer(comp, field, wrap);
-      }
-      // 03: Add clear icon after renderer has populated the wrap (so it doesn't get overwritten)
-      if (isOverridden) {
-        const clearIcon = document.createElement('button');
-        clearIcon.type = 'button';
-        clearIcon.className = 'override-clear-icon';
-        clearIcon.setAttribute('data-testid', 'clear-override');
-        clearIcon.innerHTML = '✕';
-        clearIcon.title = 'Clear this override';
-        clearIcon.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          this.commitField(comp, field.path, undefined);
-        });
-        wrap.appendChild(clearIcon);
-      }
+      const wrap = this.buildFieldWrap(comp, field, fields, target, groupCoveredPaths);
+      if (wrap) mount.appendChild(wrap);
     });
+  }
+
+  /** 10: Returns the CURATED_COMPOUND_GROUPS entry whose first path matches
+   * `path`, but only when EVERY member path of that group is actually
+   * present in this render's `fields` array — a group's second field may
+   * not apply to every component type (e.g. props.min/max only co-occur on
+   * core.input/core.slider/core.stepper), and a lone survivor should just
+   * render as a normal standalone field, not a one-item "compound" row. */
+  matchCompoundGroup(path, fields) {
+    return CURATED_COMPOUND_GROUPS.find((g) => g.paths[0] === path && g.paths.every((p) => fields.some((f) => f.path === p)));
+  }
+
+  /** 10: Builds every member of a curated group via buildFieldWrap() — so
+   * override/suppressed/tier/testid behavior is byte-for-byte identical to a
+   * standalone field, including ticket 09's numeric mousewheel/chevron
+   * machinery (applied globally post-render, unaffected by DOM position) —
+   * then lays the survivors out as one `.prop-field-compound` row with short
+   * inline prefix labels (group.prefixLabels) replacing each field's own
+   * full descriptive label. Falls back to appending whichever member(s) DID
+   * build individually if fewer than 2 survive (e.g. a group member is an
+   * unauthored showWhen-hidden field on this component type) — a single
+   * field isn't a compound row. */
+  renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths) {
+    const memberFields = group.paths.map((p) => fields.find((f) => f.path === p));
+    const built = memberFields
+      .map((field, i) => ({ field, label: group.prefixLabels[i], wrap: this.buildFieldWrap(comp, field, fields, target, groupCoveredPaths) }))
+      .filter((entry) => entry.wrap);
+    if (built.length < 2) {
+      built.forEach((entry) => mount.appendChild(entry.wrap));
+      return;
+    }
+    const outer = document.createElement('div');
+    outer.className = 'prop-field-compound';
+    outer.setAttribute('data-testid', `compound-row-${group.id}`);
+    built.forEach((entry) => {
+      entry.wrap.classList.add('prop-field-compound-item');
+      const labelEl = entry.wrap.querySelector('label');
+      if (labelEl) {
+        labelEl.textContent = entry.label;
+        labelEl.classList.add('prop-compound-label');
+        if (!labelEl.title) labelEl.title = entry.field.tooltip || '';
+      }
+      outer.appendChild(entry.wrap);
+    });
+    mount.appendChild(outer);
+  }
+
+  /**
+   * Builds one field's `.prop-field` wrap — override indicator, suppressed/
+   * showWhen note, tier attribute, testid, clear icon, and the FIELD_RENDERERS
+   * dispatch itself — but returns it instead of appending it to `mount`
+   * directly, so a curated compound group (renderCompoundGroup(), above) can
+   * gather several of these into one row before insertion. Returns null for
+   * a field that renders nothing at all: control:null/'bespoke', or an
+   * unauthored showWhen-hidden field — exactly the cases that used to
+   * `return;` straight out of renderRegistryFields' own forEach body before
+   * this was extracted into its own method.
+   */
+  buildFieldWrap(comp, field, fields, target, groupCoveredPaths) {
+    if (field.control === null) return null; // deprecated/hidden, e.g. props.align
+    // Step 3 Part A (2026-09-04): 'bespoke' is a DIFFERENT skip reason from null —
+    // the field is real and has working UI, it's just intentionally hand-rendered
+    // outside this engine (e.g. core.list's itemTemplate, which needs JSON.parse
+    // validation this engine's controls don't have). Distinct from null so a future
+    // "which fields have no UI at all" check can tell the two apart.
+    if (field.control === 'bespoke') return null;
+    // Part 2, §2.1 (Ingrid's guarantee): "a field holding a non-default
+    // value surfaces regardless of tier and regardless of showWhen."
+    // Computed once, reused for both halves of that guarantee — post-
+    // implementation review §5 found only the showWhen half was actually
+    // wired: a field with no showWhen at all (the common case) still
+    // vanished below Full purely because of its own field.tier, authored
+    // or not (e.g. core.button's props.hasLed set true, then invisible
+    // again the moment you left Full).
+    const raw = this.getFieldValue(comp, field.path);
+    const isAuthored = raw !== undefined && raw !== field.default;
+    // 03: Override indicator — check if this field is overridden in a state/rule tab
+    // BUT suppress if this field is covered by a group-level override indicator
+    const isOverridable = target && (target.kind === 'state' || target.kind === 'rule');
+    const isCoveredByGroup = groupCoveredPaths && groupCoveredPaths.has(field.path);
+    const isOverridden = isOverridable && raw !== undefined && !isCoveredByGroup;
+
+    // A showWhen-false field is normally skipped entirely, but a
+    // GENUINELY AUTHORED value (raw, stored, and different from the
+    // field's own default — not just "happens to be set to its own
+    // default") must never silently vanish, at any tier. Render it
+    // anyway, dimmed, with why it's hidden and a one-click clear.
+    let suppressed = false;
+    if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen, fields)) {
+      if (!isAuthored) return null; // unchanged: nothing authored, skip as before
+      suppressed = true;
+    }
+    const renderer = this.FIELD_RENDERERS[field.control];
+    if (!renderer) {
+      throw new Error(`[StudioInspector] No FIELD_RENDERERS entry for control "${field.control}" (path "${field.path}") — register one before declaring a field with this control.`);
+    }
+    const wrap = document.createElement('div');
+    wrap.className = 'prop-field';
+    // 03: Add data-testid for style fields to support test assertions (use originalPath if available)
+    const testidPath = field.originalPath || field.path;
+    if (testidPath.startsWith('style.')) {
+      // Remove 'style.' prefix from the path for the testid
+      const testidSuffix = testidPath.substring(6); // 'style.'.length === 6
+      wrap.setAttribute('data-testid', `style-field-${testidSuffix}`);
+    }
+    // 03: Add is-overridden class
+    if (isOverridden) {
+      wrap.classList.add('is-overridden');
+    }
+    // Part 2: 'advanced' fields stay Full-only, unchanged. A 'simple' field
+    // not in the curated Guided allowlist (field.guided) is Build+Full —
+    // hidden only in Guided. A curated Guided field gets no data-tier
+    // attribute at all, same as every field before Part 2 existed: always
+    // visible, at every tier. A suppressed-but-authored field, OR any
+    // other authored field regardless of showWhen, ALSO gets no data-tier
+    // — §2.1's full guarantee, both axes.
+    if (!suppressed && !isAuthored) {
+      if (field.tier === 'advanced') wrap.setAttribute('data-tier', 'advanced');
+      else if (field.tier === 'simple' && !field.guided) wrap.setAttribute('data-tier', 'build');
+    }
+    if (suppressed) {
+      const note = document.createElement('div');
+      note.className = 'prop-showwhen-note';
+      note.innerHTML = `
+        <span>${escapeHtmlAttr(this.formatShowWhenReason(field.showWhen))} — still set to "${escapeHtmlAttr(String(raw))}"</span>
+        <button type="button" class="prop-showwhen-clear">Clear</button>
+      `;
+      note.querySelector('.prop-showwhen-clear')?.addEventListener('click', () => this.commitField(comp, field.path, undefined));
+      wrap.appendChild(note);
+      const fieldMount = document.createElement('div');
+      fieldMount.style.opacity = '0.55';
+      wrap.appendChild(fieldMount);
+      renderer(comp, field, fieldMount);
+    } else {
+      renderer(comp, field, wrap);
+    }
+    // 03: Add clear icon after renderer has populated the wrap (so it doesn't get overwritten)
+    if (isOverridden) {
+      const clearIcon = document.createElement('button');
+      clearIcon.type = 'button';
+      clearIcon.className = 'override-clear-icon';
+      clearIcon.setAttribute('data-testid', 'clear-override');
+      clearIcon.innerHTML = '✕';
+      clearIcon.title = 'Clear this override';
+      clearIcon.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.commitField(comp, field.path, undefined);
+      });
+      wrap.appendChild(clearIcon);
+    }
+    return wrap;
   }
 
   /**
