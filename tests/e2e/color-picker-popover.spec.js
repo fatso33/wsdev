@@ -72,6 +72,45 @@ test('Cancel leaves the field value unchanged; Apply commits the picked color', 
   expect(comp.style.typography.color).toBe('#ff00ff');
 });
 
+test('opening the popover and clicking Apply with zero edits does not drift the committed color', async ({ page }) => {
+  await selectSeedButton(page);
+  // Seed a color known to round-trip hex->HSV->hex with rounding drift
+  // (see ColorPickerLogic.test.js) so a spurious write-back would show up.
+  await page.evaluate(() => {
+    const state = window.__studioApp.state;
+    const comp = state.widgetDef.components.find((c) => c.id === 'seed-btn');
+    comp.style.typography.color = '#3b82f6';
+    state.selectComponent('seed-btn');
+  });
+  await page.getByTestId('inspector-tab-style').click();
+
+  const textField = page.locator('#c-typo-color');
+  await expect(textField).toHaveValue('#3b82f6');
+
+  await page.locator('#c-typo-color-pick').click();
+  await page.locator('.studio-popover').getByRole('button', { name: 'Apply' }).click();
+  await expect(page.locator('.studio-popover')).toHaveCount(0);
+
+  // No edits were made — the committed value must be exactly the seed,
+  // not a hex->HSV->hex round trip of it.
+  await expect(textField).toHaveValue('#3b82f6');
+  const comp = await page.evaluate(() => window.__studioApp.state.widgetDef.components.find((c) => c.id === 'seed-btn'));
+  expect(comp.style.typography.color).toBe('#3b82f6');
+});
+
+test('typing in the hex input is not clobbered mid-edit by canonicalization', async ({ page }) => {
+  await selectSeedButton(page);
+  await page.locator('#c-typo-color-pick').click();
+
+  const hexInput = page.locator('.studio-popover .cp-hex-input');
+  // Type a valid hex using uppercase letters — if the input re-syncs its
+  // own value from canonicalized state on every keystroke, this would get
+  // stomped (lowercased and/or cursor reset) mid-edit.
+  await hexInput.fill('');
+  await hexInput.pressSequentially('#AABBCC', { delay: 20 });
+  await expect(hexInput).toHaveValue('#AABBCC');
+});
+
 test('the field text input stays directly editable by typing a hex value, without opening the popover', async ({ page }) => {
   await selectSeedButton(page);
   const textField = page.locator('#c-typo-color');
