@@ -220,4 +220,54 @@ test.describe('numeric field redesign', () => {
     await clearIcon.click();
     await expect(field).not.toHaveClass(/is-overridden/);
   });
+
+  test('changing the override-icon size via its shared CSS variable keeps chevrons non-overlapping (ticket 12)', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => {
+      const state = window.__studioApp.state;
+      state.widgetDef.components.push({
+        id: 'seed-btn',
+        type: 'core.button',
+        style: { offset: { x: 0 }, states: { pressed: { offset: { x: 5 } } } },
+        props: { label: 'Seed' },
+      });
+      state.selectComponent('seed-btn');
+    });
+
+    await page.locator('[data-mode="full"]').click();
+    await page.getByTestId('inspector-tab-style').click();
+    await page.getByTestId('style-state-tab-pressed').click();
+
+    const field = page.getByTestId('style-field-offset.x');
+    await expect(field).toHaveClass(/is-overridden/);
+
+    // Blow up the override-clear-icon's footprint via the single shared CSS
+    // custom property (not by re-declaring font-size/padding directly on
+    // .override-clear-icon) — proves the chevron gutter positioning is
+    // genuinely derived from that variable rather than independently
+    // re-hardcoded at new pixel values.
+    await page.addStyleTag({
+      content: ':root { --override-icon-size: 24px; --override-icon-padding: 8px; }',
+    });
+
+    const clearIcon = field.getByTestId('clear-override');
+    await expect(clearIcon).toHaveCSS('font-size', '24px');
+
+    const chevrons = field.locator('.prop-number-chevrons');
+    await field.hover();
+    await expect(chevrons).toHaveCSS('opacity', '1');
+    await expect(clearIcon).toHaveCSS('opacity', '1');
+
+    const chevronsBox = await chevrons.boundingBox();
+    const clearIconBox = await clearIcon.boundingBox();
+    expect(chevronsBox).not.toBeNull();
+    expect(clearIconBox).not.toBeNull();
+
+    const chevronsLeft = chevronsBox.x;
+    const chevronsRight = chevronsBox.x + chevronsBox.width;
+    const clearIconLeft = clearIconBox.x;
+    const clearIconRight = clearIconBox.x + clearIconBox.width;
+    const overlaps = chevronsLeft < clearIconRight && clearIconLeft < chevronsRight;
+    expect(overlaps).toBe(false);
+  });
 });

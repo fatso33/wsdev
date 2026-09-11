@@ -35,6 +35,15 @@
   --inspector-border-width: 1px;
   --inspector-border-color: var(--studio-panel-border);
   --inspector-focus-ring: 1px solid var(--accent-cyan);
+
+  /* 12: .override-clear-icon's own geometry — single source of truth for its
+     footprint, so the numeric-chevron gutter (see .prop-number-chevrons)
+     stays reconciled with it if the icon's size ever changes, instead of two
+     independently hand-derived pixel numbers drifting apart. */
+  --override-icon-right: 4px;
+  --override-icon-size: 14px;
+  --override-icon-padding: 4px;
+  --override-icon-zone: calc(var(--override-icon-right) + var(--override-icon-size) + (2 * var(--override-icon-padding)));
 }
 
 /* Widget-content color contract — mirrors flight-deck-pwa/css/main.css's
@@ -2056,7 +2065,7 @@ body, html {
 /* 03: Clear override button — hidden by default, revealed on hover */
 .override-clear-icon {
   position: absolute;
-  right: 4px;
+  right: var(--override-icon-right);
   bottom: 6px;
   top: auto;
   transform: none;
@@ -2065,8 +2074,8 @@ body, html {
   border: none;
   color: var(--accent-cyan, #00d8f6);
   cursor: pointer;
-  font-size: 14px;
-  padding: 4px;
+  font-size: var(--override-icon-size);
+  padding: var(--override-icon-padding);
   transition: opacity 0.15s;
 }
 
@@ -2271,9 +2280,12 @@ body, html {
 /* Combine with the override-indicator's own reserved 30px (§03) when both a
    clear-override icon AND the step chevrons are present on the same field —
    higher specificity (3 classes) wins over the 2-class .is-overridden rule
-   above regardless of source order. */
+   above regardless of source order.
+   12: the 20px chevron-only reserve (see .prop-input.has-number-chevrons
+   above) plus --override-icon-zone (the icon's own footprint, defined once
+   at :root) replaces what used to be an independently hand-derived 46px. */
 .prop-field.is-overridden .prop-input.has-number-chevrons {
-  padding-right: 46px;
+  padding-right: calc(20px + var(--override-icon-zone));
 }
 
 /* Bug fix (review, 2026-09-10): .prop-number-chevrons and .override-clear-icon
@@ -2281,10 +2293,14 @@ body, html {
    unshifted, both sit flush against the right edge — overlapping whenever a
    field is both overridden and chevron-enhanced (e.g. style.offset.x in a
    rule/state tab). Shift the chevron gutter left of the clear-icon's own
-   ~26px zone (icon at right:4px, ~22px wide) so the two never collide; the
-   46px combined padding-right above already reserves room for exactly this. */
+   zone (--override-icon-zone, defined once at :root) plus a small 2px gap so
+   the two never collide; the calc() above already reserves room for exactly
+   this.
+   12: right offset now derives from --override-icon-zone (was a
+   hand-derived 28px) so it stays reconciled if the icon's own size ever
+   changes. */
 .prop-field.is-overridden .prop-number-chevrons {
-  right: 28px;
+  right: calc(var(--override-icon-zone) + 2px);
 }
 
 .prop-number-chevrons {
