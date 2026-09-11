@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { reorderRules, summarizeCondition } from '../js/InspectorLogic.js';
+import { reorderRules, summarizeCondition, getMultiSelectAvailability } from '../js/InspectorLogic.js';
+import { getFieldsForType } from '../widgets/PropertyRegistry.js';
 
 describe('reorderRules', () => {
   it('moves a rule from one index to another, preserving the rest in order', () => {
@@ -171,5 +172,45 @@ describe('summarizeCondition', () => {
     expect(summary).toContain('auxPower');
     expect(summary).toContain('AND');
     expect(summary).toContain('OR');
+  });
+});
+
+describe('getMultiSelectAvailability', () => {
+  it('returns the shared state-tab name when every selected component supports the same one', () => {
+    const selected = [
+      { type: 'core.button', props: {} },
+      { type: 'core.button', props: {} },
+    ];
+    expect(getMultiSelectAvailability(selected).stateTabName).toBe('pressed');
+  });
+
+  it('hides the state tab when selected components support different state names', () => {
+    const selected = [
+      { type: 'core.button', props: {} },
+      { type: 'core.rotary', props: {} },
+    ];
+    expect(getMultiSelectAvailability(selected).stateTabName).toBeNull();
+  });
+
+  it('limits enabled fields to the intersection across selected types', () => {
+    const selected = [
+      { type: 'core.divider', props: {} },
+      { type: 'core.button', props: {} },
+    ];
+    const buttonOnlyField = getFieldsForType('core.button').find((f) => f.path === 'props.hasLed');
+    expect(buttonOnlyField).toBeTruthy(); // sanity: this field exists for core.button
+    expect(getMultiSelectAvailability(selected).enabledFieldPaths).not.toContain('props.hasLed');
+  });
+
+  it('returns a null stateTabName and empty fields for an empty selection', () => {
+    expect(getMultiSelectAvailability([])).toEqual({ enabledFieldPaths: [], stateTabName: null, stateTabLabel: null });
+  });
+
+  it('returns the shared tab label alongside the shared state name', () => {
+    const selected = [
+      { type: 'core.button', props: {} },
+      { type: 'core.button', props: {} },
+    ];
+    expect(getMultiSelectAvailability(selected).stateTabLabel).toBe('Pressed');
   });
 });

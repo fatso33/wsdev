@@ -68,4 +68,42 @@ describe('state-scoped Copy/Paste Style', () => {
     expect(btnC.style.typography.color).toBe('#111111');
     expect(btnC.style.background.fillColor).toBe('#aaaaaa');
   });
+
+  // Ticket 11: the multi-select Style tab's State sub-tab needs state-scoped
+  // paste to actually reach every selected component, not just be rejected —
+  // extends pasteStyleToSelection() with an explicit stateKey argument rather
+  // than replacing the no-arg (base-style) guard covered above.
+  it('pasteStyleToSelection(stateKey) applies a state-scoped clipboard copy to every selected component', () => {
+    const state = new StudioState();
+    state.widgetDef.components = [
+      { id: 'btnA', type: 'core.button', style: { typography: { color: '#111111' }, states: { pressed: { typography: { color: '#ff0000' } } } } },
+      { id: 'btnB', type: 'core.button', style: { typography: { color: '#222222' } } },
+      { id: 'btnC', type: 'core.button', style: { typography: { color: '#333333' }, states: { pressed: { border: { width: 2 } } } } },
+    ];
+
+    state.multiSelectedIds = new Set(['btnB', 'btnC']);
+    state.copyComponentStyle('btnA', 'pressed');
+    state.pasteStyleToSelection('pressed');
+
+    const btnB = state.getComponent('btnB');
+    const btnC = state.getComponent('btnC');
+    expect(btnB.style.states.pressed.typography.color).toBe('#ff0000');
+    expect(btnB.style.typography.color).toBe('#222222'); // base style untouched
+    expect(btnC.style.states.pressed.typography.color).toBe('#ff0000');
+    expect(btnC.style.states.pressed.border).toBeUndefined(); // wholesale replace, not merge
+  });
+
+  it('pasteStyleToSelection(stateKey) is a single combined undo step', () => {
+    const state = new StudioState();
+    state.widgetDef.components = [
+      { id: 'btnA', type: 'core.button', style: { states: { pressed: { typography: { color: '#ff0000' } } } } },
+      { id: 'btnB', type: 'core.button', style: {} },
+      { id: 'btnC', type: 'core.button', style: {} },
+    ];
+    state.multiSelectedIds = new Set(['btnB', 'btnC']);
+    state.copyComponentStyle('btnA', 'pressed');
+    const before = state.undoStack.length;
+    state.pasteStyleToSelection('pressed');
+    expect(state.undoStack.length).toBe(before + 1);
+  });
 });

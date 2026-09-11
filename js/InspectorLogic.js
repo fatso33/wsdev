@@ -4,6 +4,8 @@
  * Designed to be extensible — tickets 06 and 11 add further functions here.
  */
 
+import { getFieldsForType, getStateStyleConfig } from '../widgets/PropertyRegistry.js';
+
 const RULE_OP_SYMBOLS = { equals: '=', notEquals: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' };
 
 /**
@@ -100,4 +102,43 @@ export function summarizeCondition(when) {
 
   // Fallback for unrecognized structures
   return 'No condition set';
+}
+
+/**
+ * Ticket 11: pure, DOM-free field-availability intersection for a 2+
+ * multi-selection — which style/type fields are supported by EVERY selected
+ * component's type (registry-driven, via getFieldsForType()), and whether
+ * every selected component's type/variant shares the identical alt-state
+ * name (via getStateStyleConfig()) so a State sub-tab can be shown at all.
+ *
+ * Every style.* row in PropertyRegistry.js's COMMON_FIELDS currently applies
+ * to every type (no `appliesTo` restriction on any of them today), so in
+ * practice `enabledFieldPaths` rarely excludes a Style-tab field yet — the
+ * intersection is real and registry-driven regardless, and starts mattering
+ * the moment a future style field IS restricted via `appliesTo`.
+ *
+ * @param {Array<{type: string, props?: object}>} selected - the selected components
+ * @returns {{enabledFieldPaths: string[], stateTabName: string|null, stateTabLabel: string|null}}
+ *
+ * @example
+ * getMultiSelectAvailability([{type:'core.button',props:{}},{type:'core.button',props:{}}])
+ * // => { enabledFieldPaths: [...], stateTabName: 'pressed', stateTabLabel: 'Pressed' }
+ *
+ * getMultiSelectAvailability([{type:'core.button',props:{}},{type:'core.rotary',props:{}}])
+ * // => { enabledFieldPaths: [...], stateTabName: null, stateTabLabel: null }
+ */
+export function getMultiSelectAvailability(selected) {
+  if (!Array.isArray(selected) || selected.length === 0) {
+    return { enabledFieldPaths: [], stateTabName: null, stateTabLabel: null };
+  }
+
+  const fieldPathSets = selected.map((c) => new Set(getFieldsForType(c.type).map((f) => f.path)));
+  const enabledFieldPaths = [...fieldPathSets[0]].filter((path) => fieldPathSets.every((set) => set.has(path)));
+
+  const stateConfigs = selected.map((c) => getStateStyleConfig(c.type, c.props || {}));
+  const firstName = stateConfigs[0]?.name || null;
+  const stateTabName = (firstName && stateConfigs.every((cfg) => cfg?.name === firstName)) ? firstName : null;
+  const stateTabLabel = stateTabName ? (stateConfigs.find((cfg) => cfg?.name === stateTabName)?.tabLabel || null) : null;
+
+  return { enabledFieldPaths, stateTabName, stateTabLabel };
 }

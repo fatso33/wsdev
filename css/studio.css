@@ -1986,6 +1986,20 @@ body, html {
   border-bottom-color: var(--accent-cyan);
 }
 
+/* Ticket 11: multi-select shell disables General/Data/Events outright
+   (there's no single component to show them for) rather than hiding them —
+   the tab stays visible so the shell's shape doesn't shift between single-
+   and multi-selection, just visibly inert. */
+.inspector-tab-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.inspector-tab-btn:disabled:hover {
+  color: var(--text-dim);
+  background-color: transparent;
+}
+
 .inspector-panels {
   display: flex;
   flex-direction: column;
@@ -2006,6 +2020,15 @@ body, html {
 
 .inspector-panel.active {
   display: flex;
+}
+
+/* Ticket 11: multi-select Style tab — a field not supported by every
+   selected component's type is shown disabled rather than hidden, so the
+   set of visible fields stays stable across a selection change (and so it's
+   obvious the field DOES exist, just not for this whole selection). */
+.prop-field-multiselect-disabled {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 /* Form Controls */

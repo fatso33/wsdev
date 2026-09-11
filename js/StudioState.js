@@ -679,26 +679,95 @@ export class StudioState {
   }
 
   /**
-   * Pastes the clipboard style onto every multi-selected component at once,
-   * wholesale-replacing each one's existing style. One combined undo step.
-   * No-ops below 2 selected or with nothing copied.
-   * Ticket 04: Guards against pasting state-scoped clipboard fragments to
-   * all components — bulk paste only applies to base-style copies (full
-   * style tree), not state-scoped overrides which should be pasted
-   * individually via pasteStyleToComponent(id, stateKey).
+   * Pastes the clipboard style onto every multi-selected component at once.
+   * One combined undo step. No-ops below 2 selected or with nothing copied.
+   *
+   * Ticket 04: called with no `stateKey` (or 'normal'), wholesale-replaces
+   * each component's full style tree — guarded against a state-scoped
+   * clipboard fragment (bulk-replacing every component's WHOLE style with
+   * e.g. just `{ background: {...} }` copied from one Pressed state would be
+   * silently destructive), which should be pasted individually via
+   * pasteStyleToComponent(id, stateKey) instead.
+   *
+   * Ticket 11: with an explicit `stateKey` (the multi-select Style tab's
+   * active State sub-tab, gated to only exist when every selected
+   * component's type shares that state name — see
+   * InspectorLogic.getMultiSelectAvailability()), pastes into that state's
+   * override on every selected component instead — the guard above only
+   * ever applied to the base-style (no stateKey) case, so it does not apply
+   * here. Same per-component semantics as pasteStyleToComponent(id, stateKey):
+   * wholesale-replaces that one state's override, leaving each component's
+   * base style and other states untouched.
+   * @param {string} [stateKey] - optional state key; 'normal' or omitted = base style
    */
-  pasteStyleToSelection() {
+  pasteStyleToSelection(stateKey) {
     if (!this.copiedStyle) return;
-    // Guard: don't paste state-scoped fragments to all selected components
-    if (this.copiedStateKey) return;
     const ids = [...this.multiSelectedIds];
     if (ids.length < 2) return;
     const comps = ids.map((id) => this.getComponent(id)).filter(Boolean);
     if (comps.length < 2) return;
 
+    if (stateKey && stateKey !== 'normal') {
+      this.saveHistory(`Paste Style (${comps.length} components)`);
+      comps.forEach((c) => {
+        if (!c.style) c.style = {};
+        if (!c.style.states) c.style.states = {};
+        c.style.states[stateKey] = JSON.parse(JSON.stringify(this.copiedStyle));
+      });
+      StudioValidator.syncCapabilities(this.widgetDef);
+      this.notify('WIDGET_LAYOUT_UPDATED', {});
+      return;
+    }
+
+    // Guard: don't paste state-scoped fragments as a base-style replacement.
+    if (this.copiedStateKey) return;
     this.saveHistory(`Paste Style (${comps.length} components)`);
     comps.forEach((c) => {
       c.style = JSON.parse(JSON.stringify(this.copiedStyle));
+    });
+    StudioValidator.syncCapabilities(this.widgetDef);
+    this.notify('WIDGET_LAYOUT_UPDATED', {});
+  }
+
+  /**
+   * Ticket 11: applies ONE nested style leaf (e.g.
+   * 'style.typography.color', or a state-retargeted
+   * 'style.states.pressed.border.width') to every multi-selected component,
+   * with a single combined undo step — the multi-select Style tab's
+   * per-field commit, mirroring StudioInspector.commitField()'s nested-clone
+   * splice (clones only the objects along `path`, preserving every sibling
+   * key) but fanned out across the whole selection in one saveHistory()/
+   * notify() pair, the same "one call = one undo entry" precedent
+   * applyStyleToSelection() already set for its own (shallow, per-top-key)
+   * merges. Wholesale-overwrites the leaf at `path` — same "last write wins"
+   * semantics commitField() already has for single-select.
+   * No-ops below 2 selected components.
+   * @param {string} path - e.g. 'style.typography.color'
+   * @param {*} value
+   */
+  applyFieldToSelection(path, value) {
+    const ids = [...this.multiSelectedIds];
+    if (ids.length < 2) return;
+    const comps = ids.map((id) => this.getComponent(id)).filter(Boolean);
+    if (comps.length < 2) return;
+
+    this.saveHistory('Bulk Style Edit');
+    const segs = path.split('.');
+    const topKey = segs[0];
+    const cloneLevel = (obj) => (Array.isArray(obj) ? [...obj] : (obj && typeof obj === 'object' ? { ...obj } : {}));
+    comps.forEach((comp) => {
+      if (segs.length === 1) {
+        comp[topKey] = value;
+        return;
+      }
+      const topVal = cloneLevel(comp[topKey]);
+      let cur = topVal;
+      for (let i = 1; i < segs.length - 1; i++) {
+        cur[segs[i]] = cloneLevel(cur[segs[i]]);
+        cur = cur[segs[i]];
+      }
+      cur[segs[segs.length - 1]] = value;
+      comp[topKey] = topVal;
     });
     StudioValidator.syncCapabilities(this.widgetDef);
     this.notify('WIDGET_LAYOUT_UPDATED', {});
