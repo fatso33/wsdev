@@ -111,6 +111,34 @@ test('typing in the hex input is not clobbered mid-edit by canonicalization', as
   await expect(hexInput).toHaveValue('#AABBCC');
 });
 
+test('a drag on the SV area does not clobber the hex input while it is still focused mid-edit', async ({ page }) => {
+  await selectSeedButton(page);
+  await page.locator('#c-typo-color-pick').click();
+
+  const hexInput = page.locator('.studio-popover .cp-hex-input');
+  const svArea = page.locator('.studio-popover .cp-sv-area');
+
+  // Type a partial (not-yet-valid) hex and deliberately do NOT blur —
+  // the SV area's mousedown calls e.preventDefault() to stop native text
+  // selection while dragging, which also suppresses the browser's default
+  // outside-mousedown blur, so the hex input can still be focused here.
+  await hexInput.fill('');
+  await hexInput.pressSequentially('#3b', { delay: 20 });
+  await expect(hexInput).toHaveValue('#3b');
+  await expect(hexInput).toBeFocused();
+
+  const box = await svArea.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+
+  // Still focused, and the drag must not have overwritten the in-progress
+  // hex value even though the drag itself produced a valid committed color.
+  await expect(hexInput).toBeFocused();
+  await expect(hexInput).toHaveValue('#3b');
+
+  await page.mouse.up();
+});
+
 test('the field text input stays directly editable by typing a hex value, without opening the popover', async ({ page }) => {
   await selectSeedButton(page);
   const textField = page.locator('#c-typo-color');

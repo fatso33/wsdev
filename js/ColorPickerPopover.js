@@ -75,21 +75,31 @@ export function openColorPickerPopover({ anchor, initialColor }) {
         ctx.setValue(hex);
       };
 
-      const setFromSv = (clientX, clientY) => {
+      const setFromSv = (clientX, clientY, suppressHexSync) => {
         const rect = svArea.getBoundingClientRect();
         const s = clamp((clientX - rect.left) / rect.width, 0, 1);
         const v = 1 - clamp((clientY - rect.top) / rect.height, 0, 1);
         hsv = { ...hsv, s, v };
-        commit();
+        commit({ fromHexInput: suppressHexSync });
       };
 
       let dragging = false;
-      const onMouseMove = (e) => { if (dragging) setFromSv(e.clientX, e.clientY); };
+      // Set at drag start and held for the whole drag: `e.preventDefault()`
+      // below (needed to stop native text-selection while dragging) also
+      // suppresses the browser's default outside-mousedown blur, so the hex
+      // input can still have focus for the entire drag. If it does, treat
+      // every commit() during that drag like a hex-input-originated one —
+      // i.e. never stomp hexInput.value — otherwise a drag started without
+      // first blurring the hex field reopens the exact clobbering bug
+      // `fromHexInput` exists to prevent (bug 2, take 2).
+      let dragSuppressesHexSync = false;
+      const onMouseMove = (e) => { if (dragging) setFromSv(e.clientX, e.clientY, dragSuppressesHexSync); };
       const stopDragging = () => { dragging = false; };
       svArea.addEventListener('mousedown', (e) => {
         e.preventDefault();
         dragging = true;
-        setFromSv(e.clientX, e.clientY);
+        dragSuppressesHexSync = document.activeElement === hexInput;
+        setFromSv(e.clientX, e.clientY, dragSuppressesHexSync);
       });
       window.addEventListener('mousemove', onMouseMove);
       window.addEventListener('mouseup', stopDragging);
