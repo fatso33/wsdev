@@ -35,6 +35,25 @@ describe('applyFieldToSelection', () => {
     expect(state.getComponent('a').style.typography).toBeUndefined();
   });
 
+  // Review fix (ticket 11, finding #3): applyFieldToSelection()'s undo label
+  // used a bare 'Bulk Style Edit' while the sibling applyStyleToSelection()
+  // includes the selection count as 'Bulk Style Edit (N components)' —
+  // brought into line so both bulk-edit paths read the same way in the undo
+  // history.
+  it('labels its undo step with the selection count, matching applyStyleToSelection()', () => {
+    const state = new StudioState();
+    state.widgetDef.components = [
+      { id: 'a', type: 'core.button', style: {} },
+      { id: 'b', type: 'core.button', style: {} },
+      { id: 'c', type: 'core.button', style: {} },
+    ];
+    state.multiSelectedIds = new Set(['a', 'b', 'c']);
+
+    state.applyFieldToSelection('style.border.width', 3);
+
+    expect(state.undoStack[state.undoStack.length - 1].label).toBe('Bulk Style Edit (3 components)');
+  });
+
   it('produces a single combined undo step regardless of selection size', () => {
     const state = new StudioState();
     state.widgetDef.components = [

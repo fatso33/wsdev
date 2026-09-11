@@ -751,7 +751,7 @@ export class StudioState {
     const comps = ids.map((id) => this.getComponent(id)).filter(Boolean);
     if (comps.length < 2) return;
 
-    this.saveHistory('Bulk Style Edit');
+    this.saveHistory(`Bulk Style Edit (${comps.length} components)`);
     const segs = path.split('.');
     const topKey = segs[0];
     const cloneLevel = (obj) => (Array.isArray(obj) ? [...obj] : (obj && typeof obj === 'object' ? { ...obj } : {}));

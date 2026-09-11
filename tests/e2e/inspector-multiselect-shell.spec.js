@@ -127,3 +127,89 @@ test('pasting a state-scoped copy onto a multi-selection applies it to every sel
   });
   expect(result).toEqual(['#ff00ff', '#ff00ff']);
 });
+
+// Review fix (ticket 11, finding #1): the Style tab button used to keep its
+// click listener wired even while it's the multi-select shell's forced-active
+// tab, so a click on it (a no-op visually, since it's already active) still
+// wrote 'style' into the persistent this.activeInspectorTab. Deselecting back
+// to single-select then unexpectedly reopened the Inspector on Style instead
+// of whatever tab the prior single selection actually had active.
+test('deselecting a multi-selection back to single-select preserves the previously-active tab', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = window.__studioApp.state;
+    state.widgetDef.components.push(
+      { id: 'ms-tab-1', type: 'core.button', style: {}, props: { label: 'One' } },
+      { id: 'ms-tab-2', type: 'core.button', style: {}, props: { label: 'Two' } },
+    );
+    state.selectComponent('ms-tab-1');
+  });
+
+  // Single-select ms-tab-1 and switch its active tab to Events.
+  await page.getByTestId('inspector-tab-events').click();
+  await expect(page.getByTestId('inspector-panel-events')).toBeVisible();
+
+  // Multi-select ms-tab-1 + ms-tab-2 — Style is forced active.
+  await page.evaluate(() => {
+    window.__studioApp.state.selectComponent('ms-tab-2', true);
+  });
+  await expect(page.getByTestId('inspector-panel-style')).toBeVisible();
+
+  // Clicking the (already-active, forced) Style tab button must stay a no-op.
+  await page.getByTestId('inspector-tab-style').click();
+
+  // Deselect back to a single selection of ms-tab-1.
+  await page.evaluate(() => {
+    window.__studioApp.state.selectComponent('ms-tab-1');
+  });
+
+  await expect(page.getByTestId('inspector-panel-events')).toBeVisible();
+  await expect(page.getByTestId('inspector-panel-style')).toBeHidden();
+});
+
+// Review fix (ticket 11, finding #2): the Base-tab hand-coded color fields
+// (Text/Stroke/Glow/Border/Border Glow/Background Color) and the rest of the
+// Background section skipped buildFieldWrap() entirely and never got a
+// `style-field-*` testid, so applyMultiSelectFieldAvailability()'s selector
+// could never reach them to disable them.
+test('hand-coded Base-tab color/background fields carry style-field testids and merge to the common value', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = window.__studioApp.state;
+    state.widgetDef.components.push(
+      { id: 'ms-color-1', type: 'core.button', style: { typography: { color: '#111111' }, border: { color: '#222222' }, background: { type: 'color', color: '#333333' } }, props: { label: 'One' } },
+      { id: 'ms-color-2', type: 'core.button', style: { typography: { color: '#111111' }, border: { color: '#444444' }, background: { type: 'color', color: '#333333' } }, props: { label: 'Two' } },
+    );
+    state.selectComponent('ms-color-1');
+    state.selectComponent('ms-color-2', true);
+  });
+
+  // All six hand-coded fields are discoverable by the same testid convention
+  // the generic field engine already uses on the state/rule tab.
+  await expect(page.getByTestId('style-field-typography.color')).toBeVisible();
+  await expect(page.getByTestId('style-field-typography.stroke.color')).toBeVisible();
+  await expect(page.getByTestId('style-field-typography.glow.color')).toBeVisible();
+  await expect(page.getByTestId('style-field-border.color')).toBeVisible();
+  await expect(page.getByTestId('style-field-border.glow.color')).toBeVisible();
+  await expect(page.getByTestId('style-field-background.color')).toBeVisible();
+  await expect(page.getByTestId('style-field-background.type')).toBeVisible();
+
+  // typography.color agrees across both selected components -> shows the
+  // common value. border.color disagrees -> falls back to the field's
+  // default rather than either component's real value ("common-value-or-
+  // blank" merge behavior, same as the generic engine's proxy merge).
+  await expect(page.locator('#c-typo-color')).toHaveValue('#111111');
+  await expect(page.locator('#c-border-color')).toHaveValue('#273344');
+
+  // Extending applyMultiSelectFieldAvailability() with a restricted
+  // availability (as a future appliesTo-restricted style field would produce)
+  // now reaches these hand-coded fields too, since they carry the same
+  // [data-testid^="style-field-"] markup the method already selects on.
+  const disabledCount = await page.evaluate(() => {
+    const inspector = window.__studioApp.inspector;
+    const mount = document.querySelector('[data-testid="inspector-panel-style"]');
+    inspector.applyMultiSelectFieldAvailability(mount, { enabledFieldPaths: [] });
+    return mount.querySelectorAll('#c-typo-color:disabled, #c-border-color:disabled, #c-bg-color:disabled').length;
+  });
+  expect(disabledCount).toBe(3);
+});

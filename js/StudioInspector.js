@@ -1441,7 +1441,13 @@ export class StudioInspector {
       btn.setAttribute('data-testid', `inspector-tab-${tabName}`);
       if (isDisabled) {
         btn.disabled = true;
-      } else {
+      } else if (!forceActiveTab) {
+        // Review fix (ticket 11): when a tab is forced active (multi-select's
+        // Style tab), clicking it must stay a no-op rather than writing
+        // `tabName` into the persistent `this.activeInspectorTab` — that write
+        // survived deselection back to single-select, silently reopening the
+        // Inspector on Style instead of whatever tab the prior single
+        // selection actually had active.
         btn.addEventListener('click', () => {
           this.activeInspectorTab = tabName;
           this.render();
@@ -3984,22 +3990,30 @@ export class StudioInspector {
     };
 
     if (groupName === 'Typography') {
+      // Review fix (ticket 11): these three hand-coded color fields now carry
+      // the SAME `style-field-<path>` testid convention buildFieldWrap() uses
+      // (already real on the state/rule tab's generic rendering of these same
+      // paths — see inspector-override-indicator.spec.js's
+      // `style-field-typography.color`). That's what lets
+      // applyMultiSelectFieldAvailability()'s existing
+      // `[data-testid^="style-field-"]` selector reach and disable them too,
+      // with no change to that method itself.
       mount.innerHTML = `
-        <div class="prop-field">
+        <div class="prop-field" data-testid="style-field-typography.color">
           <label>Text Color</label>
           <div class="color-picker-wrap">
             <button type="button" class="color-swatch" id="c-typo-color-pick" data-color="${this.toHexColor(effTypoColor) || '#f8fafc'}" style="background:${this.toHexColor(effTypoColor) || '#f8fafc'}" aria-label="Pick color"></button>
             <input type="text" id="c-typo-color" class="prop-input" value="${effTypoColor || '#f8fafc'}" />
           </div>
         </div>
-        <div class="prop-field">
+        <div class="prop-field" data-testid="style-field-typography.stroke.color">
           <label title="Text outline color. Leave unset for none.">Stroke Color</label>
           <div class="color-picker-wrap">
             <button type="button" class="color-swatch" id="c-typo-stroke-color-pick" data-color="${this.toHexColor(effStrokeColor) || '#000000'}" style="background:${this.toHexColor(effStrokeColor) || '#000000'}" aria-label="Pick color"></button>
             <input type="text" id="c-typo-stroke-color" class="prop-input" value="${escapeHtmlAttr(effStrokeColor || '')}" placeholder="none" />
           </div>
         </div>
-        <div class="prop-field">
+        <div class="prop-field" data-testid="style-field-typography.glow.color">
           <label title="Text glow/bloom color. Leave unset for none.">Glow Color</label>
           <div class="color-picker-wrap">
             <button type="button" class="color-swatch" id="c-typo-glow-color-pick" data-color="${this.toHexColor(effGlowColor) || '#000000'}" style="background:${this.toHexColor(effGlowColor) || '#000000'}" aria-label="Pick color"></button>
@@ -4031,14 +4045,14 @@ export class StudioInspector {
 
     if (groupName === 'Border') {
       mount.innerHTML = `
-        <div class="prop-field">
+        <div class="prop-field" data-testid="style-field-border.color">
           <label>Border Color</label>
           <div class="color-picker-wrap">
             <button type="button" class="color-swatch" id="c-border-color-pick" data-color="${this.toHexColor(effBorderColor) || '#273344'}" style="background:${this.toHexColor(effBorderColor) || '#273344'}" aria-label="Pick color"></button>
             <input type="text" id="c-border-color" class="prop-input" value="${effBorderColor || '#273344'}" />
           </div>
         </div>
-        <div class="prop-field">
+        <div class="prop-field" data-testid="style-field-border.glow.color">
           <label title="Soft glow around the border. Leave unset for none.">Border Glow Color</label>
           <div class="color-picker-wrap">
             <button type="button" class="color-swatch" id="c-border-glow-color-pick" data-color="${this.toHexColor(effBorderGlowColor) || '#000000'}" style="background:${this.toHexColor(effBorderGlowColor) || '#000000'}" aria-label="Pick color"></button>
@@ -4065,8 +4079,11 @@ export class StudioInspector {
     // renders Background generically instead; Base keeps them here).
     const setBg = themeEdit.isOverrideEdit ? updateOverrideBackground : (nextBg) => updateStyle({ background: nextBg });
     const curBg = themeEdit.isOverrideEdit ? (comp.style?.themeOverride?.background || {}) : (comp.style?.background || {});
+    // Review fix (ticket 11): each hand-coded Background wrap now carries the
+    // matching `style-field-background.*` testid — same rationale as the
+    // Typography/Border color fields above.
     mount.innerHTML = `
-      <div class="prop-field">
+      <div class="prop-field" data-testid="style-field-background.type">
         <label>Background Type</label>
         <select id="c-bg-type" class="prop-select">
           <option value="none" ${effBg.type === 'none' ? 'selected' : ''}>None (Transparent)</option>
@@ -4075,19 +4092,19 @@ export class StudioInspector {
           <option value="image" ${effBg.type === 'image' ? 'selected' : ''}>Image (Asset Library)</option>
         </select>
       </div>
-      <div id="c-bg-color-field" class="prop-field" style="${(!effBg.type || effBg.type === 'color') ? '' : 'display:none;'}">
+      <div id="c-bg-color-field" class="prop-field" data-testid="style-field-background.color" style="${(!effBg.type || effBg.type === 'color') ? '' : 'display:none;'}">
         <label>Background Color</label>
         <div class="color-picker-wrap">
           <button type="button" class="color-swatch" id="c-bg-color-pick" data-color="${this.toHexColor(effBg.color) || '#131b26'}" style="background:${this.toHexColor(effBg.color) || '#131b26'}" aria-label="Pick color"></button>
           <input type="text" id="c-bg-color" class="prop-input" value="${effBg.color || '#131b26'}" />
         </div>
       </div>
-      <div id="c-bg-gradient-field" class="prop-field" style="${effBg.type === 'gradient' ? '' : 'display:none;'}">
+      <div id="c-bg-gradient-field" class="prop-field" data-testid="style-field-background.gradient" style="${effBg.type === 'gradient' ? '' : 'display:none;'}">
         <label>CSS Gradient</label>
         <input type="text" id="c-bg-gradient" class="prop-input" value="${effBg.gradient || ''}" placeholder="linear-gradient(180deg, #1a2332, #0b0f17)" />
       </div>
       <div id="c-bg-image-fields" style="${effBg.type === 'image' ? '' : 'display:none;'}">
-        <div class="prop-field">
+        <div class="prop-field" data-testid="style-field-background.image.assetId">
           <label>Image <span class="prop-hint" title="FDWS v1.8 background.image, already fully supported at runtime. Add images on the Assets tab first. For a switch/control that looks different per position, use Conditional Formatting (below) to swap this per state instead of picking one fixed image here.">ⓘ</span></label>
           <select id="c-bg-image-asset" class="prop-select">
             <option value="">— none —</option>
@@ -4096,7 +4113,7 @@ export class StudioInspector {
           ${assets.length === 0 ? '<div class="caps-empty">No assets uploaded yet — add one on the Assets tab.</div>' : ''}
         </div>
         <div class="prop-row-2">
-          <div class="prop-field">
+          <div class="prop-field" data-testid="style-field-background.image.fit">
             <label>Fit</label>
             <select id="c-bg-image-fit" class="prop-select">
               <option value="cover" ${(!effBg.image?.fit || effBg.image?.fit === 'cover') ? 'selected' : ''}>Cover</option>
@@ -4104,7 +4121,7 @@ export class StudioInspector {
               <option value="tile" ${effBg.image?.fit === 'tile' ? 'selected' : ''}>Tile</option>
             </select>
           </div>
-          <div class="prop-field">
+          <div class="prop-field" data-testid="style-field-background.image.position">
             <label>Position</label>
             <input type="text" id="c-bg-image-position" class="prop-input" value="${effBg.image?.position || ''}" placeholder="center" />
           </div>
