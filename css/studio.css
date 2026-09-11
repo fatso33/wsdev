@@ -2276,6 +2276,160 @@ body, html {
   cursor: pointer;
 }
 
+/* Ticket 08: the color-picker-wrap swatch is now a plain button that opens
+   ColorPickerPopover.js instead of a native <input type="color">. Checker
+   background shows through for empty/unset values before the inline
+   background-color style (set from JS) paints over it. */
+.color-swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--studio-input-border);
+  border-radius: 4px;
+  cursor: pointer;
+  background-color: transparent;
+  background-image:
+    linear-gradient(45deg, #333 25%, transparent 25%),
+    linear-gradient(-45deg, #333 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #333 75%),
+    linear-gradient(-45deg, transparent 75%, #333 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+
+.color-swatch:hover {
+  border-color: var(--accent-cyan);
+}
+
+/* AnchoredPopover.js generic chrome — a small, single-purpose popover
+   anchored to a triggering field (swatch/icon), distinct from
+   .studio-modal-overlay/.studio-modal-box's full-screen dialog. */
+.studio-popover {
+  position: fixed;
+  z-index: 200;
+  width: 240px;
+  background-color: var(--studio-panel-bg);
+  border: 1px solid var(--studio-panel-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.popover-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.popover-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: var(--studio-surface);
+  border-top: 1px solid var(--studio-panel-border);
+}
+
+/* ColorPickerPopover.js — modern color picker body content, rendered into
+   AnchoredPopover's .popover-body. */
+.cp-sv-area {
+  position: relative;
+  width: 100%;
+  height: 120px;
+  border-radius: 4px;
+  border: 1px solid var(--studio-input-border);
+  cursor: crosshair;
+}
+
+.cp-sv-white,
+.cp-sv-black {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 3px;
+}
+
+.cp-sv-thumb {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.cp-hue-slider {
+  width: 100%;
+  height: 12px;
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  cursor: pointer;
+}
+
+.cp-hue-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid var(--studio-panel-border);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.cp-hue-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid var(--studio-panel-border);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.cp-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cp-preview-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid var(--studio-input-border);
+  flex-shrink: 0;
+}
+
+.cp-hex-input {
+  flex: 1;
+}
+
+.cp-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.cp-preset-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid var(--studio-input-border);
+  cursor: pointer;
+}
+
+.cp-preset-swatch:hover {
+  border-color: var(--accent-cyan);
+  transform: scale(1.1);
+}
+
 /* Capabilities Matrix */
 .caps-summary-box {
   background-color: #090d14;

@@ -11,6 +11,7 @@ import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../core/deckEventPacks.js';
 import { openModal, confirmModal, showToast } from './StudioModal.js';
 import { summarizeCondition, reorderRules } from './InspectorLogic.js';
+import { openColorPickerPopover } from './ColorPickerPopover.js';
 // Widget Studio 2.0, Phase 1: TRIGGERS/ACTIONS are now read from
 // PropertyRegistry.js instead of being hand-copied arrays here — the exact
 // "UI list is stale relative to runtime" bug class found four times in the
@@ -322,7 +323,7 @@ export class StudioInspector {
           <div class="prop-field">
             <label>Text Color</label>
             <div class="color-picker-wrap">
-              <input type="color" id="bulk-typo-color-pick" value="#f8fafc" />
+              <button type="button" class="color-swatch" id="bulk-typo-color-pick" data-color="#f8fafc" style="background:#f8fafc" aria-label="Pick color"></button>
               <input type="text" id="bulk-typo-color" class="prop-input" placeholder="unchanged" />
             </div>
           </div>
@@ -342,7 +343,7 @@ export class StudioInspector {
         <div class="prop-field">
           <label>Border Color</label>
           <div class="color-picker-wrap">
-            <input type="color" id="bulk-border-color-pick" value="#273344" />
+            <button type="button" class="color-swatch" id="bulk-border-color-pick" data-color="#273344" style="background:#273344" aria-label="Pick color"></button>
             <input type="text" id="bulk-border-color" class="prop-input" placeholder="unchanged" />
           </div>
         </div>
@@ -351,7 +352,7 @@ export class StudioInspector {
         <div class="prop-field">
           <label>Background Color</label>
           <div class="color-picker-wrap">
-            <input type="color" id="bulk-bg-color-pick" value="#131b26" />
+            <button type="button" class="color-swatch" id="bulk-bg-color-pick" data-color="#131b26" style="background:#131b26" aria-label="Pick color"></button>
             <input type="text" id="bulk-bg-color" class="prop-input" placeholder="unchanged" />
           </div>
         </div>
@@ -753,7 +754,7 @@ export class StudioInspector {
         <div class="prop-field" data-tier="build">
           <label>Border Color</label>
           <div class="color-picker-wrap">
-            <input type="color" id="w-border-clr-pick" value="${this.toHexColor(effBorderColor) || '#1f2937'}" />
+            <button type="button" class="color-swatch" id="w-border-clr-pick" data-color="${this.toHexColor(effBorderColor) || '#1f2937'}" style="background:${this.toHexColor(effBorderColor) || '#1f2937'}" aria-label="Pick color"></button>
             <input type="text" id="w-border-clr-txt" class="prop-input" value="${effBorderColor || '#1f2937'}" />
           </div>
         </div>
@@ -770,7 +771,7 @@ export class StudioInspector {
           <label>Background Value</label>
           ${effBg.type === 'color' ? `
             <div class="color-picker-wrap">
-              <input type="color" id="w-bg-val-pick" value="${this.toHexColor(effBg.color) || '#0b0f17'}" />
+              <button type="button" class="color-swatch" id="w-bg-val-pick" data-color="${this.toHexColor(effBg.color) || '#0b0f17'}" style="background:${this.toHexColor(effBg.color) || '#0b0f17'}" aria-label="Pick color"></button>
               <input type="text" id="w-bg-val" class="prop-input" value="${effBg.color || '#0b0f17'}" />
             </div>
           ` : `
@@ -3198,17 +3199,19 @@ export class StudioInspector {
   }
 
   /**
-   * Wave 0b (V22): every color field is a swatch+text pair. The two halves
-   * used to listen to different events (swatch on 'input' only, text on
-   * 'change' only) — a value delivered via the "wrong" channel for a given
-   * half (set programmatically, pasted, or delivered by an automation tool)
-   * silently never committed. Both halves now listen to both events, deduped
-   * through one commit path so a single user gesture (e.g. dragging, which
-   * fires many 'input' events then one 'change') doesn't push duplicate
-   * undo-history entries or re-render more than once per distinct value. The
-   * text field's own 'input' listener only live-commits once its value is a
-   * complete, valid color (or, for background fields, a gradient() string) —
-   * never on a partial "#f8" mid-type.
+   * Wave 0b (V22): every color field is a swatch+text pair. Ticket 08
+   * replaced the swatch half's native `<input type="color">` with a plain
+   * `<button class="color-swatch">` that opens the anchored ColorPickerPopover
+   * (see ColorPickerPopover.js) instead of the browser's own picker — the
+   * text half is untouched and still directly editable on its own, satisfying
+   * that ticket's "typing a hex value doesn't require opening the popover"
+   * requirement. Both halves still funnel through one `commit()` so a value
+   * delivered via either channel (typed, pasted, or applied from the
+   * popover) dedupes against the last-committed value and only pushes one
+   * undo-history entry / re-render per distinct value. The text field's own
+   * 'input' listener only live-commits once its value is a complete, valid
+   * color (or, for background fields, a gradient() string) — never on a
+   * partial "#f8" mid-type.
    * @param {Element} root - queried for #pickId/#txtId (usually `body` or `this.container`)
    * @param {string} pickId
    * @param {string} txtId
@@ -3228,11 +3231,24 @@ export class StudioInspector {
       lastCommitted = val;
       if (txt) txt.value = val;
       const hex = this.toHexColor(val);
-      if (pick && hex) pick.value = hex;
+      if (pick) {
+        pick.style.background = hex || val || 'transparent';
+        pick.dataset.color = hex || val || '';
+      }
       applyFn(val);
     };
-    pick?.addEventListener('input', (e) => commit(e.target.value));
-    pick?.addEventListener('change', (e) => commit(e.target.value));
+    if (pick && pick.tagName === 'BUTTON') {
+      pick.addEventListener('click', async () => {
+        const seed = (txt && txt.value) || pick.dataset.color || '';
+        const result = await openColorPickerPopover({ anchor: pick, initialColor: seed });
+        if (result !== null && result !== undefined) commit(result);
+      });
+    } else {
+      // Legacy path, kept only in case a native <input type="color"> ever
+      // reappears at some call site — every current one now uses a button.
+      pick?.addEventListener('input', (e) => commit(e.target.value));
+      pick?.addEventListener('change', (e) => commit(e.target.value));
+    }
     txt?.addEventListener('change', (e) => commit(e.target.value));
     txt?.addEventListener('input', (e) => {
       const v = e.target.value.trim();
@@ -3682,21 +3698,21 @@ export class StudioInspector {
         <div class="prop-field">
           <label>Text Color</label>
           <div class="color-picker-wrap">
-            <input type="color" id="c-typo-color-pick" value="${this.toHexColor(effTypoColor) || '#f8fafc'}" />
+            <button type="button" class="color-swatch" id="c-typo-color-pick" data-color="${this.toHexColor(effTypoColor) || '#f8fafc'}" style="background:${this.toHexColor(effTypoColor) || '#f8fafc'}" aria-label="Pick color"></button>
             <input type="text" id="c-typo-color" class="prop-input" value="${effTypoColor || '#f8fafc'}" />
           </div>
         </div>
         <div class="prop-field">
           <label title="Text outline color. Leave unset for none.">Stroke Color</label>
           <div class="color-picker-wrap">
-            <input type="color" id="c-typo-stroke-color-pick" value="${this.toHexColor(effStrokeColor) || '#000000'}" />
+            <button type="button" class="color-swatch" id="c-typo-stroke-color-pick" data-color="${this.toHexColor(effStrokeColor) || '#000000'}" style="background:${this.toHexColor(effStrokeColor) || '#000000'}" aria-label="Pick color"></button>
             <input type="text" id="c-typo-stroke-color" class="prop-input" value="${escapeHtmlAttr(effStrokeColor || '')}" placeholder="none" />
           </div>
         </div>
         <div class="prop-field">
           <label title="Text glow/bloom color. Leave unset for none.">Glow Color</label>
           <div class="color-picker-wrap">
-            <input type="color" id="c-typo-glow-color-pick" value="${this.toHexColor(effGlowColor) || '#000000'}" />
+            <button type="button" class="color-swatch" id="c-typo-glow-color-pick" data-color="${this.toHexColor(effGlowColor) || '#000000'}" style="background:${this.toHexColor(effGlowColor) || '#000000'}" aria-label="Pick color"></button>
             <input type="text" id="c-typo-glow-color" class="prop-input" value="${escapeHtmlAttr(effGlowColor || '')}" placeholder="none" />
           </div>
         </div>
@@ -3721,14 +3737,14 @@ export class StudioInspector {
         <div class="prop-field">
           <label>Border Color</label>
           <div class="color-picker-wrap">
-            <input type="color" id="c-border-color-pick" value="${this.toHexColor(effBorderColor) || '#273344'}" />
+            <button type="button" class="color-swatch" id="c-border-color-pick" data-color="${this.toHexColor(effBorderColor) || '#273344'}" style="background:${this.toHexColor(effBorderColor) || '#273344'}" aria-label="Pick color"></button>
             <input type="text" id="c-border-color" class="prop-input" value="${effBorderColor || '#273344'}" />
           </div>
         </div>
         <div class="prop-field">
           <label title="Soft glow around the border. Leave unset for none.">Border Glow Color</label>
           <div class="color-picker-wrap">
-            <input type="color" id="c-border-glow-color-pick" value="${this.toHexColor(effBorderGlowColor) || '#000000'}" />
+            <button type="button" class="color-swatch" id="c-border-glow-color-pick" data-color="${this.toHexColor(effBorderGlowColor) || '#000000'}" style="background:${this.toHexColor(effBorderGlowColor) || '#000000'}" aria-label="Pick color"></button>
             <input type="text" id="c-border-glow-color" class="prop-input" value="${escapeHtmlAttr(effBorderGlowColor || '')}" placeholder="none" />
           </div>
         </div>
@@ -3765,7 +3781,7 @@ export class StudioInspector {
       <div id="c-bg-color-field" class="prop-field" style="${(!effBg.type || effBg.type === 'color') ? '' : 'display:none;'}">
         <label>Background Color</label>
         <div class="color-picker-wrap">
-          <input type="color" id="c-bg-color-pick" value="${this.toHexColor(effBg.color) || '#131b26'}" />
+          <button type="button" class="color-swatch" id="c-bg-color-pick" data-color="${this.toHexColor(effBg.color) || '#131b26'}" style="background:${this.toHexColor(effBg.color) || '#131b26'}" aria-label="Pick color"></button>
           <input type="text" id="c-bg-color" class="prop-input" value="${effBg.color || '#131b26'}" />
         </div>
       </div>
@@ -4035,7 +4051,7 @@ export class StudioInspector {
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
       <div class="color-picker-wrap">
-        <input type="color" id="${id}-pick" value="${this.toHexColor(value) || '#000000'}" />
+        <button type="button" class="color-swatch" id="${id}-pick" data-color="${escapeHtmlAttr(this.toHexColor(value) || '#000000')}" style="background:${this.toHexColor(value) || '#000000'}" aria-label="Pick color"></button>
         <input type="text" id="${id}" class="prop-input" value="${escapeHtmlAttr(value || '')}" placeholder="" />
       </div>
     `;
