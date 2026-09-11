@@ -2160,6 +2160,82 @@ body, html {
   border-color: var(--accent-cyan);
 }
 
+/* 09: Numeric input redesign — no native browser spinner arrows anywhere in
+   the Inspector, scoped to this root so it can't leak into other parts of
+   Studio's own chrome (this app has no other number inputs outside the
+   Inspector today, but scope it anyway rather than a blanket global rule). */
+.studio-inspector-root input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: none;
+}
+.studio-inspector-root input[type="number"]::-webkit-outer-spin-button,
+.studio-inspector-root input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* 09: enhanceNumberInputs() (StudioInspector.js) wraps every number input in
+   this container at render time. The chevron gutter's width is reserved via
+   the input's own padding-right at ALL times (has-number-chevrons), not just
+   on hover — only the chevrons' opacity/pointer-events change on hover/focus,
+   so the value's displayed position never shifts when they appear/disappear. */
+.prop-number-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.prop-input.has-number-chevrons {
+  padding-right: 20px;
+}
+
+/* Combine with the override-indicator's own reserved 30px (§03) when both a
+   clear-override icon AND the step chevrons are present on the same field —
+   higher specificity (3 classes) wins over the 2-class .is-overridden rule
+   above regardless of source order. */
+.prop-field.is-overridden .prop-input.has-number-chevrons {
+  padding-right: 46px;
+}
+
+.prop-number-chevrons {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 18px;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+  border-radius: 0 3px 3px 0;
+  overflow: hidden;
+}
+
+.prop-number-wrap:hover .prop-number-chevrons,
+.prop-number-wrap:focus-within .prop-number-chevrons {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.prop-number-chevron {
+  flex: 1 1 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--studio-surface);
+  border: none;
+  color: var(--text-label);
+  cursor: pointer;
+  font-size: 7px;
+  line-height: 1;
+  padding: 0;
+}
+
+.prop-number-chevron:hover {
+  background: var(--studio-surface-hover);
+  color: var(--accent-cyan);
+}
+
 /* Wave 4, G10: full whole-widget JSON read/apply panel — .prop-textarea's base
    has no height set, far too small for a whole widget definition. */
 .full-json-textarea {

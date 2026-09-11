@@ -42,6 +42,22 @@ const CONTENT_FIELD_BY_TYPE = {
   'core.indicator': 'props.label'
 };
 
+// 09: Numeric input redesign — per-field step-size lookup, keyed by either
+// a registry field path (set on the input via data-step-key, see
+// renderPlainField) or a hand-coded field's own DOM id (for the numeric
+// inputs outside the registry-driven engine, e.g. Layout & Layering's
+// c-layer-z). Lives ENTIRELY here, on the Studio/Inspector side — deliberately
+// NOT part of PropertyRegistry.js's field schema, so a field's step size is a
+// pure authoring-UI convenience, not a spec-level concern. A key absent from
+// this table falls back to NUMBER_STEP_DEFAULT (1), which matches every
+// pixel/integer-ish field's existing practical range already.
+const NUMBER_STEP_LOOKUP = {
+  // Fractional-practical-range fields — a step of 1 would be far too coarse.
+  'props.sensitivity': 0.1, // core.pad — practical range is roughly 0.1-3
+  'c-bind-deadband': 0.01, // binding editor's Dead Band — small fractional tolerances
+};
+const NUMBER_STEP_DEFAULT = 1;
+
 // V14 ("Use This Component's Own Value"): a fourth option shared by every
 // condition-source dropdown (visibleWhen row, style.rules condition, an
 // interaction's "Only Run If"), alongside declared state[] vars and the
@@ -261,6 +277,7 @@ export class StudioInspector {
       this.applyUiMode();
       this.applyTierMoreBadges();
       this.applySectionJsonViews();
+      this.enhanceNumberInputs(this.container);
       return;
     }
 
@@ -277,6 +294,123 @@ export class StudioInspector {
     this.applyUiMode();
     this.applyTierMoreBadges();
     this.applySectionJsonViews();
+    this.enhanceNumberInputs(this.container);
+  }
+
+  /**
+   * 09: Numeric input redesign — a single post-render pass over EVERY
+   * `input[type="number"]` currently in the panel (both registry-driven
+   * fields from renderPlainField() and the many hand-coded ones scattered
+   * through this file), rather than touching each of those ~25 call sites
+   * individually. Safe to call unconditionally on every render: renderInner()
+   * always does `container.innerHTML = ''` first (see its own header
+   * comment), so every number input here is fresh DOM on every call — no
+   * "already enhanced" bookkeeping needed across renders, only within a
+   * single pass (the guard below is for cases where a nested render helper
+   * calls this again on a sub-tree it already processed).
+   *
+   * Wraps each input in a `.prop-number-wrap` with a permanently-reserved
+   * `.prop-number-chevrons` gutter (opacity-only reveal on hover/focus — the
+   * gutter's own width/padding never changes, so the value never shifts) and
+   * wires mousewheel + chevron-click stepping through NUMBER_STEP_LOOKUP.
+   * Native spinner arrows are removed globally via CSS (studio.css), not
+   * here — this only adds the replacement interaction.
+   */
+  enhanceNumberInputs(root) {
+    const inputs = root.querySelectorAll('input[type="number"]:not([data-num-enhanced])');
+    inputs.forEach((input) => {
+      input.dataset.numEnhanced = '1';
+
+      const wrap = document.createElement('div');
+      wrap.className = 'prop-number-wrap';
+      input.parentNode.insertBefore(wrap, input);
+      wrap.appendChild(input);
+      input.classList.add('has-number-chevrons');
+
+      const chevrons = document.createElement('div');
+      chevrons.className = 'prop-number-chevrons';
+      chevrons.innerHTML = `
+        <button type="button" class="prop-number-chevron prop-number-chevron-up" tabindex="-1" aria-label="Increase">▲</button>
+        <button type="button" class="prop-number-chevron prop-number-chevron-down" tabindex="-1" aria-label="Decrease">▼</button>
+      `;
+      wrap.appendChild(chevrons);
+
+      const step = this.getNumberStep(input);
+
+      // Commits via the SAME 'change' event every existing field listener
+      // (renderPlainField, and every hand-coded number field's own 'change'
+      // wiring) already listens for — typing's commit path is untouched by
+      // this whole feature, and stepping reuses it rather than duplicating
+      // each field's own commit logic.
+      const applyDelta = (multiplier) => {
+        if (input.disabled) return;
+        const cur = Number(input.value) || 0;
+        const delta = step * multiplier;
+        const decimals = this.decimalPlaces(step) + (Math.abs(multiplier) < 1 ? 1 : 0);
+        let next = this.roundToDecimals(cur + delta, decimals);
+        if (input.min !== '' && !Number.isNaN(Number(input.min))) next = Math.max(Number(input.min), next);
+        if (input.max !== '' && !Number.isNaN(Number(input.max))) next = Math.min(Number(input.max), next);
+        input.value = String(next);
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+
+      chevrons.querySelector('.prop-number-chevron-up').addEventListener('click', (e) => {
+        e.preventDefault();
+        applyDelta(1);
+      });
+      chevrons.querySelector('.prop-number-chevron-down').addEventListener('click', (e) => {
+        e.preventDefault();
+        applyDelta(-1);
+      });
+
+      // Standard step on plain wheel; Shift = x10; Alt = x0.1 — combining
+      // both multiplies them together (x1), which is a reasonable if
+      // untested edge case (ticket only specifies the two modifiers alone).
+      // Attached to the WRAP (not just the input) so it also fires while the
+      // pointer is over the hover-revealed chevron gutter, which visually
+      // sits on top of the input's own reserved padding but is a DOM sibling,
+      // not a descendant, of the input.
+      wrap.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        // Browsers swap a wheel event's axis when Shift is held (native
+        // "scroll horizontally" convention) — deltaY reads 0 and the amount
+        // moves to deltaX instead. Fall back to deltaX so Shift+wheel still
+        // reads as the same vertical-scroll gesture, just with the x10
+        // multiplier, rather than a no-op.
+        const rawDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+        if (rawDelta === 0) return;
+        let multiplier = 1;
+        if (e.shiftKey) multiplier *= 10;
+        if (e.altKey) multiplier *= 0.1;
+        const dir = rawDelta < 0 ? 1 : -1;
+        applyDelta(dir * multiplier);
+      }, { passive: false });
+    });
+  }
+
+  /** Lookup a field's configured step: by its registry field path (data-step-key,
+   * set in renderPlainField), falling back to the input's own DOM id (for the
+   * hand-coded numeric fields outside the registry engine), falling back to
+   * NUMBER_STEP_DEFAULT when neither key is in NUMBER_STEP_LOOKUP. */
+  getNumberStep(input) {
+    const pathKey = input.dataset.stepKey;
+    if (pathKey && Object.prototype.hasOwnProperty.call(NUMBER_STEP_LOOKUP, pathKey)) return NUMBER_STEP_LOOKUP[pathKey];
+    if (input.id && Object.prototype.hasOwnProperty.call(NUMBER_STEP_LOOKUP, input.id)) return NUMBER_STEP_LOOKUP[input.id];
+    return NUMBER_STEP_DEFAULT;
+  }
+
+  /** Decimal places in a step literal like 0.1 (1) or 0.01 (2) or 1 (0). */
+  decimalPlaces(step) {
+    const str = String(step);
+    const dot = str.indexOf('.');
+    return dot === -1 ? 0 : str.length - dot - 1;
+  }
+
+  /** Rounds away the float-arithmetic noise (e.g. 1 + 0.1 !== 1.1) from a
+   * wheel/chevron step, to the given number of decimal places. */
+  roundToDecimals(value, decimals) {
+    const factor = Math.pow(10, Math.max(0, decimals));
+    return Math.round(value * factor) / factor;
   }
 
   /**
@@ -3994,9 +4128,14 @@ export class StudioInspector {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
     const { value } = this.resolveEffectiveValue(comp, field);
+    // 09: data-step-key drives NUMBER_STEP_LOOKUP (wheel/chevron stepping) —
+    // keyed by the registry field path itself, so this is the ONLY new
+    // attribute a registry-driven number field needs; the lookup table lives
+    // entirely in this file, PropertyRegistry.js's field schema is untouched.
+    const stepAttr = inputType === 'number' ? ` data-step-key="${escapeHtmlAttr(field.path)}"` : '';
     mount.innerHTML = `
       <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}" />
+      <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}"${stepAttr} />
     `;
     mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
       const raw = e.target.value;
