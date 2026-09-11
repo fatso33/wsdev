@@ -43,25 +43,28 @@ test.describe('numeric field redesign', () => {
     await page.getByTestId('inspector-tab-style').click();
     const offsetXField = page.getByTestId('style-field-offset.x').locator('input');
 
+    // Bug fix (review, 2026-09-10): wheel-to-step now requires the field to
+    // be focused, not just hovered (hover-only was hijacking normal panel
+    // scrolling). Click to focus before each wheel, mirroring real usage.
+    await offsetXField.click();
     const before = Number(await offsetXField.inputValue());
-    await offsetXField.hover();
     await page.mouse.wheel(0, -100); // scroll up = increment by standard step (1)
     let after = Number(await offsetXField.inputValue());
     expect(after).toBe(before + 1);
 
     // Each wheel step commits a value, which re-renders the whole Inspector
     // panel (fresh DOM, see StudioInspector.js's renderInner() header comment)
-    // — re-hover before every subsequent wheel so the OS-level pointer
-    // position is re-hit-tested against the freshly rendered element rather
-    // than possibly landing on stale/shifted layout from the previous frame.
-    await offsetXField.hover();
+    // — re-focus before every subsequent wheel so the OS-level pointer/focus
+    // is re-hit-tested against the freshly rendered element rather than
+    // possibly landing on stale/shifted layout from the previous frame.
+    await offsetXField.click();
     await page.keyboard.down('Shift');
     await page.mouse.wheel(0, -100); // Shift = x10
     await page.keyboard.up('Shift');
     after = Number(await offsetXField.inputValue());
     expect(after).toBe(before + 1 + 10);
 
-    await offsetXField.hover();
+    await offsetXField.click();
     await page.keyboard.down('Alt');
     await page.mouse.wheel(0, 100); // scroll down = decrement; Alt = x0.1
     await page.keyboard.up('Alt');
@@ -135,9 +138,86 @@ test.describe('numeric field redesign', () => {
     await expect(sensitivityField).toBeVisible();
 
     const before = Number(await sensitivityField.inputValue());
-    await sensitivityField.hover();
+    await sensitivityField.click(); // focus required for wheel-to-step (review fix)
     await page.mouse.wheel(0, -100); // one notch up
     const after = Number(await sensitivityField.inputValue());
     expect(after).toBeCloseTo(before + 0.1, 5);
+  });
+
+  test('scrolling while merely hovering an unfocused numeric field does not hijack the scroll (bug fix)', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => {
+      const state = window.__studioApp.state;
+      state.widgetDef.components.push({ id: 'seed-btn', type: 'core.button', style: {}, props: { label: 'Seed' } });
+      state.selectComponent('seed-btn');
+    });
+
+    await page.locator('[data-mode="full"]').click();
+    await page.getByTestId('inspector-tab-style').click();
+    const offsetXField = page.getByTestId('style-field-offset.x').locator('input');
+    const panel = page.locator('.inspector-panel.active');
+
+    const before = Number(await offsetXField.inputValue());
+    const scrollBefore = await panel.evaluate((el) => el.scrollTop);
+
+    // Hover (not focus/click) the field, then wheel — value must NOT change,
+    // and the underlying panel scroll must NOT be blocked.
+    await expect(offsetXField).not.toBeFocused();
+    await offsetXField.hover();
+    await page.mouse.wheel(0, 300);
+
+    const after = Number(await offsetXField.inputValue());
+    const scrollAfter = await panel.evaluate((el) => el.scrollTop);
+
+    expect(after).toBe(before); // field value untouched
+    expect(scrollAfter).toBeGreaterThan(scrollBefore); // panel actually scrolled
+  });
+
+  test('an overridden AND chevron-enhanced field shows both controls fully visible with no overlap (bug fix)', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => {
+      const state = window.__studioApp.state;
+      state.widgetDef.components.push({
+        id: 'seed-btn',
+        type: 'core.button',
+        style: { offset: { x: 0 }, states: { pressed: { offset: { x: 5 } } } },
+        props: { label: 'Seed' },
+      });
+      state.selectComponent('seed-btn');
+    });
+
+    await page.locator('[data-mode="full"]').click();
+    await page.getByTestId('inspector-tab-style').click();
+    await page.getByTestId('style-state-tab-pressed').click();
+
+    const field = page.getByTestId('style-field-offset.x');
+    await expect(field).toHaveClass(/is-overridden/);
+
+    const chevrons = field.locator('.prop-number-chevrons');
+    const clearIcon = field.getByTestId('clear-override');
+
+    // Force both hover-revealed controls visible for measurement.
+    await field.hover();
+    await expect(chevrons).toHaveCSS('opacity', '1');
+    await expect(clearIcon).toHaveCSS('opacity', '1');
+
+    const chevronsBox = await chevrons.boundingBox();
+    const clearIconBox = await clearIcon.boundingBox();
+    expect(chevronsBox).not.toBeNull();
+    expect(clearIconBox).not.toBeNull();
+
+    // No horizontal overlap between the two controls.
+    const chevronsLeft = chevronsBox.x;
+    const chevronsRight = chevronsBox.x + chevronsBox.width;
+    const clearIconLeft = clearIconBox.x;
+    const clearIconRight = clearIconBox.x + clearIconBox.width;
+    const overlaps = chevronsLeft < clearIconRight && clearIconLeft < chevronsRight;
+    expect(overlaps).toBe(false);
+
+    // Both independently clickable: verify the clear-override button is
+    // actually hittable at its own coordinates (not intercepted by the
+    // chevron gutter sitting on top of it).
+    await clearIcon.click();
+    await expect(field).not.toHaveClass(/is-overridden/);
   });
 });

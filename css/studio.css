@@ -2196,6 +2196,17 @@ body, html {
   padding-right: 46px;
 }
 
+/* Bug fix (review, 2026-09-10): .prop-number-chevrons and .override-clear-icon
+   are both absolutely positioned against the same .prop-field ancestor and,
+   unshifted, both sit flush against the right edge — overlapping whenever a
+   field is both overridden and chevron-enhanced (e.g. style.offset.x in a
+   rule/state tab). Shift the chevron gutter left of the clear-icon's own
+   ~26px zone (icon at right:4px, ~22px wide) so the two never collide; the
+   46px combined padding-right above already reserves room for exactly this. */
+.prop-field.is-overridden .prop-number-chevrons {
+  right: 28px;
+}
+
 .prop-number-chevrons {
   position: absolute;
   top: 1px;

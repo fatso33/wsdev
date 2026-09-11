@@ -336,6 +336,11 @@ export class StudioInspector {
       wrap.appendChild(chevrons);
 
       const step = this.getNumberStep(input);
+      // Also reflect the lookup's step onto the native `step` attribute so
+      // keyboard ArrowUp/ArrowDown stepping (native browser behavior, not
+      // wired through applyDelta) matches the same per-field granularity as
+      // wheel/chevron stepping instead of defaulting to the browser's step=1.
+      input.step = String(step);
 
       // Commits via the SAME 'change' event every existing field listener
       // (renderPlainField, and every hand-coded number field's own 'change'
@@ -370,7 +375,13 @@ export class StudioInspector {
       // pointer is over the hover-revealed chevron gutter, which visually
       // sits on top of the input's own reserved padding but is a DOM sibling,
       // not a descendant, of the input.
+      // Gated on the input actually being focused (not mere hover) — review
+      // fix for a real regression where hovering ANY numeric field while
+      // scrolling the Inspector panel hijacked the scroll via an
+      // unconditional preventDefault(). Hover still reveals the chevrons
+      // (pure CSS, untouched); only wheel-to-step now requires focus.
       wrap.addEventListener('wheel', (e) => {
+        if (document.activeElement !== input) return;
         e.preventDefault();
         // Browsers swap a wheel event's axis when Shift is held (native
         // "scroll horizontally" convention) — deltaY reads 0 and the amount
