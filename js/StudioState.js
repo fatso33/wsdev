@@ -197,6 +197,9 @@ export class StudioState {
     // Ticket 04: copiedStateKey tracks which state key was copied (null for base style).
     this.copiedStyle = null;
     this.copiedStateKey = null;
+    // Ticket 13: copiedRuleScoped tracks whether the clipboard holds one
+    // rule's style override rather than a state override or the base tree.
+    this.copiedRuleScoped = false;
 
     // Undo / Redo Stacks
     this.undoStack = [];
@@ -627,21 +630,33 @@ export class StudioState {
    * change what a subsequent paste applies.
    * Ticket 04: optional stateKey parameter — when provided (and not 'normal'),
    * copies only that state's style override instead of the whole tree.
+   * Ticket 13: optional ruleIndex parameter — when provided (an integer),
+   * copies only that rule's style override instead. Takes precedence over
+   * stateKey (a component's Style tab is never on both a State and a Rule
+   * tab at once, so callers pass at most one of the two).
    * @param {string} id
    * @param {string} [stateKey] - optional state key; 'normal' or omitted = base style
+   * @param {number} [ruleIndex] - optional rule index into comp.style.rules
    */
-  copyComponentStyle(id, stateKey) {
+  copyComponentStyle(id, stateKey, ruleIndex) {
     const comp = this.getComponent(id);
     if (!comp) return;
 
-    if (stateKey && stateKey !== 'normal') {
+    if (Number.isInteger(ruleIndex)) {
+      // Copy only the rule-specific style
+      this.copiedStyle = JSON.parse(JSON.stringify(comp.style?.rules?.[ruleIndex]?.style || {}));
+      this.copiedStateKey = null;
+      this.copiedRuleScoped = true;
+    } else if (stateKey && stateKey !== 'normal') {
       // Copy only the state-specific style
       this.copiedStyle = JSON.parse(JSON.stringify(comp.style?.states?.[stateKey] || {}));
       this.copiedStateKey = stateKey;
+      this.copiedRuleScoped = false;
     } else {
       // Copy the full style tree
       this.copiedStyle = JSON.parse(JSON.stringify(comp.style || {}));
       this.copiedStateKey = null;
+      this.copiedRuleScoped = false;
     }
     this.notify('STYLE_CLIPBOARD_UPDATED', {});
   }
@@ -654,13 +669,33 @@ export class StudioState {
    * Ticket 04: optional stateKey parameter — when provided (and not 'normal'),
    * pastes only into that state's style override, leaving the target's base
    * style and other states untouched. Creates the states object/key if needed.
+   * Ticket 13: optional ruleIndex parameter — when provided (an integer),
+   * pastes only into that rule's style override, leaving the target's base
+   * style and other rules untouched. Creates the rule's style key if it
+   * doesn't yet have one. Takes precedence over stateKey (see
+   * copyComponentStyle). No-ops if the target has no rule at that index —
+   * the Rule tab that drives this can only ever be scoped to a rule that
+   * already exists on the component being edited.
    * @param {string} id
    * @param {string} [stateKey] - optional state key; 'normal' or omitted = base style
+   * @param {number} [ruleIndex] - optional rule index into comp.style.rules
    */
-  pasteStyleToComponent(id, stateKey) {
+  pasteStyleToComponent(id, stateKey, ruleIndex) {
     if (!this.copiedStyle) return;
 
-    if (stateKey && stateKey !== 'normal') {
+    if (Number.isInteger(ruleIndex)) {
+      // Paste only into the rule-specific style
+      const comp = this.getComponent(id);
+      if (!comp) return;
+      const rule = comp.style?.rules?.[ruleIndex];
+      if (!rule) return;
+
+      this.saveHistory('Paste Style');
+      rule.style = JSON.parse(JSON.stringify(this.copiedStyle));
+
+      StudioValidator.syncCapabilities(this.widgetDef);
+      this.notify('COMPONENT_UPDATED', { componentId: id, component: comp });
+    } else if (stateKey && stateKey !== 'normal') {
       // Paste only into the state-specific style
       const comp = this.getComponent(id);
       if (!comp) return;
@@ -698,6 +733,14 @@ export class StudioState {
    * here. Same per-component semantics as pasteStyleToComponent(id, stateKey):
    * wholesale-replaces that one state's override, leaving each component's
    * base style and other states untouched.
+   *
+   * Ticket 13: no `ruleIndex` parameter — the multi-select Style tab never
+   * surfaces a Rule sub-tab (InspectorLogic.getMultiSelectAvailability()
+   * only ever computes a State tab, gated the same way), so there's no UI
+   * path that could call this with rule-scoping intent. The base-style
+   * guard below is still extended to also reject a rule-scoped clipboard
+   * copy, since the clipboard itself is shared with the single-select
+   * Rule tab's Copy Style button.
    * @param {string} [stateKey] - optional state key; 'normal' or omitted = base style
    */
   pasteStyleToSelection(stateKey) {
@@ -719,8 +762,14 @@ export class StudioState {
       return;
     }
 
-    // Guard: don't paste state-scoped fragments as a base-style replacement.
-    if (this.copiedStateKey) return;
+    // Guard: don't paste state-scoped or rule-scoped fragments as a
+    // base-style replacement. Ticket 13: the multi-select Style tab never
+    // surfaces a Rule sub-tab (InspectorLogic.getMultiSelectAvailability()
+    // only ever computes a State tab), so this method has no ruleIndex
+    // parameter to accept — but the clipboard is shared with the
+    // single-select Rule tab, so a rule-scoped copy can still reach here via
+    // the no-arg (base-style) multi-select Paste Style button.
+    if (this.copiedStateKey || this.copiedRuleScoped) return;
     this.saveHistory(`Paste Style (${comps.length} components)`);
     comps.forEach((c) => {
       c.style = JSON.parse(JSON.stringify(this.copiedStyle));

@@ -1897,15 +1897,17 @@ export class StudioInspector {
 
       body.querySelector('#c-style-copy')?.addEventListener('click', () => {
         const stateKey = activeTab === 'state' ? stateCfg.name : undefined;
-        this.state.copyComponentStyle(comp.id, stateKey);
-        const stateLabel = stateKey ? ` (${stateCfg.tabLabel})` : '';
+        const ruleIndex = activeTab === 'rule' ? activeRuleIndex : undefined;
+        this.state.copyComponentStyle(comp.id, stateKey, ruleIndex);
+        const stateLabel = stateKey ? ` (${stateCfg.tabLabel})` : (ruleIndex != null ? ` (Rule ${ruleIndex + 1})` : '');
         showToast(`Copied${stateLabel} style from "${comp.label || comp.id}".`);
         this.render();
       });
       body.querySelector('#c-style-paste')?.addEventListener('click', () => {
         const stateKey = activeTab === 'state' ? stateCfg.name : undefined;
-        this.state.pasteStyleToComponent(comp.id, stateKey);
-        const stateLabel = stateKey ? ` (${stateCfg.tabLabel})` : '';
+        const ruleIndex = activeTab === 'rule' ? activeRuleIndex : undefined;
+        this.state.pasteStyleToComponent(comp.id, stateKey, ruleIndex);
+        const stateLabel = stateKey ? ` (${stateCfg.tabLabel})` : (ruleIndex != null ? ` (Rule ${ruleIndex + 1})` : '');
         showToast(`Pasted${stateLabel} style onto "${comp.label || comp.id}".`);
       });
 

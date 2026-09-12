@@ -107,3 +107,116 @@ describe('state-scoped Copy/Paste Style', () => {
     expect(state.undoStack.length).toBe(before + 1);
   });
 });
+
+describe('rule-scoped Copy/Paste Style', () => {
+  it('copies and pastes only the active rule\'s style, leaving base style untouched', () => {
+    const state = new StudioState();
+    state.widgetDef.components = [
+      {
+        id: 'btnA', type: 'core.button',
+        style: {
+          typography: { color: '#111111' },
+          rules: [{ when: { state: 'fuel', operator: 'lt', value: 10 }, style: { typography: { color: '#ff0000' } } }],
+        },
+      },
+      {
+        id: 'btnB', type: 'core.button',
+        style: {
+          typography: { color: '#222222' },
+          rules: [{ when: { state: 'fuel', operator: 'lt', value: 10 }, style: { typography: { color: '#0000ff' } } }],
+        },
+      },
+    ];
+
+    state.copyComponentStyle('btnA', undefined, 0);
+    state.pasteStyleToComponent('btnB', undefined, 0);
+
+    const btnB = state.getComponent('btnB');
+    expect(btnB.style.rules[0].style.typography.color).toBe('#ff0000');
+    expect(btnB.style.typography.color).toBe('#222222');
+  });
+
+  it('leaves other rules on the target component untouched', () => {
+    const state = new StudioState();
+    state.widgetDef.components = [
+      {
+        id: 'btnA', type: 'core.button',
+        style: { rules: [{ when: { state: 'fuel', operator: 'lt', value: 10 }, style: { typography: { color: '#ff0000' } } }] },
+      },
+      {
+        id: 'btnB', type: 'core.button',
+        style: {
+          typography: { color: '#222222' },
+          rules: [
+            { when: { state: 'fuel', operator: 'lt', value: 10 }, style: { typography: { color: '#0000ff' } } },
+            { when: { state: 'oil', operator: 'gt', value: 90 }, style: { border: { width: 3 } } },
+          ],
+        },
+      },
+    ];
+
+    state.copyComponentStyle('btnA', undefined, 0);
+    state.pasteStyleToComponent('btnB', undefined, 0);
+
+    const btnB = state.getComponent('btnB');
+    expect(btnB.style.rules[0].style.typography.color).toBe('#ff0000');
+    expect(btnB.style.rules[1].style.border.width).toBe(3);
+    expect(btnB.style.typography.color).toBe('#222222');
+  });
+
+  it('creates the target rule\'s style key when it does not yet have one', () => {
+    const state = new StudioState();
+    state.widgetDef.components = [
+      {
+        id: 'btnA', type: 'core.button',
+        style: { typography: { color: '#111111' }, rules: [{ when: { state: 'fuel', operator: 'lt', value: 10 }, style: { typography: { color: '#ff0000' } } }] },
+      },
+      {
+        id: 'btnB', type: 'core.button',
+        style: { typography: { color: '#222222' }, rules: [{ when: { state: 'fuel', operator: 'lt', value: 10 } }] }, // no style key yet
+      },
+    ];
+
+    state.copyComponentStyle('btnA', undefined, 0);
+    state.pasteStyleToComponent('btnB', undefined, 0);
+
+    const btnB = state.getComponent('btnB');
+    expect(btnB.style.rules[0].style.typography.color).toBe('#ff0000');
+    expect(btnB.style.typography.color).toBe('#222222');
+  });
+
+  it('Normal-tab (base style) copy/paste is unaffected by rule-scoping support', () => {
+    const state = new StudioState();
+    state.widgetDef.components = [
+      { id: 'btnA', type: 'core.button', style: { typography: { color: '#111111' } } },
+      { id: 'btnB', type: 'core.button', style: { typography: { color: '#222222' } } },
+    ];
+
+    state.copyComponentStyle('btnA');
+    state.pasteStyleToComponent('btnB');
+
+    const btnB = state.getComponent('btnB');
+    expect(btnB.style.typography.color).toBe('#111111');
+  });
+
+  it('pasteStyleToSelection() rejects a rule-scoped clipboard copy as a base-style replacement', () => {
+    const state = new StudioState();
+    state.widgetDef.components = [
+      {
+        id: 'btnA', type: 'core.button',
+        style: { rules: [{ when: { state: 'fuel', operator: 'lt', value: 10 }, style: { typography: { color: '#ff0000' } } }] },
+      },
+      { id: 'btnB', type: 'core.button', style: { typography: { color: '#222222' } } },
+      { id: 'btnC', type: 'core.button', style: { typography: { color: '#333333' } } },
+    ];
+
+    state.multiSelectedIds = new Set(['btnB', 'btnC']);
+    state.copyComponentStyle('btnA', undefined, 0);
+    state.pasteStyleToSelection();
+
+    const btnB = state.getComponent('btnB');
+    const btnC = state.getComponent('btnC');
+    expect(btnB.style.typography.color).toBe('#222222');
+    expect(btnC.style.typography.color).toBe('#333333');
+  });
+});
