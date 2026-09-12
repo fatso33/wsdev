@@ -142,3 +142,33 @@ export function getMultiSelectAvailability(selected) {
 
   return { enabledFieldPaths, stateTabName, stateTabLabel };
 }
+
+/**
+ * Ticket 14: pure, DOM-free anchoring math for scroll-position preservation
+ * across an Inspector render() rebuild. render() already preserves *focus*
+ * (see StudioInspector.js) but not scroll position — the freshly-rebuilt
+ * panel always starts at scrollTop 0. Rather than saving/restoring a raw
+ * scrollTop (which breaks the moment the rebuild changes content height
+ * above the focused element, e.g. a showWhen-gated field appearing), this
+ * anchors on the focused element's on-screen position relative to the
+ * panel's own top edge, before and after the rebuild, and returns how much
+ * to add to the panel's (post-rebuild) scrollTop so that element lands back
+ * in the exact same on-screen spot.
+ *
+ * @param {{oldFocusTop: number, oldPanelTop: number, newFocusTop: number, newPanelTop: number}} positions -
+ *   getBoundingClientRect().top values for the focused element and its
+ *   scrollable panel, captured before and after the rebuild.
+ * @returns {number} the amount to add to the panel's current scrollTop
+ *
+ * @example
+ * computeScrollAnchorDelta({ oldFocusTop: 300, oldPanelTop: 100, newFocusTop: 300, newPanelTop: 100 })
+ * // => 0 (element didn't move relative to the panel)
+ *
+ * computeScrollAnchorDelta({ oldFocusTop: 300, oldPanelTop: 100, newFocusTop: 360, newPanelTop: 100 })
+ * // => 60 (element now sits 60px lower relative to the panel; scroll down to compensate)
+ */
+export function computeScrollAnchorDelta({ oldFocusTop, oldPanelTop, newFocusTop, newPanelTop }) {
+  const oldOffset = oldFocusTop - oldPanelTop;
+  const newOffset = newFocusTop - newPanelTop;
+  return newOffset - oldOffset;
+}

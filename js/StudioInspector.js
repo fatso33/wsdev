@@ -10,7 +10,7 @@ import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_N
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../core/deckEventPacks.js';
 import { openModal, confirmModal, showToast } from './StudioModal.js';
-import { summarizeCondition, reorderRules, getMultiSelectAvailability } from './InspectorLogic.js';
+import { summarizeCondition, reorderRules, getMultiSelectAvailability, computeScrollAnchorDelta } from './InspectorLogic.js';
 import { openColorPickerPopover } from './ColorPickerPopover.js';
 // Widget Studio 2.0, Phase 1: TRIGGERS/ACTIONS are now read from
 // PropertyRegistry.js instead of being hand-copied arrays here — the exact
@@ -278,6 +278,16 @@ export class StudioInspector {
       ? [active.selectionStart, active.selectionEnd]
       : null;
 
+    // Ticket 14: anchor the focused element's on-screen position relative to
+    // its scrollable `.inspector-panel` before the wipe, mirroring the focus
+    // preservation just below — restoring a raw scrollTop instead would break
+    // the moment the rebuild changes content height above the focused element
+    // (e.g. a showWhen-gated field appearing/disappearing).
+    const oldPanel = active ? active.closest('.inspector-panel') : null;
+    const oldFocusTop = oldPanel ? active.getBoundingClientRect().top : null;
+    const oldPanelTop = oldPanel ? oldPanel.getBoundingClientRect().top : null;
+    const oldScrollTop = oldPanel ? oldPanel.scrollTop : null;
+
     this.renderInner();
 
     if (focusId) {
@@ -287,6 +297,26 @@ export class StudioInspector {
         if (selRange && 'setSelectionRange' in el) {
           try { el.setSelectionRange(selRange[0], selRange[1]); } catch { /* not a text-selectable input type */ }
         }
+
+        if (oldPanel) {
+          const newPanel = el.closest('.inspector-panel');
+          if (newPanel) {
+            const delta = computeScrollAnchorDelta({
+              oldFocusTop,
+              oldPanelTop,
+              newFocusTop: el.getBoundingClientRect().top,
+              newPanelTop: newPanel.getBoundingClientRect().top,
+            });
+            newPanel.scrollTop += delta;
+          }
+        }
+      } else if (oldPanel) {
+        // The previously-focused element didn't survive the rebuild (e.g. it
+        // was a showWhen-gated field that just got hidden) — nothing left to
+        // anchor to, so fall back to restoring the panel's raw scrollTop
+        // rather than snapping to the top.
+        const fallbackPanel = this.container.querySelector('.inspector-panel.active');
+        if (fallbackPanel) fallbackPanel.scrollTop = oldScrollTop;
       }
     }
   }

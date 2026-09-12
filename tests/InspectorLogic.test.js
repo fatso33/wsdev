@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reorderRules, summarizeCondition, getMultiSelectAvailability } from '../js/InspectorLogic.js';
+import { reorderRules, summarizeCondition, getMultiSelectAvailability, computeScrollAnchorDelta } from '../js/InspectorLogic.js';
 import { getFieldsForType } from '../widgets/PropertyRegistry.js';
 
 describe('reorderRules', () => {
@@ -212,5 +212,17 @@ describe('getMultiSelectAvailability', () => {
       { type: 'core.button', props: {} },
     ];
     expect(getMultiSelectAvailability(selected).stateTabLabel).toBe('Pressed');
+  });
+});
+
+describe('computeScrollAnchorDelta', () => {
+  it('returns zero when the focused element stayed in exactly the same position', () => {
+    expect(computeScrollAnchorDelta({ oldFocusTop: 300, oldPanelTop: 100, newFocusTop: 300, newPanelTop: 100 })).toBe(0);
+  });
+
+  it('returns a positive delta when the focused element moved down relative to the panel (content grew above it)', () => {
+    // element sat 200px below the panel top before, now sits 260px below it —
+    // panel needs to scroll down by 60px more to put it back where it was
+    expect(computeScrollAnchorDelta({ oldFocusTop: 300, oldPanelTop: 100, newFocusTop: 360, newPanelTop: 100 })).toBe(60);
   });
 });
