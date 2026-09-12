@@ -588,7 +588,7 @@ export class StudioInspector {
     const themeEdit = this.getThemeEditContext();
 
     const styleBody = panels['style'].appendChild(document.createElement('div'));
-    const canPasteBase = !!this.state.copiedStyle && !this.state.copiedStateKey;
+    const canPasteBase = !!this.state.copiedStyle && !this.state.copiedStateKey && !this.state.copiedRuleScoped;
     const canPaste = activeTab === 'state' ? !!this.state.copiedStyle : canPasteBase;
     styleBody.innerHTML = `
       ${themeEdit.isOverrideEdit ? `<div class="theme-override-banner">Editing ${this.state.previewTheme.toUpperCase()} theme override — Text/Stroke/Glow/Border/Border Glow/Background Color apply only to this theme; other properties stay shared with the base ${themeEdit.baseTheme} style.</div>` : ''}
@@ -601,7 +601,9 @@ export class StudioInspector {
             ? `Paste Copied Style onto All ${comps.length} (replaces each one's full style)`
             : this.state.copiedStateKey
               ? 'Paste Style — state-scoped copy needs a matching State sub-tab active above'
-              : 'Paste Style — copy a style from a single component\'s panel first'}
+              : this.state.copiedRuleScoped
+                ? 'Paste Style — rule-scoped copy has no matching Rule sub-tab here; copy the full style instead'
+                : 'Paste Style — copy a style from a single component\'s panel first'}
       </button>
 
       <div class="prop-section-subtitle" style="margin-top:10px;">Style Presets <span class="prop-hint" title="Applies typography, border, and background together to every selected component, then leaves every field below exactly as editable as before.">ⓘ</span></div>

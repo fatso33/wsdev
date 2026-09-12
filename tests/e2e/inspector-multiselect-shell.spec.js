@@ -167,6 +167,56 @@ test('deselecting a multi-selection back to single-select preserves the previous
   await expect(page.getByTestId('inspector-panel-style')).toBeHidden();
 });
 
+// Ticket 13 correction pass: copying a Rule tab's style (single-select), then
+// multi-selecting components on the Normal sub-tab, must disable "Paste
+// Style" the same way a state-scoped copy already does — otherwise the
+// button stays clickable, pasteStyleToSelection() silently no-ops (guarded
+// against bulk-replacing each component's WHOLE base style with just one
+// rule's fragment), and a false "Pasted style onto N components" toast fires.
+test('pasting a rule-scoped copy onto a multi-selection\'s Normal tab is disabled, not a silently-no-op success toast', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = window.__studioApp.state;
+    state.widgetDef.components.push(
+      {
+        id: 'ms-rule-src', type: 'core.button', props: { label: 'Src' },
+        style: {
+          typography: { color: '#111111' },
+          rules: [{ when: { state: 'fuel', operator: 'lt', value: 10 }, style: { typography: { color: '#ff0000' } } }],
+        },
+      },
+      { id: 'ms-rule-1', type: 'core.button', style: { typography: { color: '#222222' } }, props: { label: 'One' } },
+      { id: 'ms-rule-2', type: 'core.button', style: { typography: { color: '#333333' } }, props: { label: 'Two' } },
+    );
+    state.selectComponent('ms-rule-src');
+  });
+
+  await page.getByTestId('inspector-tab-style').click();
+  await page.locator('[data-rule-chip="0"]').click();
+  await page.locator('#c-style-copy').click();
+
+  await page.evaluate(() => {
+    const state = window.__studioApp.state;
+    state.selectComponent('ms-rule-1');
+    state.selectComponent('ms-rule-2', true);
+  });
+
+  // Normal sub-tab is the multi-select Style tab's default.
+  await expect(page.locator('#ms-style-paste')).toBeDisabled();
+
+  // Bypass the (correctly) disabled button to confirm the underlying state
+  // method is also a genuine no-op, not just UI-gated.
+  const result = await page.evaluate(() => {
+    const state = window.__studioApp.state;
+    state.pasteStyleToSelection();
+    return [
+      state.getComponent('ms-rule-1').style.typography.color,
+      state.getComponent('ms-rule-2').style.typography.color,
+    ];
+  });
+  expect(result).toEqual(['#222222', '#333333']);
+});
+
 // Review fix (ticket 11, finding #2): the Base-tab hand-coded color fields
 // (Text/Stroke/Glow/Border/Border Glow/Background Color) and the rest of the
 // Background section skipped buildFieldWrap() entirely and never got a
