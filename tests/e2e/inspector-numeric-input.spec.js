@@ -26,8 +26,16 @@ test.describe('numeric field redesign', () => {
 
     // c-layer-z lives in the always-visible LAYOUT & LAYERING group on the
     // General tab (default tab) — no accordion expand/tab click needed.
+    //
+    // `appearance: textfield` (not `none`) is the deliberate, cross-browser-
+    // correct value here — `none` fully suppresses the spinner in Chromium as
+    // a side effect, but Firefox needs `textfield` specifically (matching
+    // `-moz-appearance: textfield` alongside it) or its native spin buttons
+    // can still render. Fixed after a live Firefox screenshot showed native
+    // arrows next to the custom chevrons despite this test passing under
+    // Chromium with `none`.
     const layerZField = page.locator('#c-layer-z');
-    await expect(layerZField).toHaveCSS('appearance', 'none');
+    await expect(layerZField).toHaveCSS('appearance', 'textfield');
   });
 
   test('mousewheel over a numeric field adjusts its value by the standard step, with Shift/Alt multipliers', async ({ page }) => {

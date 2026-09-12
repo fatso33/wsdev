@@ -2255,7 +2255,7 @@ body, html {
    Inspector today, but scope it anyway rather than a blanket global rule). */
 .studio-inspector-root input[type="number"] {
   -moz-appearance: textfield;
-  appearance: none;
+  appearance: textfield;
 }
 .studio-inspector-root input[type="number"]::-webkit-outer-spin-button,
 .studio-inspector-root input[type="number"]::-webkit-inner-spin-button {
