@@ -10,7 +10,7 @@
 
 import { DEVICE_PROFILES } from './StudioState.js';
 import { ComponentRegistry } from '../widgets/components/ComponentRegistry.js';
-import { createMockHost } from '../widgets/components/MockWidgetHost.js';
+import { createMockHost, createPopoverHost } from '../widgets/components/MockWidgetHost.js';
 import { resolveThemedColor } from '../widgets/components/ThemeColor.js';
 import { openWidgetPopover } from '../widgets/components/WidgetPopoverModal.js';
 import { readStateRef } from '../widgets/utils/StateRefPath.js';
@@ -543,11 +543,18 @@ export class StudioDeviceView {
       }
     };
     const findPopoverDef = (id) => this.state.getSavedWidgetsByKind('popover').find((w) => w.id === id) || null;
+    // Rotary Component rebuild, ticket 00: the shared WidgetPopoverModal.js no longer
+    // constructs the popover's rendering host itself — createPopoverHost() (MockWidgetHost.js)
+    // is Studio's injected factory for it, bound to this view's own dispatchSimEvent/
+    // findPopoverDef/theme.
+    const createPopoverInstance = (args) => createPopoverHost(args, {
+      dispatchSimEvent, findPopoverDef, theme: this.state.previewTheme
+    });
 
     const mockHost = createMockHost(def, {
       dispatchSimEvent,
       findPopoverDef,
-      openWidgetPopover: (openOpts) => openWidgetPopover({ ...openOpts, findPopoverDef, dispatchSimEvent }),
+      openWidgetPopover: (openOpts) => openWidgetPopover({ ...openOpts, findPopoverDef, createPopoverInstance }),
       theme: this.state.previewTheme,
       // State tab's live "Current:" readout (StudioLayersPanel.js) — mirrors
       // this mock host's local state into StudioState as it changes from

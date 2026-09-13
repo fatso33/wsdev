@@ -12,6 +12,8 @@
 import { ComponentRegistry } from './ComponentRegistry.js';
 import { runInteraction } from './InteractionDispatcher.js';
 import { notifyBindingDependents } from './BindingReactivity.js';
+import { openWidgetPopover } from './WidgetPopoverModal.js';
+import { readStateRef } from '../utils/StateRefPath.js';
 
 /**
  * @param {object} def - widget definition being previewed
@@ -166,4 +168,89 @@ export function createMockHost(def, opts) {
   };
 
   return host;
+}
+
+/**
+ * Builds a `{mount, destroy}` rendering host for a `kind:"popover"` widget definition —
+ * Widget Studio's implementation of the `createPopoverInstance` factory
+ * shared/widgets/components/WidgetPopoverModal.js now requires as an injected dependency
+ * (Rotary Component rebuild, ticket 00: the shared overlay no longer constructs a host
+ * internally). Backed by createMockHost() above, plus the same manual grid-setup +
+ * component-render loop StudioDeviceView.js's renderWidgetInstanceInsideDevice() uses for
+ * the top-level preview widget — this is Studio's live-preview equivalent of what a real
+ * CompositeWidget's own mount()/render() do for a popover instance in flight-deck-pwa.
+ *
+ * Wires its own nested `openWidgetPopover` (recursing through this same factory) so a
+ * popover's own components can open a further popover — mirrors the equivalent wiring
+ * StudioDeviceView.js does for the top-level widget.
+ *
+ * @param {object} args - passed straight through by WidgetPopoverModal.js's
+ *   createPopoverInstance call: {popoverDef, contextSnapshot, onCommitToHost, onClosePopover}
+ * @param {object} env - Studio-specific environment threaded through by the caller
+ *   (StudioDeviceView.js for a top-level popover open, or this function recursively for a
+ *   nested one): {dispatchSimEvent, findPopoverDef, theme}
+ * @returns {{mount: (container: HTMLElement) => void, destroy: () => void}}
+ */
+export function createPopoverHost({ popoverDef, contextSnapshot, onCommitToHost, onClosePopover }, env) {
+  const { dispatchSimEvent, findPopoverDef, theme } = env;
+
+  const popoverHost = createMockHost(popoverDef, {
+    dispatchSimEvent,
+    popoverContext: contextSnapshot,
+    onCommitToHost,
+    onClosePopover,
+    findPopoverDef,
+    theme,
+    openWidgetPopover: (nestedOpts) => openWidgetPopover({
+      ...nestedOpts,
+      findPopoverDef,
+      createPopoverInstance: (nestedArgs) => createPopoverHost(nestedArgs, env)
+    })
+  });
+
+  return {
+    mount(card) {
+      const gridCols = popoverDef.layout?.grid?.columns || 12;
+      const gridRows = popoverDef.layout?.grid?.rows || 6;
+      // minmax(0,1fr), not bare 1fr — matches CompositeWidget.js's real popover
+      // rendering path exactly (flight-deck-pwa's popover instance is a real
+      // CompositeWidget and inherits this fix from its own render(); this mock
+      // rendering path needs it applied directly).
+      card.style.display = 'grid';
+      card.style.gridTemplateColumns = `repeat(${gridCols}, minmax(0, 1fr))`;
+      card.style.gridTemplateRows = `repeat(${gridRows}, minmax(0, 1fr))`;
+      card.style.gap = '4px';
+
+      const layerGroupsMap = new Map();
+      (popoverDef.layerGroups || []).forEach((lg) => layerGroupsMap.set(lg.id, lg.z || 0));
+
+      const components = (popoverDef.components || []).map((comp, idx) => {
+        const groupZ = comp.layer?.group ? (layerGroupsMap.get(comp.layer.group) ?? 0) : 0;
+        const compZ = comp.layer?.z ?? 0;
+        return { comp, effectiveZ: groupZ + compZ, idx };
+      });
+      components.sort((a, b) => (a.effectiveZ !== b.effectiveZ ? a.effectiveZ - b.effectiveZ : a.idx - b.idx));
+
+      components.forEach(({ comp, effectiveZ }) => {
+        const RendererClass = ComponentRegistry.getRenderer(comp.type);
+        const renderer = new RendererClass(comp, popoverHost);
+        popoverHost.renderers.set(comp.id, renderer);
+        const el = renderer.render();
+        el.style.zIndex = `${effectiveZ}`;
+        card.appendChild(el);
+
+        // FDWS v1.11 §1.2: see StudioDeviceView.js's identical resolution for the
+        // full rationale — binding.stateRef addresses a nested/indexed path.
+        let stateVal = comp.binding?.stateVar ? popoverHost.getLocalState(comp.binding.stateVar) : undefined;
+        if (stateVal === undefined && comp.binding?.stateRef) {
+          stateVal = readStateRef(popoverHost, comp.binding.stateRef);
+        }
+        renderer.update(stateVal, popoverHost.getAllStateObject());
+      });
+    },
+    destroy() {
+      popoverHost.renderers.forEach((renderer) => { renderer.destroy?.(); });
+      popoverHost.renderers.clear();
+    }
+  };
 }
