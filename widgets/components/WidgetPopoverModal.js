@@ -128,7 +128,22 @@ export function openWidgetPopover({ hostWidget, popoverWidgetId, contextDecl, fi
   // with this callback already in hand — `let` avoids a TDZ error if a factory were ever
   // to invoke onClosePopover synchronously during construction (none do today).
   let instance;
+  // The single teardown path for this popover: both dismissal routes (escape/backdrop,
+  // the instance's own onClosePopover) and the exported closeWidgetPopover() go through
+  // it, so there is one place that knows what a close consists of and what order it
+  // happens in — destroy() before the overlay leaves the document, per the
+  // PopoverHostInstance contract above.
+  //
+  // Guarded against running for a popover that a later open() has already superseded:
+  // an instance can still reach its onClosePopover after being replaced (a
+  // `core.closePopover` tap racing the swap, or a timer its destroy() didn't stop), and
+  // without this it would null out `activePopover` from under the LIVE popover —
+  // orphaning that popover's overlay and keydown listener with nothing left tracking
+  // them to clean up. `activePopover` being null (nothing tracked yet, or already closed)
+  // deliberately still runs: a factory that called onClosePopover synchronously during
+  // construction, before the assignment below, must still tear its own chrome down.
   const close = () => {
+    if (activePopover && activePopover.close !== close) return;
     try { instance?.destroy?.(); } catch (_) { /* already torn down */ }
     overlay.remove();
     activePopover = null;
@@ -159,14 +174,16 @@ export function openWidgetPopover({ hostWidget, popoverWidgetId, contextDecl, fi
   });
 
   instance.mount(card);
-  activePopover = { overlay, instance, onKeyDown };
+  activePopover = { close };
 }
 
 export function closeWidgetPopover() {
-  document.getElementById('fd-widget-popover-modal')?.remove();
   if (activePopover) {
-    try { activePopover.instance.destroy?.(); } catch (_) { /* already torn down */ }
-    document.removeEventListener('keydown', activePopover.onKeyDown);
-    activePopover = null;
+    activePopover.close();
+    return;
   }
+  // Nothing tracked: still clear any overlay chrome left in the document, which is all
+  // this path could ever do in that case anyway (it has no instance to destroy and no
+  // listener reference to remove).
+  document.getElementById('fd-widget-popover-modal')?.remove();
 }
