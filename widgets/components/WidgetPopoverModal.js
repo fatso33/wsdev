@@ -159,13 +159,14 @@ export function openWidgetPopover({ hostWidget, popoverWidgetId, contextDecl, fi
   });
 
   instance.mount(card);
-  activePopover = { overlay, instance };
+  activePopover = { overlay, instance, onKeyDown };
 }
 
 export function closeWidgetPopover() {
   document.getElementById('fd-widget-popover-modal')?.remove();
   if (activePopover) {
     try { activePopover.instance.destroy?.(); } catch (_) { /* already torn down */ }
+    document.removeEventListener('keydown', activePopover.onKeyDown);
     activePopover = null;
   }
 }
