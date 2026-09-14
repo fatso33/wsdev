@@ -265,7 +265,15 @@ export class BaseComponent {
     // a visible "double border" (reported live on a popover's Cancel/Save
     // buttons; less visible on inputs only because the wrapper has zero
     // padding, so the two borders land almost exactly on top of each other).
-    const surfaceTarget = this.btnNode || this.element;
+    //
+    // FDWS v1.30 (Rotary rebuild): `this.surfaceNode` generalises the same idea for
+    // a component type whose visible surface is neither the wrapper nor a <button> —
+    // core.rotary's Face wrapper, the round knob the user actually sees inside a
+    // square layout box. A subclass registers it exactly like btnNode (assign, then
+    // re-run applyStyles()), and everything below — including the stale-clear
+    // immediately after this — applies unchanged, since all of it keys off
+    // "surfaceTarget isn't this.element", not off which node it is.
+    const surfaceTarget = this.surfaceNode || this.btnNode || this.element;
     // ButtonComponent (and similarly-shaped subclasses) call applyStyles()
     // TWICE — once via super.render() before btnNode exists (so this ran
     // with surfaceTarget === this.element that first time) and once more

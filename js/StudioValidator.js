@@ -62,7 +62,12 @@ const GRADIENT_VALUE_RE = /^(?:repeating-)?(?:linear|radial|conic)-gradient\(/i;
 // Wave 0a (V20): component types whose own runtime component class dispatches
 // binding.writeEvent itself (no interaction row required) — see the comment
 // at its one call site below for how this was verified.
-export const SELF_DISPATCHING_WRITE_EVENT_TYPES = ['core.input', 'core.selector', 'core.slider'];
+// FDWS v1.30 (Rotary rebuild, ticket 02): core.rotary joins the list — the rebuilt
+// RotaryComponent writes binding.writeEvent itself on every turn (Absolute write
+// mode), so a bound knob drives the sim with no interaction row at all. The old one
+// did not, which is what the palette entry's "pair it with an interaction" note and
+// proposeWireUp()'s fineChange row below both existed for.
+export const SELF_DISPATCHING_WRITE_EVENT_TYPES = ['core.input', 'core.rotary', 'core.selector', 'core.slider'];
 
 /**
  * Wave 0a (V20): does an interaction already exist that would dispatch
@@ -204,9 +209,10 @@ export function findUnrecognisedDefPaths(def) {
  * export-time "Wire this up" flow AND the Connect dialog can propose the
  * same correct trigger(s) — only for component types where a single
  * correct trigger genuinely exists. Excluded deliberately:
- * core.input/core.selector/core.slider never reach this at all (they
- * self-dispatch binding.writeEvent, see SELF_DISPATCHING_WRITE_EVENT_TYPES
- * above); core.rocker has no sensible single-trigger fix (it reads a
+ * core.input/core.rotary/core.selector/core.slider never reach this at all
+ * (they self-dispatch binding.writeEvent, see SELF_DISPATCHING_WRITE_EVENT_TYPES
+ * above — core.rotary joined them in FDWS v1.30); core.rocker has no sensible
+ * single-trigger fix (it reads a
  * completely different field, props.zones[].writeEvent) so it falls
  * through to `null` here too. Each row deliberately leaves `action.event`
  * unset — it rides the same fallback-to-binding.writeEvent precedence
@@ -220,11 +226,6 @@ export function proposeWireUp(comp) {
   switch (comp.type) {
     case 'core.button':
       return [row('tap')];
-    case 'core.rotary': {
-      const rows = [row('fineChange')];
-      if (comp.binding?.pushEvent) rows.push(row('push'));
-      return rows;
-    }
     case 'core.stepper':
       return [row('increment'), row('decrement')];
     case 'core.list':

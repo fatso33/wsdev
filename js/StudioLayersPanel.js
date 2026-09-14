@@ -185,10 +185,16 @@ export const PALETTE_ITEMS = [
   {
     type: 'core.rotary',
     title: 'Rotary Dial',
-    desc: 'Dual coarse/fine rotary dial knob with center push. Note: the runtime rotary does not dispatch write events on its own — pair it with an interaction or use core.stepper for a control that writes.',
+    // FDWS v1.30 (Rotary rebuild): turn it and the knob rotates under the finger,
+    // writing its value straight to the bound event — the old entry's "pair it with
+    // an interaction or use core.stepper instead" caveat no longer applies.
+    desc: 'Turnable knob. Drag around it to change the bound value; it writes to its Write Deck Event on its own, and rotates to show the value coming back from the sim.',
     category: 'Avionics Controls',
     icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="12" x2="12" y2="6"/><circle cx="12" cy="12" r="2"/>',
-    defaultProps: { coarseStep: 10, fineStep: 1, circular: true },
+    // Heading-shaped out of the box, matching defaultBinding below: a full turn of
+    // the knob covers the full 0-360 range at 1 degree of finger travel per degree
+    // of heading.
+    defaultProps: { min: 0, max: 360, degreesPerUnit: 1 },
     defaultBinding: { readSimVar: 'apHdgBugValue', writeEvent: 'apHdgSet' },
     defaultLayout: { col: 1, row: 1, w: 4, h: 4 }
   },

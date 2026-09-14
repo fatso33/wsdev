@@ -6,6 +6,9 @@
 import { StudioValidator, isComponentUnconfigured } from './StudioValidator.js';
 import { PALETTE_ITEMS, PALETTE_DRAG_MIME, createComponentFromPaletteItem } from './StudioLayersPanel.js';
 import { resolveThemedColor, resolveThemedColors, resolveThemedBackground } from '../widgets/components/ThemeColor.js';
+// FDWS v1.30: the Rotary's knob face is a pure config→markup function, so the canvas
+// thumbnail draws the real thing instead of a hand-approximated copy of it.
+import { buildRotaryFace } from '../widgets/components/rotaryFace.js';
 
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 // Matches studio.css's .fd-widget-preview-scope block — the canvas's own
@@ -845,11 +848,35 @@ export class StudioCanvas {
       }
 
       case 'core.rotary': {
-        container.innerHTML = `
-          <div style="width:32px;height:32px;border-radius:50%;border:2px solid #00d8f6;background:#1e293b;display:flex;align-items:center;justify-content:center;position:relative;">
-            <div style="width:3px;height:10px;background:#00d8f6;position:absolute;top:2px;border-radius:2px;"></div>
-          </div>
-        `;
+        // FDWS v1.30 (Rotary rebuild, ticket 02). The canvas draws its own static
+        // mocks rather than running the real renderers, so this case has to be
+        // brought along by hand whenever a component's look changes — but the KNOB
+        // itself is already a pure configuration-in/markup-out function, so this
+        // calls that instead of hand-drawing a second, driftable approximation of
+        // it. What stays canvas-specific is everything around it: no gesture, no
+        // telemetry, and a fixed at-rest indicator position (the minimum, where an
+        // unbound knob sits) rather than a live value.
+        const face = document.createElement('div');
+        face.style.width = '100%';
+        face.style.height = '100%';
+        face.style.display = 'flex';
+        face.style.alignItems = 'center';
+        face.style.justifyContent = 'center';
+        face.innerHTML = buildRotaryFace({
+          angle: props.startAngle ?? -135,
+          faceColor: props.faceColor,
+          rimColor: props.rimColor,
+          rimWidth: props.rimWidth,
+          indicatorColor: props.indicatorColor,
+          indicatorWidth: props.indicatorWidth
+        });
+        const svg = face.querySelector('svg');
+        if (svg) {
+          svg.style.width = '100%';
+          svg.style.height = '100%';
+          svg.style.maxHeight = '100%';
+        }
+        container.appendChild(face);
         break;
       }
 

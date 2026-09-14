@@ -38,7 +38,10 @@
 export const FDWS_VERSIONS = [
   '1.0', '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9', '1.10',
   '1.11', '1.12', '1.13', '1.14', '1.15', '1.16', '1.17', '1.18', '1.19', '1.20',
-  '1.21', '1.22', '1.23', '1.24', '1.25', '1.26', '1.27', '1.28', '1.29'
+  '1.21', '1.22', '1.23', '1.24', '1.25', '1.26', '1.27', '1.28', '1.29',
+  // v1.30: the Rotary rebuild. NON-ADDITIVE — core.rotary's props and trigger
+  // vocabulary were replaced outright, not extended (see RotaryComponent.js's header).
+  '1.30'
 ];
 
 // ---------------------------------------------------------------------------
@@ -72,10 +75,17 @@ export const TRIGGERS = [
   { id: 'panDelta', fires: 'PadComponent — relative-mode drag (the default mode)', live: true, componentTypes: ['core.pad'] },
   { id: 'zoneActive', fires: 'RockerComponent — one zone pressed', live: true, componentTypes: ['core.rocker'] },
   { id: 'zoneReleased', fires: 'RockerComponent — a pressed zone released', live: true, componentTypes: ['core.rocker'] },
-  { id: 'push', fires: 'RotaryComponent — center button press', live: true, componentTypes: ['core.rotary'] },
-  { id: 'dragStart', fires: 'RotaryComponent — drag begins', live: true, componentTypes: ['core.rotary'] },
-  { id: 'fineChange', fires: 'RotaryComponent — drag delta (the knob’s defining interaction)', live: true, componentTypes: ['core.rotary'] },
-  { id: 'dragEnd', fires: 'RotaryComponent — drag ends', live: true, componentTypes: ['core.rotary'] },
+  // FDWS v1.30 (Rotary rebuild): the turn vocabulary replaces the deleted Rotary's
+  // push/dragStart/fineChange/dragEnd outright — no aliases, per that rebuild's
+  // ticket 02. Every payload carries a `value` key alongside delta/direction/ring, so
+  // a core.dispatchEvent action works with no special case (the old fineChange
+  // payload's key mismatch is why Studio-suggested wiring dispatched a literal zero).
+  // Note a bound Rotary needs NO interaction wiring at all to drive the sim — it
+  // writes binding.writeEvent itself (StudioValidator's
+  // SELF_DISPATCHING_WRITE_EVENT_TYPES); these are for authoring anything EXTRA on top.
+  { id: 'turnStart', fires: 'RotaryComponent — the knob is grabbed', live: true, componentTypes: ['core.rotary'] },
+  { id: 'turn', fires: 'RotaryComponent — the knob moves (the knob’s defining interaction)', live: true, componentTypes: ['core.rotary'] },
+  { id: 'turnEnd', fires: 'RotaryComponent — the knob is released', live: true, componentTypes: ['core.rotary'] },
   { id: 'detentReached', fires: 'SliderComponent — commit lands on a declared detent', live: true, componentTypes: ['core.slider'] },
   { id: 'increment', fires: 'StepperComponent — + button', live: true, componentTypes: ['core.stepper'] },
   { id: 'decrement', fires: 'StepperComponent — − button', live: true, componentTypes: ['core.stepper'] },
@@ -547,15 +557,24 @@ export const TYPE_FIELDS = {
     { path: 'props.max', control: 'number', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Maximum value.' },
     { path: 'props.step', control: 'number', tier: 'simple', guided: true, group: 'Content', default: 1, tooltip: 'Amount each tap increments/decrements by.' }
   ],
+  // FDWS v1.30 (Rotary rebuild, ticket 02): a deliberately narrow first configuration
+  // surface — the Arc gesture, the Bounded range, the Absolute write mode, and just
+  // enough appearance to look like a knob. Later tickets widen each axis (Scrub/Tap,
+  // Continuous/Detented, Pulse, Acceleration, the remaining Face groups). The old
+  // props (circular/coarseStep/fineStep/pushLabel) are gone with the Component that
+  // read them; an older widget still declaring one loads and degrades to defaults.
+  // Every `default` here matches RotaryComponent.js/rotaryFace.js's own fallback.
   'core.rotary': [
-    // Wave 1 gap-closing pass (2026-09-04): default was `false`, but
-    // RotaryComponent.js:19 computes `props.circular !== false` — the knob is circular
-    // (continuous spin) *unless* explicitly set to false, so the effective default is
-    // true, not false. Registry had this backwards.
-    { path: 'props.circular', control: 'checkbox', tier: 'simple', group: 'Content', default: true, tooltip: 'Allows the knob to spin continuously instead of stopping at endpoints.' },
-    { path: 'props.coarseStep', control: 'number', tier: 'simple', guided: true, group: 'Content', default: 10, tooltip: 'Value change per full knob detent.' },
-    { path: 'props.fineStep', control: 'number', tier: 'advanced', group: 'Content', default: 1, tooltip: 'Value change per small drag increment, for fine adjustment.' },
-    { path: 'props.pushLabel', control: 'text', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Label shown for this knob’s push/click action, if it has one.' }
+    { path: 'props.min', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 0, tooltip: 'Lowest value the knob can reach. The knob stops here like a physical end-stop — turning further is absorbed and has to be wound back.' },
+    { path: 'props.max', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 100, tooltip: 'Highest value the knob can reach.' },
+    { path: 'props.degreesPerUnit', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 1, tooltip: 'How far the finger has to travel around the knob to move the value by 1 — the knob’s "feel". Higher means finer/slower; 1 means one degree of turn per unit.' },
+    { path: 'props.sweepDegrees', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: 270, tooltip: 'How far the knob visibly rotates across its whole range, in degrees. Purely visual — it does not change the values the knob produces.' },
+    { path: 'props.startAngle', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: -135, tooltip: 'Where the indicator points at the minimum value, in degrees clockwise from straight up (12 o\'clock) — same convention as core.gauge\'s Arc Start Angle. Default -135, which puts mid-range straight up over the default 270° sweep.' },
+    { path: 'props.faceColor', control: 'color', tier: 'advanced', group: 'Knob', fdwsMin: '1.30', default: undefined, tooltip: 'Fills the knob disc. Leave unset to let this component’s own Background (and its state/conditional variants) show through instead.' },
+    { path: 'props.rimColor', control: 'color', tier: 'advanced', group: 'Knob', fdwsMin: '1.30', default: '#64748b', tooltip: 'Color of the ring around the edge of the knob.' },
+    { path: 'props.rimWidth', control: 'number', tier: 'advanced', group: 'Knob', fdwsMin: '1.30', default: 6, tooltip: 'Thickness of the knob’s rim, as a share of a 100-unit knob (6 = 6% of the knob’s width), so it scales with the knob instead of being a fixed pixel size.' },
+    { path: 'props.indicatorColor', control: 'color', tier: 'advanced', group: 'Knob', fdwsMin: '1.30', default: '#e2e8f0', tooltip: 'Color of the pointer mark that shows which way the knob is turned.' },
+    { path: 'props.indicatorWidth', control: 'number', tier: 'advanced', group: 'Knob', fdwsMin: '1.30', default: 6, tooltip: 'Thickness of the pointer mark, on the same 100-unit scale as Rim Width.' }
   ],
   'core.image': [
     { path: 'props.assetId', control: 'assetPicker', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Image from this widget’s Asset Library to display.' },
