@@ -114,14 +114,21 @@ function shortestAngleDeltaDeg(fromRad, toRad) {
 export function createRotaryState(config, telemetry) {
   const cfg = config || {};
   const min = cfg.min ?? DEFAULT_MIN;
+  const max = cfg.max ?? DEFAULT_MAX;
   const seeded = telemetry && typeof telemetry.value === 'number';
+  const rawValue = seeded ? telemetry.value : (cfg.initialValue ?? min);
   return {
     phase: 'idle', // 'idle' | 'engaged' | 'reconciling'
-    rawValue: seeded ? telemetry.value : (cfg.initialValue ?? min),
+    rawValue,
     lastPos: null,
     pendingDispatchValue: null,
     reconcileStartedAt: null,
-    atBoundSide: null
+    // Seeded from the starting position itself, not `null` — a Rotary that
+    // starts resting at `min` (the common unseeded-by-telemetry case) has
+    // not "just reached" that bound by existing there, so the very first
+    // grab must not read as a fresh min->min transition and fire a spurious
+    // boundReached cue.
+    atBoundSide: boundSideOf(clamp(rawValue, min, max), min, max)
   };
 }
 
