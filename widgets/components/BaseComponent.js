@@ -83,7 +83,9 @@ export class BaseComponent {
    * FDWS v1.2 §1.1 hit-testing rule: resolves the effective pointer-events value.
    * An explicit author-set 'auto'/'none' is always respected. When unset, the
    * component is 'auto' iff: its type is unconditionally interactive by contract
-   * (core.button, core.input), OR it declares a non-empty interactions[], OR its
+   * (core.button, core.input, core.rotary — FDWS v1.30: a Rotary is turnable because
+   * it IS a Rotary, whatever it is or isn't bound to), OR it declares a non-empty
+   * interactions[], OR its
    * binding includes a write-capable field (pushEvent/writeEvent/ackEvent).
    * core.gauge and core.image never qualify via contract or write-capable binding —
    * only an explicit interactions[] can make them 'auto'.
@@ -103,7 +105,7 @@ export class BaseComponent {
 
     if (alwaysDisplayOnly) return 'none';
 
-    const contractInteractiveTypes = ['core.button', 'core.input'];
+    const contractInteractiveTypes = ['core.button', 'core.input', 'core.rotary'];
     if (contractInteractiveTypes.includes(type)) return 'auto';
 
     const binding = this.def.binding || {};
