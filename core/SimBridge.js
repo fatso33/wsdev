@@ -794,13 +794,22 @@ export class SimBridge {
    * widget's own vars land together in one chunk instead of being
    * interleaved with unrelated widgets' vars purely by subscribe-order
    * timing. Only meaningful the first time PC Bridge sees this simVar.
+   * FDWS v1.30 ticket 01: `allowDemote` marks this call as the *authoritative*
+   * recomputed rate from `EventBus.unsubscribeSimVar()` (a subscriber left,
+   * not one arriving) — the only case where `pollFrequencyHz` can legitimately
+   * be lower than what PC Bridge already has for this var and should be
+   * honored as a real downgrade rather than ignored as a stale/no-op
+   * re-subscribe. A plain subscribe-time call never sets this, so the
+   * existing "only ever promotes" behavior of a bare re-subscribe is
+   * unchanged — see `pc-bridge/server.js`'s `subscribeDynamicSimVar()`.
    * @param {string} simVar
    * @param {string} unit
    * @param {number} deadband
    * @param {number} pollFrequencyHz
    * @param {string} [groupKey]
+   * @param {boolean} [allowDemote=false]
    */
-  subscribeSimVar(simVar, unit = 'Number', deadband = 0, pollFrequencyHz = 1, groupKey) {
+  subscribeSimVar(simVar, unit = 'Number', deadband = 0, pollFrequencyHz = 1, groupKey, allowDemote = false) {
     const cleanVar = SecurityValidator.sanitizeSimVar(simVar);
     if (!cleanVar) return;
 
@@ -810,7 +819,8 @@ export class SimBridge {
       unit: unit || 'Number',
       pollFrequencyHz: Number(pollFrequencyHz) || 1,
       pollGroup: groupKey || undefined,
-      deadband: Number(deadband) || 0
+      deadband: Number(deadband) || 0,
+      allowDemote: !!allowDemote
     });
   }
 
