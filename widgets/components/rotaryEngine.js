@@ -35,7 +35,9 @@
  *     min: number,                 // Bounded range floor (default 0)
  *     max: number,                 // Bounded range ceiling (default 100)
  *     initialValue: number,        // used only if no telemetry has arrived yet
- *     degreesPerUnit: number,      // arc degrees that move the value by 1 unit (default 1)
+ *     degreesPerUnit: number,      // arc degrees that move the value by 1 unit (default 1).
+ *                                  // Used as a divisor, so its magnitude is floored at
+ *                                  // MIN_DEGREES_PER_UNIT below — 0 is not reachable.
  *     minEffectiveRadius: number,  // px floor for the grab radius (default 24 — roughly
  *                                  // a fingertip contact radius; see ADR 0001)
  *     sweepDegrees: number,        // visual sweep the returned `angle` is mapped onto
@@ -91,6 +93,30 @@ const DEFAULT_TIER = 'base';
 const RECONCILIATION_TIMEOUT_FLOOR_MS = 250;
 const RECONCILIATION_TIMEOUT_MULTIPLIER = 2;
 
+// `degreesPerUnit` is a DIVISOR (arc degrees -> value units), so it must never reach
+// zero. Nothing upstream stops it: the Inspector's number control has no min/max
+// plumbing and coerces a blank/garbage entry to 0 (`Number(raw) || 0`), and the
+// registry field carries no range either — so an Author typing 0 in the "Feel" field
+// used to drive rawValue to Infinity, then to NaN on the first direction reversal,
+// after which the NaN threaded through `previousState` forever (clamp() propagates it)
+// and the knob was permanently dead until the widget was rebuilt. Floored here rather
+// than in the registry because the engine is the only layer every caller goes through
+// — Studio's preview host, the PWA and a raw `.fdwidget` import alike.
+const MIN_DEGREES_PER_UNIT = 0.01;
+
+/**
+ * The effective, always-safe divisor for a configured `degreesPerUnit`.
+ * Sign is preserved (a negative value simply reverses the turn direction); only the
+ * magnitude is floored. A non-finite value has no usable magnitude or sign at all, so
+ * it falls back to the default rather than to the floor.
+ */
+function resolveDegreesPerUnit(raw) {
+  const n = Number(raw ?? DEFAULT_DEGREES_PER_UNIT);
+  if (!Number.isFinite(n)) return DEFAULT_DEGREES_PER_UNIT;
+  const magnitude = Math.max(Math.abs(n), MIN_DEGREES_PER_UNIT);
+  return n < 0 ? -magnitude : magnitude;
+}
+
 function clamp(value, min, max) {
   const lo = Math.min(min, max);
   const hi = Math.max(min, max);
@@ -144,7 +170,7 @@ export function createRotaryState(config, telemetry) {
 function processGesture(state, cfg, gestureEvent) {
   const min = cfg.min ?? DEFAULT_MIN;
   const max = cfg.max ?? DEFAULT_MAX;
-  const degPerUnit = cfg.degreesPerUnit ?? DEFAULT_DEGREES_PER_UNIT;
+  const degPerUnit = resolveDegreesPerUnit(cfg.degreesPerUnit);
   const minRadius = cfg.minEffectiveRadius ?? DEFAULT_MIN_EFFECTIVE_RADIUS;
   const ring = cfg.ringId ?? DEFAULT_RING_ID;
 

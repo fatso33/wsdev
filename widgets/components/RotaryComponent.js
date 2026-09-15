@@ -67,6 +67,7 @@ export class RotaryComponent extends BaseComponent {
     this.element.appendChild(face);
 
     this.attachTurnGesture(face);
+    this.watchDispatchFailures();
 
     // The Face wrapper didn't exist when super.render() ran applyStyles(), so that
     // first pass targeted this.element; re-run it now that the real surface exists.
@@ -132,6 +133,10 @@ export class RotaryComponent extends BaseComponent {
    * @param {object|null} telemetry
    */
   resolve(gestureEvent, telemetry) {
+    // A fresh grab supersedes any failure still waiting to be applied: the user has
+    // taken the knob back, so reverting under their finger would be wrong.
+    if (gestureEvent && gestureEvent.type === 'start') this.pendingDispatchFailure = false;
+
     const result = resolveRotary(this.rotaryConfig(), gestureEvent, telemetry, this.now());
     this.rotaryState = result.state;
     this.currentValue = result.value;
@@ -149,14 +154,59 @@ export class RotaryComponent extends BaseComponent {
       }
     });
 
+    if (dispatchFailed) this.pendingDispatchFailure = true;
+
     // Reported back into the engine as its own frame (not folded into the one above,
     // which has already returned): a failed write must revert to telemetry rather
     // than leave a value the sim never applied.
-    if (dispatchFailed) {
-      this.resolve(null, { value: this.lastTelemetryValue, dispatchFailed: true });
+    //
+    // Held until a Reconciliation window is actually open, because that is the only
+    // phase the engine honours `dispatchFailed` in. A failure raised mid-turn (every
+    // frame of a turn writes, and the bridge may go down during one) used to be
+    // reported into an 'engaged' engine, which correctly ignored it — and then
+    // nothing ever raised it again, so release reconciled normally and the knob sat
+    // on a value the sim never took. Deferring it here is what makes ticket 01's
+    // "a dispatch failure reverts the value to telemetry" hold for a failure that
+    // happens while the knob is still being turned.
+    if (this.pendingDispatchFailure) {
+      if (this.rotaryState.phase === 'reconciling') {
+        this.pendingDispatchFailure = false;
+        this.resolve(null, { value: this.lastTelemetryValue, dispatchFailed: true });
+      } else if (this.rotaryState.phase === 'idle') {
+        // Already back on telemetry (the window closed some other way, or the knob
+        // was never engaged) — there is nothing left to revert, and holding the flag
+        // would misfire on the NEXT release instead.
+        this.pendingDispatchFailure = false;
+      }
     }
     // Haptic cues (result.haptics) are deliberately not wired here — they arrive with
     // the Detented/Acceleration tickets that give them something to distinguish.
+  }
+
+  /**
+   * Subscribes to the host's report of a write this Rotary made being rejected
+   * downstream — the failure mode `writeValue()`'s synchronous result cannot see.
+   *
+   * `dispatchSimEvent()` answers immediately, so it can only ever report what is
+   * knowable at the send: a rejected event name, or a bridge that isn't connected.
+   * A write that IS sent and is then refused by PC Bridge (unmapped Deck Event,
+   * SimConnect error) is reported asynchronously, as SIM_EVENT_DISPATCH_FAILED.
+   * Both land on the same `pendingDispatchFailure` path, so the engine sees one
+   * notion of "that write didn't take" regardless of which layer noticed.
+   */
+  watchDispatchFailures() {
+    this.releaseDispatchFailureWatch = this.widget?.onDispatchFailure?.(
+      this.def,
+      () => this.reportDispatchFailure()
+    ) || null;
+  }
+
+  /** Feeds an asynchronously-reported failure into the same path as a synchronous one. */
+  reportDispatchFailure() {
+    this.pendingDispatchFailure = true;
+    // No gesture, no telemetry — just re-run the engine so the deferred failure above
+    // is applied the moment a Reconciliation window exists to apply it to.
+    this.resolve(null, null);
   }
 
   /**
@@ -259,6 +309,12 @@ export class RotaryComponent extends BaseComponent {
     if (this.releaseFastPoll) {
       this.releaseFastPoll();
       this.releaseFastPoll = null;
+    }
+    // Same reasoning for the failure watch: it is a host-level EventBus subscription
+    // that outlives this node unless it is dropped here.
+    if (this.releaseDispatchFailureWatch) {
+      this.releaseDispatchFailureWatch();
+      this.releaseDispatchFailureWatch = null;
     }
     this.activePointerId = undefined;
     super.destroy();

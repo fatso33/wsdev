@@ -845,15 +845,25 @@ export class SimBridge {
 
   /**
    * Dispatches SimEvent to PC Bridge
+   *
+   * FDWS v1.30 (Rotary rebuild, ticket 02 correction): reports whether the event
+   * actually reached the socket. PC Bridge's own SIM_EVENT_DISPATCH_FAILED broadcast
+   * only covers a write that arrived and was rejected — it can say nothing at all
+   * about a write sent while the bridge is down, because there is no connection to
+   * carry the report back. That case is only observable here, at the send, which is
+   * why this return value exists: core.rotary reverts to last-known telemetry on it
+   * instead of sitting parked on a value the sim never took.
    * @param {string} event
    * @param {number|string} value
    * @param {string} category
+   * @returns {boolean} true if handed to an open socket; false if the name was
+   *   rejected or the socket was not open
    */
   sendEvent(event, value = 0, category = 'K_EVENT') {
     const cleanEvent = SecurityValidator.sanitizeEventName(event);
-    if (!cleanEvent) return;
+    if (!cleanEvent) return false;
 
-    this.sendRaw({
+    return this.sendRaw({
       type: 'event',
       event: cleanEvent,
       name: cleanEvent,

@@ -2328,7 +2328,7 @@ export class StudioInspector {
             <div class="prop-sanitize-diff hidden" id="c-bind-ack-custom-diff"></div>
           </div>
           <div class="prop-field">
-            <label>Push Event <span class="prop-hint" title="Fired when a component with a push/click action (e.g. core.rotary's center push) is pressed, separate from its normal turn/drag write event.">ⓘ</span></label>
+            <label>Push Event <span class="prop-hint" title="Optional second write event for a component that has a separate press action alongside its main write — dispatched on press-and-hold, for spring-loaded/momentary controls. No core component dispatches it today (core.rotary's centre push was removed in FDWS v1.30), so leave it as None unless the component you are configuring documents one.">ⓘ</span></label>
             <select id="c-bind-push" class="prop-select">${buildDefaultOptions('write', binding.pushEvent)}</select>
           </div>
           <div class="prop-field prop-custom-block ${pushIsCustom ? '' : 'hidden'}" id="c-bind-push-custom-block">
