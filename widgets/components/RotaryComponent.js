@@ -134,15 +134,21 @@ export class RotaryComponent extends BaseComponent {
    */
   resolve(gestureEvent, telemetry) {
     // A fresh grab supersedes any failure still waiting to be applied: the user has
-    // taken the knob back, so reverting under their finger would be wrong.
-    if (gestureEvent && gestureEvent.type === 'start') this.pendingDispatchFailure = false;
+    // taken the knob back, so reverting under their finger would be wrong. The
+    // repeat-write cache is cleared with it — a new gesture is a new intent, and a
+    // cache still holding the previous gesture's FAILED outcome would answer a retry
+    // from memory instead of actually retrying it (see writeValue()).
+    if (gestureEvent && gestureEvent.type === 'start') {
+      this.pendingDispatchFailure = false;
+      this.lastDispatchedValue = undefined;
+      this.lastDispatchOk = undefined;
+    }
 
     const result = resolveRotary(this.rotaryConfig(), gestureEvent, telemetry, this.now());
     this.rotaryState = result.state;
     this.currentValue = result.value;
     this.renderFace(result.angle);
 
-    let dispatchFailed = false;
     result.emits.forEach((emit) => {
       this.widget?.handleInteraction?.(this.def, emit.trigger, { ...emit.payload });
       // The Rotary writes to its binding DIRECTLY — a bound knob needs no interaction
@@ -150,11 +156,18 @@ export class RotaryComponent extends BaseComponent {
       // SELF_DISPATCHING_WRITE_EVENT_TYPES for exactly this reason). Absolute write
       // mode: the resolved value itself goes out, not a delta.
       if (emit.trigger === 'turn' || emit.trigger === 'turnEnd') {
-        if (this.writeValue(emit.payload.value) === false) dispatchFailed = true;
+        // The flag tracks the outcome of the MOST RECENT write, not "did any write in
+        // this gesture ever fail". A turn is many writes: if the bridge drops for one
+        // frame and recovers, the later writes genuinely reached the sim, and the value
+        // standing at release is the one the last write carried — force-reverting it
+        // because an earlier, superseded write failed would discard a value the sim
+        // really did take. `undefined` means nothing actually went out (no write event
+        // bound, or a skipped repeat): no outcome, so it must not clear a real failure.
+        const outcome = this.writeValue(emit.payload.value);
+        if (outcome === false) this.pendingDispatchFailure = true;
+        else if (outcome === true) this.pendingDispatchFailure = false;
       }
     });
-
-    if (dispatchFailed) this.pendingDispatchFailure = true;
 
     // Reported back into the engine as its own frame (not folded into the one above,
     // which has already returned): a failed write must revert to telemetry rather
@@ -210,20 +223,33 @@ export class RotaryComponent extends BaseComponent {
   }
 
   /**
-   * Sends one Absolute write, skipping a repeat of the value already sent.
+   * Sends one Absolute write, skipping a repeat of a value already sent SUCCESSFULLY.
    *
-   * A skipped repeat reports the outcome of the attempt that DID go out for that same
-   * value, rather than "nothing happened": the common case is turnEnd re-committing
-   * the value the last turn frame already sent, and a failure there must still reach
-   * the engine — otherwise a Rotary whose final write failed sits showing a value the
-   * sim never applied, which is exactly what the revert-to-telemetry path exists for.
+   * Only a success is ever skipped, and a skip reports NO OUTCOME rather than a
+   * success. The case the cache exists for is turnEnd re-committing the value the last
+   * turn frame already sent: nothing goes out, so nothing new is learned — and
+   * answering "sent, fine" from the cache would let that non-event overwrite a
+   * genuine failure reported in between (PC Bridge rejecting that very write
+   * asynchronously, between the last turn frame and the release).
+   *
+   * A FAILED value is deliberately not cached as an answer: re-dispatching is a retry,
+   * and the conditions that made it fail (a bridge that was down, a sim that refused
+   * once) are exactly the kind that change between attempts. Caching the failure
+   * instead meant the knob could get permanently stuck on one specific value — after a
+   * failed write to X, turning back to X answered "failed" from memory without ever
+   * re-sending it, so the value stayed unreachable until some other value was
+   * dispatched first. The retry costs one extra dispatch on a turnEnd re-commit whose
+   * previous attempt failed, and a failure that repeats still reaches the engine
+   * because the retry itself returns false.
    * @param {number} value
-   * @returns {boolean|undefined} false only when the host reports the dispatch failed
+   * @returns {boolean|undefined} true/false when a write actually went out and the
+   *   host reported on it; undefined when nothing went out at all (no write event
+   *   bound, or a skipped repeat), which is not an outcome and must not clear one
    */
   writeValue(value) {
     const writeEvent = this.def.binding?.writeEvent;
     if (!writeEvent) return undefined;
-    if (this.lastDispatchedValue === value) return this.lastDispatchOk;
+    if (this.lastDispatchedValue === value && this.lastDispatchOk === true) return undefined;
     this.lastDispatchedValue = value;
     this.lastDispatchOk = this.widget?.dispatchSimEvent?.(writeEvent, value);
     return this.lastDispatchOk;
