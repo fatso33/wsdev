@@ -51,7 +51,7 @@ const DEFAULT_START_ANGLE = -135;
 
 // Every trigger this Component can emit, as a literal array — the single source of
 // truth for Rotary's trigger vocabulary. `resolve()`'s dispatch path below derives
-// from this (WRITE_TRIGGERS is a slice of it, not a restatement), and
+// from this (WRITE_TRIGGERS is filtered from it by name, not a restatement), and
 // scripts/check-registry-drift.mjs reads this exported declaration directly, since
 // its usual "grep for a string-literal second handleInteraction() argument" scan is
 // structurally blind here — every trigger this Rotary fires goes through the same
@@ -59,13 +59,27 @@ const DEFAULT_START_ANGLE = -135;
 // which is where these three names actually originate).
 export const ROTARY_TRIGGERS = ['turnStart', 'turn', 'turnEnd'];
 
-// The subset of ROTARY_TRIGGERS that also drives a direct write to the binding
-// (Absolute write mode) — 'turnStart' is the one trigger that never writes (a grab
-// alone changes nothing), so it's filtered out by name rather than by position. A
-// future trigger appended to ROTARY_TRIGGERS (e.g. a detent-reached notification)
-// is excluded from writing by default unless explicitly added here, instead of
-// silently inheriting write behaviour from wherever it lands in the array.
-const WRITE_TRIGGERS = ROTARY_TRIGGERS.filter((trigger) => trigger !== 'turnStart');
+/**
+ * The subset of `triggers` that also drives a direct write to the binding (Absolute
+ * write mode) — 'turnStart' is the one trigger that never writes (a grab alone
+ * changes nothing), so it's filtered out by name rather than by position. A future
+ * trigger appended to ROTARY_TRIGGERS (e.g. a detent-reached notification) is
+ * excluded from writing by default unless explicitly added here, instead of silently
+ * inheriting write behaviour from wherever it lands in the array. Exported (both this
+ * function and WRITE_TRIGGERS below, which is just its result on the real
+ * ROTARY_TRIGGERS) so shared/RotaryComponent.writeTriggers.test.js can pin the
+ * DERIVATION itself against a reordered/extended input, not just today's output on
+ * today's ROTARY_TRIGGERS — a test that only checks the current output can't tell a
+ * name-based filter apart from a position-based slice that happens to produce the
+ * same three-element result.
+ * @param {string[]} triggers
+ * @returns {string[]}
+ */
+export function deriveWriteTriggers(triggers) {
+  return triggers.filter((trigger) => trigger !== 'turnStart');
+}
+
+export const WRITE_TRIGGERS = deriveWriteTriggers(ROTARY_TRIGGERS);
 
 export class RotaryComponent extends BaseComponent {
   render() {
