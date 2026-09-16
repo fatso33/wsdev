@@ -62,10 +62,14 @@ export const ROTARY_TRIGGERS = ['turnStart', 'turn', 'turnEnd'];
 /**
  * The subset of `triggers` that also drives a direct write to the binding (Absolute
  * write mode) — 'turnStart' is the one trigger that never writes (a grab alone
- * changes nothing), so it's filtered out by name rather than by position. A future
- * trigger appended to ROTARY_TRIGGERS (e.g. a detent-reached notification) is
- * excluded from writing by default unless explicitly added here, instead of silently
- * inheriting write behaviour from wherever it lands in the array. Exported (both this
+ * changes nothing), so it's filtered out by name rather than by position. Because the
+ * filter is name-based exclusion rather than a positional slice, a future trigger
+ * appended to ROTARY_TRIGGERS (e.g. a detent-reached notification) is INCLUDED as a
+ * write trigger by default — it starts writing to the sim binding immediately, with
+ * no opt-in required — instead of silently inheriting write behaviour from wherever it
+ * lands in the array. If a future trigger should NOT write to the sim, it must be
+ * explicitly excluded here (e.g. `trigger !== 'turnStart' && trigger !== 'newTrigger'`).
+ * Exported (both this
  * function and WRITE_TRIGGERS below, which is just its result on the real
  * ROTARY_TRIGGERS) so shared/RotaryComponent.writeTriggers.test.js can pin the
  * DERIVATION itself against a reordered/extended input, not just today's output on
