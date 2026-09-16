@@ -49,33 +49,26 @@ const DEFAULT_SWEEP_DEGREES = 270;
 // already uses.
 const DEFAULT_START_ANGLE = -135;
 
-// Every trigger this Component can emit, as a literal array — the single source of
-// truth for Rotary's trigger vocabulary. `resolve()`'s dispatch path below derives
-// from this (WRITE_TRIGGERS is filtered from it by name, not a restatement), and
-// scripts/check-registry-drift.mjs reads this exported declaration directly, since
-// its usual "grep for a string-literal second handleInteraction() argument" scan is
-// structurally blind here — every trigger this Rotary fires goes through the same
-// call site with `emit.trigger` as a variable (see resolveRotary()/rotaryEngine.js,
-// which is where these three names actually originate).
+// Every trigger this Component can emit — the single source of truth for Rotary's
+// trigger vocabulary. `resolve()`'s dispatch path derives from this rather than
+// repeating the names, and scripts/check-registry-drift.mjs reads this exported
+// declaration directly: its usual "grep for a string-literal handleInteraction()
+// argument" scan is structurally blind here, since every trigger goes through one
+// call site with `emit.trigger` as a variable (see rotaryEngine.js, where these
+// names originate).
 export const ROTARY_TRIGGERS = ['turnStart', 'turn', 'turnEnd'];
 
 /**
- * The subset of `triggers` that also drives a direct write to the binding (Absolute
- * write mode) — 'turnStart' is the one trigger that never writes (a grab alone
- * changes nothing), so it's filtered out by name rather than by position. Because the
- * filter is name-based exclusion rather than a positional slice, a future trigger
- * appended to ROTARY_TRIGGERS (e.g. a detent-reached notification) is INCLUDED as a
- * write trigger by default — it starts writing to the sim binding immediately, with
- * no opt-in required — instead of silently inheriting write behaviour from wherever it
- * lands in the array. If a future trigger should NOT write to the sim, it must be
- * explicitly excluded here (e.g. `trigger !== 'turnStart' && trigger !== 'newTrigger'`).
- * Exported (both this
- * function and WRITE_TRIGGERS below, which is just its result on the real
- * ROTARY_TRIGGERS) so shared/RotaryComponent.writeTriggers.test.js can pin the
- * DERIVATION itself against a reordered/extended input, not just today's output on
- * today's ROTARY_TRIGGERS — a test that only checks the current output can't tell a
- * name-based filter apart from a position-based slice that happens to produce the
- * same three-element result.
+ * The subset of `triggers` that also writes to the binding (Absolute write mode).
+ * 'turnStart' is the one trigger that never writes — a grab alone changes nothing —
+ * and it is excluded BY NAME, not by position.
+ *
+ * Worth knowing before adding a trigger: because this is a name-based exclusion, a
+ * new entry in ROTARY_TRIGGERS starts writing to the sim immediately, with no opt-in.
+ * One that should NOT write has to be excluded here explicitly.
+ *
+ * Exported (not inlined) so the tests can pin the derivation itself against a
+ * mutated input — the only way to tell it apart from a positional slice.
  * @param {string[]} triggers
  * @returns {string[]}
  */
