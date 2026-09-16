@@ -60,9 +60,12 @@ const DEFAULT_START_ANGLE = -135;
 export const ROTARY_TRIGGERS = ['turnStart', 'turn', 'turnEnd'];
 
 // The subset of ROTARY_TRIGGERS that also drives a direct write to the binding
-// (Absolute write mode) — derived by position (turnStart never writes; turn/turnEnd
-// always do) rather than repeating the 'turn'/'turnEnd' string literals a second time.
-const WRITE_TRIGGERS = ROTARY_TRIGGERS.slice(1);
+// (Absolute write mode) — 'turnStart' is the one trigger that never writes (a grab
+// alone changes nothing), so it's filtered out by name rather than by position. A
+// future trigger appended to ROTARY_TRIGGERS (e.g. a detent-reached notification)
+// is excluded from writing by default unless explicitly added here, instead of
+// silently inheriting write behaviour from wherever it lands in the array.
+const WRITE_TRIGGERS = ROTARY_TRIGGERS.filter((trigger) => trigger !== 'turnStart');
 
 export class RotaryComponent extends BaseComponent {
   render() {
