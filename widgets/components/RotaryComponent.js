@@ -49,6 +49,21 @@ const DEFAULT_SWEEP_DEGREES = 270;
 // already uses.
 const DEFAULT_START_ANGLE = -135;
 
+// Every trigger this Component can emit, as a literal array — the single source of
+// truth for Rotary's trigger vocabulary. `resolve()`'s dispatch path below derives
+// from this (WRITE_TRIGGERS is a slice of it, not a restatement), and
+// scripts/check-registry-drift.mjs reads this exported declaration directly, since
+// its usual "grep for a string-literal second handleInteraction() argument" scan is
+// structurally blind here — every trigger this Rotary fires goes through the same
+// call site with `emit.trigger` as a variable (see resolveRotary()/rotaryEngine.js,
+// which is where these three names actually originate).
+export const ROTARY_TRIGGERS = ['turnStart', 'turn', 'turnEnd'];
+
+// The subset of ROTARY_TRIGGERS that also drives a direct write to the binding
+// (Absolute write mode) — derived by position (turnStart never writes; turn/turnEnd
+// always do) rather than repeating the 'turn'/'turnEnd' string literals a second time.
+const WRITE_TRIGGERS = ROTARY_TRIGGERS.slice(1);
+
 export class RotaryComponent extends BaseComponent {
   render() {
     super.render();
@@ -155,7 +170,7 @@ export class RotaryComponent extends BaseComponent {
       // wiring to drive the sim (it is registered in StudioValidator's
       // SELF_DISPATCHING_WRITE_EVENT_TYPES for exactly this reason). Absolute write
       // mode: the resolved value itself goes out, not a delta.
-      if (emit.trigger === 'turn' || emit.trigger === 'turnEnd') {
+      if (WRITE_TRIGGERS.includes(emit.trigger)) {
         // The flag tracks the outcome of the MOST RECENT write, not "did any write in
         // this gesture ever fail". A turn is many writes: if the bridge drops for one
         // frame and recovers, the later writes genuinely reached the sim, and the value
