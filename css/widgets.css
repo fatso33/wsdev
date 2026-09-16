@@ -881,6 +881,35 @@
   cursor: grabbing;
 }
 
+/* Gesture-specific affordance (ticket 03: props.gesture). RotaryComponent.js sets
+   data-gesture on .fd-rotary-face every resolve() call; [data-gesture="arc"] needs no
+   rule of its own since grab/grabbing above is already Arc's look. */
+.fd-rotary-face[data-gesture="scrub"] {
+  /* A faint ridged "wheel" texture behind the knob face — same recipe as the
+     pre-rebuild .fd-rotary-wheel-track this replaces (see widgets.css history),
+     scaled down so it reads as a texture on a round face rather than a rectangular
+     track. Layered UNDER the SVG face (z-index left at auto, painted first) so the
+     fill/rim/indicator from rotaryFace.js still show on top. */
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.35) 0px, rgba(0, 0, 0, 0.35) 3px,
+    rgba(255, 255, 255, 0.05) 3px, rgba(255, 255, 255, 0.05) 4px
+  );
+  cursor: ns-resize;
+}
+
+.fd-rotary-face[data-gesture="scrub"]:active {
+  cursor: ns-resize;
+}
+
+.fd-rotary-face[data-gesture="tap"] {
+  cursor: pointer;
+}
+
+.fd-rotary-face[data-gesture="tap"]:active {
+  cursor: pointer;
+}
+
 .fd-rotary-face-svg {
   display: block;
   width: 100%;
@@ -997,8 +1026,11 @@
    ========================================================================= */
 
 /* 8.0 core.rotary's old linear "wheel" visual (props.circular: false) was removed with
-   the FDWS v1.30 Rotary rebuild — the prop no longer exists and nothing renders
-   .fd-rotary-wheel-track/.fd-rotary-wheel-indicator. See §7.7 for the knob itself. */
+   the FDWS v1.30 Rotary rebuild — the prop no longer exists and .fd-rotary-wheel-track/
+   .fd-rotary-wheel-indicator never came back as their own elements. Ticket 03's Scrub
+   gesture affordance instead reuses the same ridged-texture idea directly on the round
+   Face itself (`.fd-rotary-face[data-gesture="scrub"]`, §7.7) rather than a separate
+   rectangular wheel node. See §7.7 for the knob itself. */
 
 /* 8.1 core.gauge (display-only needle/bar/arc) */
 .fd-comp-gauge {

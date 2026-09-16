@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test';
  * (CLAUDE.md's Inspector-visibility gotcha).
  */
 
-const SIMPLE = ['props.min', 'props.max', 'props.degreesPerUnit'];
+const SIMPLE = ['props.gesture', 'props.min', 'props.max', 'props.degreesPerUnit'];
 const ADVANCED = [
   'props.sweepDegrees', 'props.startAngle', 'props.faceColor',
   'props.rimColor', 'props.rimWidth', 'props.indicatorColor', 'props.indicatorWidth'
@@ -74,4 +74,23 @@ test('the deleted Rotary\'s properties are gone from the Inspector entirely', as
   for (const path of DEAD) {
     expect(await isUsable(page, path), path).toBe('missing');
   }
+});
+
+// Ticket 03: "An Author can select Arc, Scrub or Tap per Rotary in the Property
+// Inspector" — exercised through the real control, not by writing state directly.
+test('an Author can choose Arc, Scrub or Tap on the Gesture field, and it defaults to Arc', async ({ page }) => {
+  await selectRotary(page, 'build');
+  const gestureField = page.locator('#rf-props-gesture');
+  await expect(gestureField).toHaveValue('arc');
+
+  const gestureOf = () => page.evaluate(() => {
+    const comp = window.__studioApp.state.widgetDef.components.find((c) => c.id === 'seed-rot');
+    return comp?.props?.gesture;
+  });
+
+  await gestureField.selectOption('scrub');
+  expect(await gestureOf()).toBe('scrub');
+
+  await gestureField.selectOption('tap');
+  expect(await gestureOf()).toBe('tap');
 });

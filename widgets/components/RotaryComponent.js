@@ -24,14 +24,21 @@
  * surface target, so an authored border/background/glow lands on the visible knob
  * instead of an invisible square wrapper around it.
  *
- * Scope for this ticket: the Arc gesture, the Bounded range, the Absolute write mode
- * and just enough appearance to look like a knob. Scrub/Tap (03), Continuous/Detented
- * (04), Pulse (05), Acceleration (06) and the remaining Face groups (07) widen this
- * without reworking it.
+ * Scope for ticket 02: the Arc gesture, the Bounded range, the Absolute write mode
+ * and just enough appearance to look like a knob. Continuous/Detented (04), Pulse (05),
+ * Acceleration (06) and the remaining Face groups (07) widen this without reworking it.
+ *
+ * Ticket 03 widened the gesture axis (`props.gesture`: arc/scrub/tap) entirely inside
+ * rotaryEngine.js — this file's only changes for it are threading the prop through
+ * (rotaryConfig()) and setting the `data-gesture` attribute the stylesheets key their
+ * cursor/track affordance off of. The pointer wiring itself (attachTurnGesture()) is
+ * unchanged: every gesture is driven by the same pointerdown/move/up sequence, and it
+ * is the engine, not this Component, that decides what dx/dy mean for the chosen
+ * gesture.
  */
 
 import { BaseComponent } from './BaseComponent.js';
-import { resolveRotary, createRotaryState } from './rotaryEngine.js';
+import { resolveRotary, createRotaryState, resolveGesture } from './rotaryEngine.js';
 import { buildRotaryFace } from './rotaryFace.js';
 
 // Fallback only. The real number comes from the host (`getPollPeriodMs()`), which is
@@ -123,6 +130,7 @@ export class RotaryComponent extends BaseComponent {
   rotaryConfig() {
     const props = this.def.props || {};
     return {
+      gesture: resolveGesture(props.gesture),
       min: props.min ?? DEFAULT_MIN,
       max: props.max ?? DEFAULT_MAX,
       degreesPerUnit: props.degreesPerUnit ?? DEFAULT_DEGREES_PER_UNIT,
@@ -173,7 +181,12 @@ export class RotaryComponent extends BaseComponent {
       this.lastDispatchOk = undefined;
     }
 
-    const result = resolveRotary(this.rotaryConfig(), gestureEvent, telemetry, this.now());
+    const cfg = this.rotaryConfig();
+    // Drives the cursor/track affordance in widgets.css (`.fd-rotary-face[data-gesture=...]`)
+    // — a plain attribute rather than a class so it composes with BaseComponent's own
+    // state classes (dragging, etc.) instead of fighting them.
+    if (this.faceNode) this.faceNode.dataset.gesture = cfg.gesture;
+    const result = resolveRotary(cfg, gestureEvent, telemetry, this.now());
     this.rotaryState = result.state;
     this.currentValue = result.value;
     this.renderFace(result.angle);

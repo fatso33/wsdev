@@ -26,6 +26,17 @@
  * already part of the return shape for that reason, even though this ticket
  * only ever produces a single ring and a single ("base") tier.
  *
+ * Ticket 03 widens the gesture axis: `config.gesture` selects 'arc' (default),
+ * 'scrub' or 'tap'. All three share the SAME `degreesPerUnit` config field as
+ * their sensitivity/"Feel" knob, reinterpreted per gesture (degrees of arc,
+ * pixels of linear drag, or units per discrete tap) rather than adding a
+ * parallel field per gesture — this is what lets an Author switch gesture in
+ * the Inspector without reconfiguring range, steps or bindings. All three
+ * gestures also share `clamp()`/the Bounded range and the Reconciliation
+ * window untouched, and emit the identical trigger vocabulary (turnStart/
+ * turn/turnEnd) with the identical payload shape — a downstream binding or
+ * interaction does not care which gesture drove it.
+ *
  * ---------------------------------------------------------------------------
  * config shape (all fields optional unless noted; caller — ticket 02's
  * Component — is expected to supply real values, these are safe fallbacks
@@ -35,9 +46,16 @@
  *     min: number,                 // Bounded range floor (default 0)
  *     max: number,                 // Bounded range ceiling (default 100)
  *     initialValue: number,        // used only if no telemetry has arrived yet
- *     degreesPerUnit: number,      // arc degrees that move the value by 1 unit (default 1).
- *                                  // Used as a divisor, so its magnitude is floored at
- *                                  // MIN_DEGREES_PER_UNIT below — 0 is not reachable.
+ *     gesture: string,              // 'arc' (default) | 'scrub' | 'tap'. Selects HOW a
+ *                                  // move/tap is interpreted; see the file header note
+ *                                  // above ticket 03 added this.
+ *     degreesPerUnit: number,      // the gesture's sensitivity ("Feel"), reinterpreted per
+ *                                  // `gesture` (default 1):
+ *                                  //   arc:   arc degrees that move the value by 1 unit.
+ *                                  //   scrub: pixels of linear drag that move the value by 1 unit.
+ *                                  //   tap:   units moved by a single discrete tap.
+ *                                  // Used as a divisor for arc/scrub, so its magnitude is
+ *                                  // floored at MIN_DEGREES_PER_UNIT below — 0 is not reachable.
  *     minEffectiveRadius: number,  // px floor for the grab radius (default 24 — roughly
  *                                  // a fingertip contact radius; see ADR 0001)
  *     sweepDegrees: number,        // visual sweep the returned `angle` is mapped onto
@@ -84,6 +102,22 @@ const DEFAULT_SWEEP_DEGREES = 270;
 const DEFAULT_POLL_PERIOD_MS = 1000; // matches the normal 1Hz poll tier (CLAUDE.md)
 const DEFAULT_RING_ID = 'default';
 const DEFAULT_TIER = 'base';
+// Arc remains the default: it is the only gesture that reads correctly against the
+// Rotary's current visual style (a circular knob face, per rotaryFace.js) — Scrub's
+// "drag like a wheel" affordance and Tap's discrete tap zones are both things an
+// Author opts into explicitly for a control that should behave like a wheel/switch
+// rather than a knob. See ticket 03.
+const DEFAULT_GESTURE = 'arc';
+const VALID_GESTURES = ['arc', 'scrub', 'tap'];
+
+/** Falls back to the default for anything not one of the three known gestures,
+ * rather than silently misbehaving on a typo'd/legacy value. Exported so the
+ * Component can resolve the SAME default when deciding the cursor/track
+ * affordance to show, rather than re-deriving (and risking drift from) this
+ * module's own notion of "the" default gesture. */
+export function resolveGesture(raw) {
+  return VALID_GESTURES.includes(raw) ? raw : DEFAULT_GESTURE;
+}
 
 // Deliberate implementation choices, not values pulled from the spec:
 // - The floor stops the Reconciliation window collapsing to a near-zero
@@ -159,34 +193,63 @@ export function createRotaryState(config, telemetry) {
 }
 
 /**
- * Resolves this frame's gesture (start/move/end) against the current state.
- * Arc is a *relative* gesture (ADR 0001): the Ring accumulates the tangential
+ * The 'start' handling shared by Arc and Scrub: both are continuous drags that
+ * simply begin tracking the pointer's position, with no value change yet — a
+ * grab alone changes nothing. Tap has its own 'start' (below): it additionally
+ * has to decide which way a tap at this position will move the value.
+ */
+function startContinuousDrag(state, min, max, ring, gestureEvent) {
+  const next = {
+    ...state,
+    phase: 'engaged',
+    lastPos: { dx: gestureEvent.dx, dy: gestureEvent.dy },
+    pendingDispatchValue: null,
+    reconcileStartedAt: null
+  };
+  const value = clamp(state.rawValue, min, max);
+  return {
+    state: next,
+    emits: [{ trigger: 'turnStart', payload: { value, delta: 0, direction: null, ring } }]
+  };
+}
+
+/**
+ * The 'end' handling shared by Arc and Scrub: release the drag and open the
+ * Reconciliation window on whatever value dragging has already accumulated.
+ * Tap has its own 'end' (below): its value change happens AT release, not
+ * during a 'move' that never occurs, so it emits an additional 'turn' first.
+ */
+function endContinuousDrag(state, min, max, ring) {
+  if (state.phase !== 'engaged') {
+    return { state, emits: [] };
+  }
+  const value = clamp(state.rawValue, min, max);
+  const next = {
+    ...state,
+    phase: 'reconciling',
+    lastPos: null,
+    pendingDispatchValue: value,
+    reconcileStartedAt: null // stamped with `now` by resolveRotary
+  };
+  return {
+    state: next,
+    emits: [{ trigger: 'turnEnd', payload: { value, delta: 0, direction: null, ring } }]
+  };
+}
+
+/**
+ * Arc: a *relative* gesture (ADR 0001) — the Ring accumulates the tangential
  * component of the finger's movement, never the finger's absolute angle. Near
  * the center, the true radius is floored to `minEffectiveRadius` when turning
  * that tangential displacement into an angle — dividing by the floor instead
  * of the (possibly tiny) real radius is what prevents a grab near the center
  * from spinning the Ring out wildly for a small physical finger movement.
  */
-function processGesture(state, cfg, gestureEvent) {
-  const min = cfg.min ?? DEFAULT_MIN;
-  const max = cfg.max ?? DEFAULT_MAX;
-  const degPerUnit = resolveDegreesPerUnit(cfg.degreesPerUnit);
+function processArcGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit) {
   const minRadius = cfg.minEffectiveRadius ?? DEFAULT_MIN_EFFECTIVE_RADIUS;
-  const ring = cfg.ringId ?? DEFAULT_RING_ID;
 
   if (gestureEvent.type === 'start') {
-    const next = {
-      ...state,
-      phase: 'engaged',
-      lastPos: { dx: gestureEvent.dx, dy: gestureEvent.dy },
-      pendingDispatchValue: null,
-      reconcileStartedAt: null
-    };
-    const value = clamp(state.rawValue, min, max);
-    return {
-      state: next,
-      emits: [{ trigger: 'turnStart', payload: { value, delta: 0, direction: null, ring } }]
-    };
+    return startContinuousDrag(state, min, max, ring, gestureEvent);
   }
 
   if (gestureEvent.type === 'move') {
@@ -245,24 +308,154 @@ function processGesture(state, cfg, gestureEvent) {
   }
 
   if (gestureEvent.type === 'end') {
-    if (state.phase !== 'engaged') {
-      return { state, emits: [] };
-    }
-    const value = clamp(state.rawValue, min, max);
-    const next = {
-      ...state,
-      phase: 'reconciling',
-      lastPos: null,
-      pendingDispatchValue: value,
-      reconcileStartedAt: null // stamped with `now` by resolveRotary
-    };
-    return {
-      state: next,
-      emits: [{ trigger: 'turnEnd', payload: { value, delta: 0, direction: null, ring } }]
-    };
+    return endContinuousDrag(state, min, max, ring);
   }
 
   return { state, emits: [] };
+}
+
+/**
+ * Scrub: a *linear* drag along a single axis — "feels like dragging a wheel"
+ * (a trim wheel or VS wheel), per the ticket 03 spec and CONTEXT.md's Scrub
+ * glossary entry. Dragging UP (finger's dy decreasing) increases the value,
+ * mirroring a vertical slider; `degreesPerUnit` is reinterpreted here as
+ * pixels of drag per unit, not degrees of arc — there is no angle involved.
+ * No radius/minimum-effective-radius concept applies: a linear drag has no
+ * center to measure a radius from.
+ */
+function processScrubGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit) {
+  if (gestureEvent.type === 'start') {
+    return startContinuousDrag(state, min, max, ring, gestureEvent);
+  }
+
+  if (gestureEvent.type === 'move') {
+    if (state.phase !== 'engaged' || !state.lastPos) {
+      return { state, emits: [] };
+    }
+    const prev = state.lastPos;
+    const curr = { dx: gestureEvent.dx, dy: gestureEvent.dy };
+    const deltaPixels = prev.dy - curr.dy; // up (dy decreasing) is positive
+    const deltaValue = deltaPixels / degPerUnit;
+
+    // Same "absorb the overshoot at a bound" behaviour as Arc: accumulate into
+    // the unclamped raw value so reversing direction has to wind back through
+    // whatever overshoot happened before the value actually moves again.
+    const rawValue = state.rawValue + deltaValue;
+    const value = clamp(rawValue, min, max);
+    const next = { ...state, rawValue, lastPos: curr };
+
+    const emits = [];
+    if (deltaValue !== 0) {
+      emits.push({
+        trigger: 'turn',
+        payload: { value, delta: deltaValue, direction: deltaValue > 0 ? 'cw' : 'ccw', ring }
+      });
+    }
+    return { state: next, emits };
+  }
+
+  if (gestureEvent.type === 'end') {
+    return endContinuousDrag(state, min, max, ring);
+  }
+
+  return { state, emits: [] };
+}
+
+/**
+ * Tap: a *discrete* gesture — "no drag required" (ticket 03). A tap changes
+ * the value by exactly one `degreesPerUnit`-sized step, in a direction decided
+ * once, at grab, by which side of center the tap landed (dx >= 0 is the
+ * increment side, matching a natural left/right split of the whole Face into
+ * two large tap zones — comfortably sized for a finger because each zone is
+ * the entire half of whatever layout box the Author gave the Rotary, not a
+ * small button drawn inside it). Movement between start and end is ignored
+ * entirely: a tap is defined by where it landed, not by any drift before
+ * release, and "no drag required" does not mean a drag is disallowed.
+ *
+ * The step is applied AT RELEASE ('end'), not at grab — a tap is cancellable
+ * the same way a button press is (nothing has committed until release) — and
+ * is reported as its own 'turn' emit immediately before the 'turnEnd' emit in
+ * the same call, since no intervening 'move' ever carries it. This keeps the
+ * emitted trigger vocabulary and payload shape identical to Arc/Scrub: an
+ * 'end' still always closes with a delta:0/direction:null 'turnEnd'.
+ */
+function processTapGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit) {
+  if (gestureEvent.type === 'start') {
+    const next = {
+      ...state,
+      phase: 'engaged',
+      lastPos: { dx: gestureEvent.dx, dy: gestureEvent.dy },
+      tapDirection: gestureEvent.dx >= 0 ? 1 : -1,
+      pendingDispatchValue: null,
+      reconcileStartedAt: null
+    };
+    const value = clamp(state.rawValue, min, max);
+    return {
+      state: next,
+      emits: [{ trigger: 'turnStart', payload: { value, delta: 0, direction: null, ring } }]
+    };
+  }
+
+  if (gestureEvent.type === 'move') {
+    // Tap has no drag phase — direction was already decided at grab.
+    return { state, emits: [] };
+  }
+
+  if (gestureEvent.type === 'end') {
+    if (state.phase !== 'engaged') {
+      return { state, emits: [] };
+    }
+    const stepAmount = Math.abs(degPerUnit);
+    const direction = state.tapDirection ?? 1;
+    const deltaValue = direction * stepAmount;
+    const rawValue = state.rawValue + deltaValue;
+    const value = clamp(rawValue, min, max);
+
+    const emits = [];
+    if (deltaValue !== 0) {
+      emits.push({
+        trigger: 'turn',
+        payload: { value, delta: deltaValue, direction: deltaValue > 0 ? 'cw' : 'ccw', ring }
+      });
+    }
+    const next = {
+      ...state,
+      rawValue,
+      phase: 'reconciling',
+      lastPos: null,
+      tapDirection: null,
+      pendingDispatchValue: value,
+      reconcileStartedAt: null // stamped with `now` by resolveRotary
+    };
+    emits.push({ trigger: 'turnEnd', payload: { value, delta: 0, direction: null, ring } });
+    return { state: next, emits };
+  }
+
+  return { state, emits: [] };
+}
+
+/**
+ * Resolves this frame's gesture (start/move/end) against the current state,
+ * dispatching to Arc/Scrub/Tap per `cfg.gesture` (default Arc). See each
+ * gesture's own function for what makes it distinct; everything else —
+ * bounds, the Reconciliation window, the emitted trigger vocabulary — is
+ * shared, which is what lets a downstream binding or interaction not care
+ * which gesture drove it.
+ */
+function processGesture(state, cfg, gestureEvent) {
+  const min = cfg.min ?? DEFAULT_MIN;
+  const max = cfg.max ?? DEFAULT_MAX;
+  const degPerUnit = resolveDegreesPerUnit(cfg.degreesPerUnit);
+  const ring = cfg.ringId ?? DEFAULT_RING_ID;
+  const gesture = resolveGesture(cfg.gesture);
+
+  if (gesture === 'scrub') {
+    return processScrubGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit);
+  }
+  if (gesture === 'tap') {
+    return processTapGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit);
+  }
+  return processArcGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit);
 }
 
 /**

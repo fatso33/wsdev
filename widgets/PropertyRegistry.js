@@ -564,10 +564,19 @@ export const TYPE_FIELDS = {
   // props (circular/coarseStep/fineStep/pushLabel) are gone with the Component that
   // read them; an older widget still declaring one loads and degrades to defaults.
   // Every `default` here matches RotaryComponent.js/rotaryFace.js's own fallback.
+  //
+  // Ticket 03 adds props.gesture (Arc/Scrub/Tap). Defaults to 'arc' — the only visual
+  // style the Rotary has today (a circular knob face, per rotaryFace.js); Scrub's wheel
+  // affordance and Tap's tap zones are both an explicit Author opt-in for a control
+  // that should feel like a wheel/switch rather than a knob, not a shape the Rotary can
+  // currently look like on its own. Switching gesture never requires touching Range,
+  // Steps or the Rotary's binding — props.degreesPerUnit's own tooltip below covers how
+  // it's reinterpreted per gesture.
   'core.rotary': [
+    { path: 'props.gesture', control: 'select', options: [{ value: 'arc', label: 'Arc (turn)' }, { value: 'scrub', label: 'Scrub (drag like a wheel)' }, { value: 'tap', label: 'Tap (discrete steps)' }], tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 'arc', tooltip: 'How the End user turns this knob. Arc turns it by arcing a finger around it — the natural gesture for a circular knob. Scrub drags it like a wheel (a trim wheel or VS wheel) with a straight up/down drag. Tap changes it in discrete steps with no drag at all — tapping the right half increments, the left half decrements. Switching gesture never requires reconfiguring Range, Feel or the binding below.' },
     { path: 'props.min', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 0, tooltip: 'Lowest value the knob can reach. The knob stops here like a physical end-stop — turning further is absorbed and has to be wound back.' },
     { path: 'props.max', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 100, tooltip: 'Highest value the knob can reach.' },
-    { path: 'props.degreesPerUnit', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 1, tooltip: 'How far the finger has to travel around the knob to move the value by 1 — the knob’s "feel". Higher means finer/slower; 1 means one degree of turn per unit.' },
+    { path: 'props.degreesPerUnit', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 1, tooltip: 'The knob\'s "feel" — reinterpreted per Gesture above. Arc: degrees of arc travelled per 1 unit of value. Scrub: pixels of straight drag per 1 unit. Tap: units changed by a single tap. Higher means finer/slower for Arc and Scrub; for Tap it is the step size itself.' },
     { path: 'props.sweepDegrees', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: 270, tooltip: 'How far the knob visibly rotates across its whole range, in degrees. Purely visual — it does not change the values the knob produces.' },
     { path: 'props.startAngle', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: -135, tooltip: 'Where the indicator points at the minimum value, in degrees clockwise from straight up (12 o\'clock) — same convention as core.gauge\'s Arc Start Angle. Default -135, which puts mid-range straight up over the default 270° sweep.' },
     { path: 'props.faceColor', control: 'color', tier: 'advanced', group: 'Knob', fdwsMin: '1.30', default: undefined, tooltip: 'Fills the knob disc. Leave unset to let this component’s own Background (and its state/conditional variants) show through instead.' },
