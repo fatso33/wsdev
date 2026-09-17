@@ -94,3 +94,38 @@ test('an Author can choose Arc, Scrub or Tap on the Gesture field, and it defaul
   await gestureField.selectOption('tap');
   expect(await gestureOf()).toBe('tap');
 });
+
+// Ticket 04: "An Author can author a list of named positions ... editable in the
+// Property Inspector" — the Positions rowListEditor only makes sense once Range Mode
+// is Detented, and Min/Max only make sense while it isn't. Both are showWhen-gated on
+// props.rangeMode; this exercises that the real render() path actually flips them,
+// not just that PropertyRegistry declares the gate (see rotaryRegistry.test.js for the
+// declaration-only coverage).
+//
+// Unlike the tier-based ADVANCED fields above (rendered but CSS-hidden, so
+// isUsable() reports 'hidden'), an unauthored showWhen-false field is skipped from
+// the DOM entirely by StudioInspector's render() (see its "A showWhen-false field is
+// normally skipped entirely" comment) — so isUsable() reports 'missing' here instead.
+//
+// Positions is a rowListEditor, whose root is a <div> (a list of rows), not an
+// <input>/<select> — hence the separate 'div' branch below rather than reusing the
+// input|select regex the plain fields above use.
+test('the Positions editor appears only in Detented, and Min/Max only outside it', async ({ page }) => {
+  await selectRotary(page, 'build');
+  const rangeModeField = page.locator('#rf-props-rangeMode');
+  await expect(rangeModeField).toHaveValue('bounded');
+
+  expect(await isUsable(page, 'props.min')).toMatch(/^(input|select)$/);
+  expect(await isUsable(page, 'props.max')).toMatch(/^(input|select)$/);
+  expect(await isUsable(page, 'props.positions')).toBe('missing');
+
+  await rangeModeField.selectOption('detented');
+  expect(await isUsable(page, 'props.positions')).toBe('div');
+  expect(await isUsable(page, 'props.min')).toBe('missing');
+  expect(await isUsable(page, 'props.max')).toBe('missing');
+
+  await rangeModeField.selectOption('continuous');
+  expect(await isUsable(page, 'props.positions')).toBe('missing');
+  expect(await isUsable(page, 'props.min')).toMatch(/^(input|select)$/);
+  expect(await isUsable(page, 'props.max')).toMatch(/^(input|select)$/);
+});

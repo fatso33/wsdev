@@ -3428,7 +3428,7 @@ export class StudioInspector {
     };
 
     mount.innerHTML = `
-      <div class="prop-field">
+      <div class="prop-field" id="${this.fieldDomId(propKey)}">
         <label>${spec.title}${spec.hint ? `<span class="prop-hint" title="${spec.hint}"> ⓘ</span>` : ''}</label>
         <div class="row-list-editor">
           ${list.map((row, idx) => `
