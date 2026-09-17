@@ -82,6 +82,12 @@ function walkBindingSites(components, visit, path = []) {
       if (binding.writeEvent) at({ kind: 'write', source: 'binding', field: 'writeEvent', name: binding.writeEvent });
       if (binding.pushEvent) at({ kind: 'write', source: 'binding', field: 'pushEvent', name: binding.pushEvent });
       if (binding.ackEvent) at({ kind: 'write', source: 'binding', field: 'ackEvent', name: binding.ackEvent });
+      // core.rotary Pulse write mode (ticket 05): a Pulse-only Ring has no
+      // writeEvent at all — its writes live entirely in incrementEvent/
+      // decrementEvent — so both need their own site here or a Pulse-only
+      // Rotary is invisible to every view over this traversal.
+      if (binding.incrementEvent) at({ kind: 'write', source: 'binding', field: 'incrementEvent', name: binding.incrementEvent });
+      if (binding.decrementEvent) at({ kind: 'write', source: 'binding', field: 'decrementEvent', name: binding.decrementEvent });
     }
 
     // core.rocker: each zone carries its own writeEvent instead of binding.writeEvent
