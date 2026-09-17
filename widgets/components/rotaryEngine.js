@@ -405,11 +405,25 @@ function processTapGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit)
     if (state.phase !== 'engaged') {
       return { state, emits: [] };
     }
+    // `Math.abs` deliberately: for Tap the step direction is *spatial* — which
+    // half of the Face was tapped — so the general `degreesPerUnit` sign
+    // convention documented on resolveDegreesPerUnit ("a negative value simply
+    // reverses the turn direction") has nothing to reverse here. Honouring the
+    // sign would silently swap which half increments, with no affordance
+    // showing it. Only the magnitude is meaningful for Tap.
     const stepAmount = Math.abs(degPerUnit);
     const direction = state.tapDirection ?? 1;
     const deltaValue = direction * stepAmount;
-    const rawValue = state.rawValue + deltaValue;
-    const value = clamp(rawValue, min, max);
+    // Step from the CLAMPED current value, and store the result clamped — the
+    // opposite of Arc/Scrub, deliberately. A continuous drag absorbs overshoot
+    // at a bound so it has to be wound back, which reads as a physical
+    // end-stop under a finger that is still moving. A tap is discrete and
+    // independent: there is no continuous motion to feel wound back, so a
+    // remembered unclamped raw value just silently eats the next taps in the
+    // opposite direction (tapping up at max=20 then back down once would land
+    // on 18 instead of 15).
+    const value = clamp(clamp(state.rawValue, min, max) + deltaValue, min, max);
+    const rawValue = value;
 
     const emits = [];
     if (deltaValue !== 0) {
