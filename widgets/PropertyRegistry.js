@@ -90,9 +90,14 @@ export const TRIGGERS = [
   // RotaryComponent.js's WRITE_TRIGGER_ALLOWLIST deliberately does not include
   // either. 'detent' fires when a Detented Ring's turn crosses into a new named
   // position; 'limit' fires when a Bounded or Detented Ring's turn reaches either
-  // end (Continuous never fires it — it wraps instead of hitting a bound).
+  // end (Continuous never fires it — it wraps instead of hitting a bound). A
+  // Detented Ring with 2 or fewer positions never fires 'limit' — with only two
+  // positions every index is always both bounds at once, so it would otherwise
+  // fire identically to 'detent' on every single toggle; 'limit' is reserved for
+  // rings with a real middle (3+ positions) where a bound is distinct from "the
+  // other end".
   { id: 'detent', fires: 'RotaryComponent — a Detented Ring\'s turn crosses into a new named position', live: true, componentTypes: ['core.rotary'] },
-  { id: 'limit', fires: 'RotaryComponent — a Bounded or Detented Ring\'s turn reaches either end', live: true, componentTypes: ['core.rotary'] },
+  { id: 'limit', fires: 'RotaryComponent — a Bounded Ring\'s turn reaches either end, or a Detented Ring\'s with 3+ positions', live: true, componentTypes: ['core.rotary'] },
   { id: 'detentReached', fires: 'SliderComponent — commit lands on a declared detent', live: true, componentTypes: ['core.slider'] },
   { id: 'increment', fires: 'StepperComponent — + button', live: true, componentTypes: ['core.stepper'] },
   { id: 'decrement', fires: 'StepperComponent — − button', live: true, componentTypes: ['core.stepper'] },

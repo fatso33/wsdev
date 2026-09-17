@@ -137,6 +137,21 @@ function normalizePositions(raw) {
 }
 
 /**
+ * The rest-state index a cold-started Detented Ring falls back to when the index it
+ * would otherwise seed (matched telemetry, or the authored initialValue) lands on a
+ * Momentary position with no prior state to fall back to instead (see
+ * createRotaryState's own comment on this). Picks the first authored position that
+ * ISN'T Momentary, since that's the closest available reading of "a position this
+ * control could actually rest at"; falls back to `min` (index 0) in the degenerate
+ * case where every authored position is Momentary and there is truly nothing else to
+ * pick.
+ */
+function firstRestablePositionIndex(positions, min) {
+  const idx = positions.findIndex((p) => !p.momentary);
+  return idx >= 0 ? idx : min;
+}
+
+/**
  * The numeric [min, max] this Rotary actually operates over this frame. Bounded and
  * Continuous use the Author's own props.min/max; Detented ignores them entirely and
  * operates over the authored positions list's own index range instead (0..N-1) —
@@ -239,6 +254,17 @@ export function createRotaryState(config, telemetry) {
     const index = matchedIndex >= 0
       ? matchedIndex
       : clamp(Math.round(cfg.initialValue ?? 0), min, max);
+    // stableIndex is what a Momentary position springs back to on release (see
+    // applyDetentedPostProcessing). There is no prior state yet on a cold start, so
+    // if the seeded index itself is Momentary (e.g. telemetry seeds the Ring
+    // directly onto a magneto's START before any gesture has ever run), it cannot
+    // fall back to "whatever was held before" the way the runtime idle-telemetry
+    // path below does — fall back to the first non-Momentary authored position
+    // instead, so release doesn't no-op onto the position already showing.
+    const seededPosition = positions[index] || null;
+    const stableIndex = (seededPosition && seededPosition.momentary)
+      ? firstRestablePositionIndex(positions, min)
+      : index;
     return {
       phase: 'idle',
       rawValue: index,
@@ -252,7 +278,12 @@ export function createRotaryState(config, telemetry) {
       // applyDetentedPostProcessing's own comment for the bug this avoids.
       telemetryUnmatched: seeded && matchedIndex < 0,
       unmatchedValue: seeded && matchedIndex < 0 ? telemetry.value : null,
-      stableIndex: index
+      stableIndex,
+      // Seeded to the same index the Ring starts at (not null) so the very first
+      // grab's `index !== previousDetentIndex` check in applyDetentedPostProcessing
+      // correctly reads as "nothing has moved yet" rather than firing a spurious
+      // detent/limit on a bare grab that never turned.
+      detentIndex: index
     };
   }
 
@@ -715,7 +746,13 @@ function applyDetentedPostProcessing(state, positions, min, max, emits, previous
   if (position && isTurnEmit && index !== previousDetentIndex) {
     extraEmits.push({ trigger: 'detent', payload: { value: position.value, delta: 0, direction: null, ring } });
     haptics.push('detent');
-    if (index === min || index === max) {
+    // A ring with 2 (or fewer) positions has every index at both bounds
+    // simultaneously — min===0 and max===positions.length-1 collapse onto the
+    // same two indices — so without this guard 'limit' would fire on literally
+    // every toggle, identically to 'detent', forever. Only rings with a real
+    // middle (3+ positions) have a bound distinct from "the other end", so only
+    // those ever emit 'limit'.
+    if (positions.length > 2 && (index === min || index === max)) {
       extraEmits.push({ trigger: 'limit', payload: { value: position.value, delta: 0, direction: null, ring } });
       haptics.push('limit');
     }
@@ -762,11 +799,17 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
   const cfg = config || {};
   const { mode, min, max, positions } = resolveEffectiveRange(cfg);
   const ring = cfg.ringId ?? DEFAULT_RING_ID;
-  const previousDetentIndex = (cfg.previousState && cfg.previousState.detentIndex != null)
-    ? cfg.previousState.detentIndex
-    : null;
 
   let state = cfg.previousState || createRotaryState(cfg, telemetry);
+
+  // Read AFTER state is resolved, not before: on a true cold call (no
+  // cfg.previousState at all) `state` was just freshly built by
+  // createRotaryState above, which now seeds its own `detentIndex` to the
+  // index it starts at (see that function's own comment). Reading only
+  // `cfg.previousState?.detentIndex` here would throw that seed away and fall
+  // back to `null` on every cold-started Ring's very first call, right back
+  // to the spurious first-grab detent/limit fire this was meant to fix.
+  const previousDetentIndex = (state.detentIndex != null) ? state.detentIndex : null;
 
   // 1. Resolve any open Reconciliation window first, using this frame's
   //    telemetry, before this frame's gesture (if any) is applied.
