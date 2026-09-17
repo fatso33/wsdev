@@ -38,7 +38,7 @@
  */
 
 import { BaseComponent } from './BaseComponent.js';
-import { resolveRotary, createRotaryState, resolveGesture, resolveRangeMode } from './rotaryEngine.js';
+import { resolveRotary, createRotaryState, resolveGesture, resolveRangeMode, resolveWriteMode, resolveDispatchTiming } from './rotaryEngine.js';
 import { buildRotaryFace } from './rotaryFace.js';
 import { SecurityValidator } from '../../core/SecurityValidator.js';
 
@@ -136,9 +136,23 @@ export class RotaryComponent extends BaseComponent {
    */
   rotaryConfig() {
     const props = this.def.props || {};
+    const writeMode = resolveWriteMode(props.writeMode);
     return {
       gesture: resolveGesture(props.gesture),
       rangeMode: resolveRangeMode(props.rangeMode),
+      // Ticket 05: writeMode ('absolute'/'pulse') and dispatchTiming ('onChange'/
+      // 'onRelease'/'perDetent') are threaded straight through — the engine owns
+      // every consequence of them (what an emit means, when it fires, the per-frame
+      // cap). hasReadableValue is the ONLY thing this Component decides for the
+      // engine rather than just forwarding an Author-set prop: whether the sim
+      // actually tells this Rotary what its value is. binding.readSimVar/stateVar
+      // are the two ways telemetry reaches update() (see BindingReactivity.js /
+      // widgetVarExtractor.js) — without either, a Pulse Ring has nothing
+      // trustworthy to compare against a bound, so it must never stop emitting on
+      // its own guess (see rotaryEngine.js's queuePulseSteps).
+      writeMode,
+      dispatchTiming: resolveDispatchTiming(props.dispatchTiming, writeMode),
+      hasReadableValue: !!(this.def.binding?.readSimVar || this.def.binding?.stateVar),
       min: props.min ?? DEFAULT_MIN,
       max: props.max ?? DEFAULT_MAX,
       positions: Array.isArray(props.positions) ? props.positions : [],
@@ -177,8 +191,15 @@ export class RotaryComponent extends BaseComponent {
    * Component reacts to a result.
    * @param {object|null} gestureEvent
    * @param {object|null} telemetry
+   * @param {number} [nowOverride] — ticket 05: schedulePulseDrain()'s rAF callback
+   *   already has a real animation-frame timestamp in hand and passes it straight
+   *   through, so the engine's per-frame Pulse coalescer keys off the SAME frame
+   *   identity the browser used. Every other call site (pointerdown/move/up,
+   *   telemetry updates, the dispatch-failure replay) falls back to this.now() —
+   *   'move' is resolved synchronously, one call per real pointermove event, not
+   *   batched to a frame (see attachTurnGesture's own comment on why).
    */
-  resolve(gestureEvent, telemetry) {
+  resolve(gestureEvent, telemetry, nowOverride) {
     // A fresh grab supersedes any failure still waiting to be applied: the user has
     // taken the knob back, so reverting under their finger would be wrong. The
     // repeat-write cache is cleared with it — a new gesture is a new intent, and a
@@ -195,7 +216,7 @@ export class RotaryComponent extends BaseComponent {
     // — a plain attribute rather than a class so it composes with BaseComponent's own
     // state classes (dragging, etc.) instead of fighting them.
     if (this.faceNode) this.faceNode.dataset.gesture = cfg.gesture;
-    const result = resolveRotary(cfg, gestureEvent, telemetry, this.now());
+    const result = resolveRotary(cfg, gestureEvent, telemetry, nowOverride ?? this.now());
     this.rotaryState = result.state;
     this.currentValue = result.value;
     this.renderFace(result.angle);
@@ -205,8 +226,7 @@ export class RotaryComponent extends BaseComponent {
       this.widget?.handleInteraction?.(this.def, emit.trigger, { ...emit.payload });
       // The Rotary writes to its binding DIRECTLY — a bound knob needs no interaction
       // wiring to drive the sim (it is registered in StudioValidator's
-      // SELF_DISPATCHING_WRITE_EVENT_TYPES for exactly this reason). Absolute write
-      // mode: the resolved value itself goes out, not a delta.
+      // SELF_DISPATCHING_WRITE_EVENT_TYPES for exactly this reason).
       if (WRITE_TRIGGERS.includes(emit.trigger)) {
         // The flag tracks the outcome of the MOST RECENT write, not "did any write in
         // this gesture ever fail". A turn is many writes: if the bridge drops for one
@@ -215,11 +235,21 @@ export class RotaryComponent extends BaseComponent {
         // because an earlier, superseded write failed would discard a value the sim
         // really did take. `undefined` means nothing actually went out (no write event
         // bound, or a skipped repeat): no outcome, so it must not clear a real failure.
-        const outcome = this.writeValue(emit.payload.value);
+        const outcome = cfg.writeMode === 'pulse'
+          ? this.writePulseStep(emit.payload.delta)
+          : this.writeValue(emit.payload.value);
         if (outcome === false) this.pendingDispatchFailure = true;
         else if (outcome === true) this.pendingDispatchFailure = false;
       }
     });
+
+    // Ticket 05: a fast flick can queue more Pulse steps than one frame's cap allows
+    // (rotaryEngine.js's applyPulseFrameCoalescing) — keep re-resolving on later
+    // animation frames, even with no further gesture, until the queue drains, so a
+    // turn that outran the cap still finishes delivering every step after release.
+    if (this.rotaryState?.pulsePendingSteps) {
+      this.schedulePulseDrain();
+    }
 
     // Reported back into the engine as its own frame (not folded into the one above,
     // which has already returned): a failed write must revert to telemetry rather
@@ -305,6 +335,42 @@ export class RotaryComponent extends BaseComponent {
     this.lastDispatchedValue = value;
     this.lastDispatchOk = this.widget?.dispatchSimEvent?.(writeEvent, value);
     return this.lastDispatchOk;
+  }
+
+  /**
+   * Sends one Pulse-mode increment/decrement write. Unlike writeValue() (Absolute),
+   * there is no value to dedupe a repeat against — every non-zero delta the engine
+   * hands back really is one whole step the sim needs to see, so every one dispatches,
+   * with no skip-on-repeat cache. `delta`'s sign alone decides which binding fires;
+   * its magnitude is always exactly 1 (one step, one write) per rotaryEngine.js's own
+   * per-step emit construction.
+   * @param {number} delta
+   * @returns {boolean|undefined} same contract as writeValue() — true/false on a real
+   *   outcome, undefined when nothing went out (no matching event bound, or delta 0).
+   */
+  writePulseStep(delta) {
+    if (!delta) return undefined;
+    const event = delta > 0 ? this.def.binding?.incrementEvent : this.def.binding?.decrementEvent;
+    if (!event) return undefined;
+    return this.widget?.dispatchSimEvent?.(event, 1);
+  }
+
+  /**
+   * Ticket 05: keeps re-resolving on successive animation frames, with no new
+   * gesture/telemetry, purely to drain whatever `state.pulsePendingSteps` a fast
+   * flick queued beyond one frame's cap (rotaryEngine.js's
+   * applyPulseFrameCoalescing) — so a turn that outran the cap still finishes
+   * delivering every step even after the finger has already lifted.
+   */
+  schedulePulseDrain() {
+    if (this.pulseDrainRaf != null) return;
+    if (typeof requestAnimationFrame !== 'function') return;
+    const step = (timestamp) => {
+      this.pulseDrainRaf = null;
+      if (!this.rotaryState || !this.rotaryState.pulsePendingSteps) return;
+      this.resolve(null, null, timestamp);
+    };
+    this.pulseDrainRaf = requestAnimationFrame(step);
   }
 
   /** Repaints the Face, skipping the write when the markup is unchanged. */
@@ -435,6 +501,19 @@ export class RotaryComponent extends BaseComponent {
       this.resolve({ type: 'start', ...offsetFromCenter(e) }, null);
     };
 
+    // Ticket 05: 'move' is still resolved synchronously, one resolve() call per real
+    // pointermove event — deferring it to an animation-frame batch was tried and
+    // reverted, because it breaks every existing test (and, more importantly, every
+    // existing dispatch-failure/reconciliation code path) that depends on each
+    // pointermove committing its OWN write immediately, including
+    // RotaryDispatchFailure.test.js's "does NOT revert when an early write failed but
+    // a later one succeeded", which specifically depends on two separate moves
+    // producing two separate, independently-outcomed writes. "At most one value per
+    // animation frame" is instead enforced by the engine itself
+    // (applyAbsoluteFrameCap, keyed off `now`) — real pointer events are timestamped
+    // far enough apart in practice that this rarely bites in the Component, and the
+    // engine's own test suite is what proves the cap holds when it does (many
+    // gesture events driven at a single identical `now`).
     const onPointerMove = (e) => {
       if (this.activePointerId === undefined || e.pointerId !== this.activePointerId) return;
       this.resolve({ type: 'move', ...offsetFromCenter(e) }, null);
@@ -475,6 +554,13 @@ export class RotaryComponent extends BaseComponent {
       this.releaseDispatchFailureWatch();
       this.releaseDispatchFailureWatch = null;
     }
+    // Ticket 05's Pulse post-release drain is an rAF handle on THIS node — torn down
+    // mid-gesture (widget removed, host re-rendering the tree) it would otherwise
+    // still fire once more against a detached node.
+    if (this.pulseDrainRaf != null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this.pulseDrainRaf);
+    }
+    this.pulseDrainRaf = null;
     this.activePointerId = undefined;
     super.destroy();
   }

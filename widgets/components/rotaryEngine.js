@@ -132,6 +132,52 @@ export function resolveRangeMode(raw) {
   return VALID_RANGE_MODES.includes(raw) ? raw : DEFAULT_RANGE_MODE;
 }
 
+// Ticket 05: the write axis. Absolute (the ticket 01/02 default) writes the resolved
+// value itself. Pulse emits one increment/decrement per step and owns no value of its
+// own — the aircraft controls it targets (most payware, many stock) expose no way to
+// set a value directly, only to nudge it. "Owns no value" is enforced structurally:
+// gesture processing in Pulse mode never writes `state.rawValue` (see
+// processPulseGesture) — only telemetry ever does, so what the Ring displays/reasons
+// about as "the value" is always the sim's own last-known reading, never a locally
+// accumulated guess a dispatch failure or a missed step could desync from.
+const DEFAULT_WRITE_MODE = 'absolute';
+const VALID_WRITE_MODES = ['absolute', 'pulse'];
+
+/** Same fallback-on-typo convention as resolveGesture. Exported for the same reason. */
+export function resolveWriteMode(raw) {
+  return VALID_WRITE_MODES.includes(raw) ? raw : DEFAULT_WRITE_MODE;
+}
+
+// Ticket 05: WHEN a Ring's writes leave the Component, independent of Write Mode.
+// 'onChange' writes on every real movement (Absolute's default — matches ticket 01/02/
+// 03/04 behaviour exactly, so nothing that predates this ticket changes unless it
+// opts in). 'onRelease' holds every write until the gesture ends. 'perDetent' writes
+// only when a whole `degreesPerUnit`-sized step is crossed — Pulse's own emit
+// granularity IS one step, so 'perDetent' is Pulse's natural default; Absolute can opt
+// into the same granularity for a control that should feel discrete despite carrying
+// a real value.
+const VALID_DISPATCH_TIMINGS = ['onChange', 'onRelease', 'perDetent'];
+
+function defaultDispatchTiming(writeMode) {
+  return writeMode === 'pulse' ? 'perDetent' : 'onChange';
+}
+
+/** Same fallback-on-typo convention as resolveGesture, but the fallback itself
+ * depends on `writeMode` (Pulse and Absolute default to different timings). */
+export function resolveDispatchTiming(raw, writeMode) {
+  return VALID_DISPATCH_TIMINGS.includes(raw) ? raw : defaultDispatchTiming(writeMode);
+}
+
+// Deliberate implementation choice, not a value from the spec: caps how many
+// discrete Pulse steps a single resolveRotary() call will hand back as real 'turn'
+// emits when several calls share the same `now` (i.e. land inside one animation
+// frame, per RotaryComponent's frame scheduling). A fast flick can cross far more
+// steps than this in one frame; the excess is queued in `state.pulsePendingSteps`
+// and drained on later calls (see applyPulseFrameCoalescing) rather than discarded —
+// this is what makes "never drops steps" hold while still bounding how many writes
+// (and downstream re-renders elsewhere in the app) happen in one paint.
+const MAX_PULSE_STEPS_PER_FRAME = 4;
+
 function normalizePositions(raw) {
   return Array.isArray(raw) ? raw.filter((p) => p && typeof p === 'object') : [];
 }
@@ -237,6 +283,34 @@ function shortestAngleDeltaDeg(fromRad, toRad) {
 }
 
 /**
+ * Ticket 05's own state fields, shared by both createRotaryState() branches below —
+ * factored out so the two branches (Detented vs. Bounded/Continuous) can't drift on
+ * what a freshly-created Ring's Pulse/dispatch-timing bookkeeping starts at.
+ *   - pulseAccumulator: fractional odometer for Pulse's step-crossing detection
+ *     (see processPulseGesture) — NOT the value; it never survives past converting
+ *     into whole steps.
+ *   - pulsePendingSteps: whole Pulse steps queued but not yet handed back as 'turn'
+ *     emits, drained by applyPulseFrameCoalescing.
+ *   - pulseHoldForRelease: true while an 'onRelease'-timed Pulse gesture is still
+ *     engaged — the coalescer holds pending steps rather than draining them.
+ *   - frameStamp / frameEmitCount: the per-frame coalescer's own bookkeeping, shared
+ *     between Absolute's cap and Pulse's cap (see applyAbsoluteFrameCap /
+ *     applyPulseFrameCoalescing).
+ *   - lastDispatchedStepIndex: Absolute's 'perDetent' dispatch timing's own
+ *     step-crossing memory (see applyDispatchTiming).
+ */
+function createDispatchState() {
+  return {
+    pulseAccumulator: 0,
+    pulsePendingSteps: 0,
+    pulseHoldForRelease: false,
+    frameStamp: null,
+    frameEmitCount: 0,
+    lastDispatchedStepIndex: null
+  };
+}
+
+/**
  * Builds the state bag for a Rotary that has never been engaged before.
  * Exported so a caller can seed `config.previousState` on its very first call
  * without needing to know the bag's internal shape ahead of time.
@@ -283,7 +357,8 @@ export function createRotaryState(config, telemetry) {
       // grab's `index !== previousDetentIndex` check in applyDetentedPostProcessing
       // correctly reads as "nothing has moved yet" rather than firing a spurious
       // detent/limit on a bare grab that never turned.
-      detentIndex: index
+      detentIndex: index,
+      ...createDispatchState()
     };
   }
 
@@ -304,7 +379,8 @@ export function createRotaryState(config, telemetry) {
     atBoundSide: mode === 'continuous' ? null : boundSideOf(displayValue, min, max),
     telemetryUnmatched: false,
     unmatchedValue: null,
-    stableIndex: null
+    stableIndex: null,
+    ...createDispatchState()
   };
 }
 
@@ -565,18 +641,283 @@ function processTapGesture(state, cfg, gestureEvent, min, max, mode, ring, degPe
 }
 
 /**
+ * Queues `steps` (a signed whole-step count — one whole step is one Pulse write) onto
+ * `state.pulsePendingSteps`, for the per-frame coalescer (applyPulseFrameCoalescing,
+ * run once per resolveRotary call) to drain into real 'turn' emits — capped per
+ * frame, never dropped; see that function's own comment for why.
+ *
+ * Bounded-range advisory clamp (ticket 05 acceptance): a Bounded Ring in Pulse mode
+ * stops QUEUEING further steps toward a limit only when `cfg.hasReadableValue` is
+ * true, checked against `state.rawValue` — which in Pulse mode is written EXCLUSIVELY
+ * by telemetry (see processPulseGesture's own header comment), never by a local count
+ * of pulses already sent. That is what "never enforced from a locally-maintained
+ * count" means: the moment anything else moves the value, this check sees the real
+ * number, not a stale tally this Ring kept for itself. With no readable value at all,
+ * there is nothing trustworthy to compare against, so every step is queued regardless
+ * and the sim is left to clamp on its own end. Continuous never has a bound to check.
+ */
+function queuePulseSteps(state, cfg, steps, min, max, mode) {
+  let allowedSteps = steps;
+  if (steps !== 0 && mode !== 'continuous' && cfg.hasReadableValue && typeof state.rawValue === 'number') {
+    const known = state.rawValue;
+    if (steps > 0 && known >= max) allowedSteps = 0;
+    else if (steps < 0 && known <= min) allowedSteps = 0;
+  }
+  if (allowedSteps === 0) return state;
+  return { ...state, pulsePendingSteps: (state.pulsePendingSteps ?? 0) + allowedSteps };
+}
+
+/**
+ * Pulse write mode (ticket 05): the Ring emits one increment/decrement PER STEP
+ * instead of ever computing/owning a value itself. `state.rawValue` is NEVER written
+ * here — in Pulse mode it is only ever written by telemetry (resolveRotary's own
+ * idle-follow step, unchanged) — so it always reflects the sim's own last-known
+ * reading (or the unseeded default), never a locally accumulated guess a missed
+ * step or a dispatch failure could desync from.
+ *
+ * The same angle/pixel math Arc/Scrub use for Absolute decides how many whole steps
+ * a gesture crosses — reusing `degreesPerUnit` as the identical "Feel" knob is what
+ * lets an Author switch Write Mode without reconfiguring Feel. `state.pulseAccumulator`
+ * is a fractional odometer that exists ONLY to detect whole-step crossings (the same
+ * role `lastPos` plays for angle tracking) — it is explicitly not "the value" either;
+ * see queuePulseSteps' own comment on why that distinction matters for bounds.
+ *
+ * Tap has no continuous drag to accumulate, so it always steps by exactly 1 unit in
+ * the tapped direction on release — the discrete-action shape a payware tap-to-pulse
+ * control (many autopilot knobs) actually has.
+ */
+function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, gesture) {
+  if (gestureEvent.type === 'start') {
+    const value = resolveDisplayValue(state.rawValue, min, max, mode);
+    const next = {
+      ...state,
+      phase: 'engaged',
+      lastPos: { dx: gestureEvent.dx, dy: gestureEvent.dy },
+      pulseAccumulator: 0,
+      pulseHoldForRelease: resolveDispatchTiming(cfg.dispatchTiming, 'pulse') === 'onRelease',
+      tapDirection: gesture === 'tap' ? (gestureEvent.dx >= 0 ? 1 : -1) : state.tapDirection
+    };
+    return { state: next, emits: [{ trigger: 'turnStart', payload: { value, delta: 0, direction: null, ring } }] };
+  }
+
+  if (gestureEvent.type === 'move') {
+    if (gesture === 'tap') return { state, emits: [] }; // Tap steps at release only.
+    if (state.phase !== 'engaged' || !state.lastPos) return { state, emits: [] };
+
+    const prev = state.lastPos;
+    const curr = { dx: gestureEvent.dx, dy: gestureEvent.dy };
+    let deltaValue;
+    if (gesture === 'scrub') {
+      deltaValue = (prev.dy - curr.dy) / degPerUnit;
+    } else {
+      const minRadius = cfg.minEffectiveRadius ?? DEFAULT_MIN_EFFECTIVE_RADIUS;
+      const prevRadius = Math.hypot(prev.dx, prev.dy);
+      const prevAngleRad = Math.atan2(prev.dy, prev.dx);
+      const currAngleRad = Math.atan2(curr.dy, curr.dx);
+      let deltaAngleDeg;
+      if (prevRadius >= minRadius) {
+        deltaAngleDeg = shortestAngleDeltaDeg(prevAngleRad, currAngleRad);
+      } else {
+        const tangentX = -Math.sin(prevAngleRad);
+        const tangentY = Math.cos(prevAngleRad);
+        const ddx = curr.dx - prev.dx;
+        const ddy = curr.dy - prev.dy;
+        const tangentialDisplacement = ddx * tangentX + ddy * tangentY;
+        deltaAngleDeg = (tangentialDisplacement / minRadius) * (180 / Math.PI);
+      }
+      deltaValue = deltaAngleDeg / degPerUnit;
+    }
+
+    const accumulator = (state.pulseAccumulator ?? 0) + deltaValue;
+    // Nudged by a tiny epsilon before truncating: the trig round-trip above (degrees
+    // -> radians -> degrees) lands a value that SHOULD be an exact whole step (e.g.
+    // exactly 10 degrees of arc at degreesPerUnit=10) a hair under it instead (e.g.
+    // 0.999999999999999) often enough that Math.trunc() alone would silently eat a
+    // genuine, deliberate whole-step turn. 1e-9 is far below any real sub-step gesture
+    // magnitude, so it only ever absorbs float dust, never a real fractional turn.
+    const EPS = 1e-9;
+    const nudged = accumulator + (accumulator >= 0 ? EPS : -EPS);
+    const steps = Math.trunc(nudged);
+    const nextAccumulator = accumulator - steps;
+    let next = { ...state, lastPos: curr, pulseAccumulator: nextAccumulator };
+    if (steps !== 0) {
+      next = queuePulseSteps(next, cfg, steps, min, max, mode);
+    }
+    return { state: next, emits: [] };
+  }
+
+  if (gestureEvent.type === 'end') {
+    if (state.phase !== 'engaged') return { state, emits: [] };
+    let next = state;
+    if (gesture === 'tap') {
+      const direction = state.tapDirection ?? 1;
+      next = queuePulseSteps(next, cfg, direction, min, max, mode);
+    }
+    const value = resolveDisplayValue(next.rawValue, min, max, mode);
+    next = {
+      ...next,
+      // Pulse owns no value, so there is nothing to reconcile a dispatched value
+      // against — idle immediately; telemetry is always the sole source of truth
+      // for what "the value" is, in every phase.
+      phase: 'idle',
+      lastPos: null,
+      tapDirection: null,
+      pulseAccumulator: 0,
+      pulseHoldForRelease: false,
+      pendingDispatchValue: null,
+      reconcileStartedAt: null
+    };
+    return { state: next, emits: [{ trigger: 'turnEnd', payload: { value, delta: 0, direction: null, ring } }] };
+  }
+
+  return { state, emits: [] };
+}
+
+/**
+ * The per-frame coalescer's Pulse half (ticket 05): drains `state.pulsePendingSteps`
+ * into actual 'turn' emits, one emit per whole step (the literal "one increment or
+ * decrement per step" the acceptance criteria call for), capped at
+ * MAX_PULSE_STEPS_PER_FRAME per distinct `now`. Calls sharing the same `now` (many
+ * gesture events landing inside one animation frame) share one cap; a new `now`
+ * resets it. A fast flick that queues more steps than the cap allows is never
+ * dropped: the remainder stays in `pulsePendingSteps` and drains on the NEXT call(s),
+ * including calls the Component makes with no gesture at all, purely to keep
+ * draining a queue after release (see RotaryComponent's frame scheduling).
+ *
+ * Held (emits nothing, cap untouched) while `state.pulseHoldForRelease` is true —
+ * 'onRelease' dispatch timing's own gate; steps still queue during the gesture, they
+ * just don't drain until it ends.
+ */
+function applyPulseFrameCoalescing(state, now, min, max, mode, ring) {
+  const sameFrame = state.frameStamp === now;
+  const frameEmitCount = sameFrame ? (state.frameEmitCount ?? 0) : 0;
+  const pending = state.pulsePendingSteps ?? 0;
+
+  if (state.pulseHoldForRelease || pending === 0) {
+    return { state: { ...state, frameStamp: now, frameEmitCount }, emits: [] };
+  }
+
+  const capRemaining = Math.max(MAX_PULSE_STEPS_PER_FRAME - frameEmitCount, 0);
+  const magnitude = Math.min(Math.abs(pending), capRemaining);
+  const toEmit = Math.sign(pending) * magnitude;
+  const remaining = pending - toEmit;
+
+  const value = resolveDisplayValue(state.rawValue, min, max, mode);
+  const emits = [];
+  for (let i = 0; i < Math.abs(toEmit); i++) {
+    emits.push({
+      trigger: 'turn',
+      payload: { value, delta: Math.sign(toEmit), direction: toEmit > 0 ? 'cw' : 'ccw', ring }
+    });
+  }
+
+  const next = {
+    ...state,
+    pulsePendingSteps: remaining,
+    frameStamp: now,
+    frameEmitCount: frameEmitCount + Math.abs(toEmit)
+  };
+  return { state: next, emits };
+}
+
+/**
+ * Absolute mode's own per-frame cap (ticket 05): "at most one value per animation
+ * frame". Unlike Pulse, an Absolute 'turn' emit already carries the fully-resolved
+ * value, so nothing is lost by only WRITING the latest one per frame — `state.rawValue`
+ * itself keeps advancing on every call regardless (the visual angle always tracks the
+ * finger exactly); only the emitted/written 'turn' is deduped down to one per distinct
+ * `now`. Applied as the very last step before resolveRotary returns, deliberately
+ * AFTER Detented post-processing and the Bounded/Continuous haptics derivation have
+ * both already consumed the un-capped emits — capping any earlier would make a
+ * same-frame repeat move silently stop crossing detents/limits, not just stop writing.
+ */
+function applyAbsoluteFrameCap(state, now, emits) {
+  const sameFrame = state.frameStamp === now;
+  let frameEmitCount = sameFrame ? (state.frameEmitCount ?? 0) : 0;
+  const filtered = [];
+  for (const emit of emits) {
+    if (emit.trigger !== 'turn') {
+      filtered.push(emit);
+      continue;
+    }
+    if (frameEmitCount >= 1) continue; // Suppressed — a later distinct `now` gets the next write.
+    frameEmitCount += 1;
+    filtered.push(emit);
+  }
+  return { state: { ...state, frameStamp: now, frameEmitCount }, emits: filtered };
+}
+
+/**
+ * Applies Absolute write mode's chosen dispatch timing to the FINAL 'turn' emits for
+ * this call — never to turnStart/turnEnd/detent/limit, which always fire on their own
+ * schedule. Run, like applyAbsoluteFrameCap, as one of the very last steps before
+ * resolveRotary returns, for the identical reason: filtering 'turn' out any earlier
+ * would rob Detented post-processing / haptics derivation of the `isTurnEmit` signal
+ * they need to still fire detent/limit notifications on a filtered-out move.
+ *
+ * 'onChange' is a no-op — every real move's 'turn' already passes through (subject
+ * only to the frame cap above). 'onRelease' drops every 'turn' produced while still
+ * engaged; the value only ever leaves via turnEnd. 'perDetent' keeps only the 'turn'
+ * that actually crosses a whole `degreesPerUnit`-sized step (Math.trunc(value)
+ * changing), the same odometer idea Pulse's own crossing detection uses, so a slow
+ * sub-step wobble does not spam writes.
+ */
+function applyDispatchTiming(state, timing, emits, gestureEvent, value, isDetented) {
+  if (gestureEvent && gestureEvent.type === 'start') {
+    // Seed the step-crossing baseline at grab time, regardless of the chosen timing
+    // (mirrors Detented's own `detentIndex` grab-time seed, same reasoning) — this is
+    // what stops 'perDetent''s very first move, however small, from misreading as
+    // "a step was crossed" just because nothing was recorded yet.
+    const EPS = 1e-9;
+    return { state: { ...state, lastDispatchedStepIndex: Math.trunc(value + (value >= 0 ? EPS : -EPS)) }, emits };
+  }
+
+  if (timing === 'onChange') return { state, emits };
+
+  if (timing === 'onRelease') {
+    if (!gestureEvent || gestureEvent.type !== 'move') return { state, emits };
+    return { state, emits: emits.filter((e) => e.trigger !== 'turn') };
+  }
+
+  // 'perDetent': doesn't apply to Detented range mode — its value is a string
+  // position, already quantized by definition, so there's no fractional wobble to
+  // gate against; every 'turn' it produces already IS a whole-step crossing.
+  if (isDetented) return { state, emits };
+  if (!gestureEvent || gestureEvent.type !== 'move') return { state, emits };
+  const hasTurn = emits.some((e) => e.trigger === 'turn');
+  if (!hasTurn) return { state, emits };
+  // Same float-dust nudge as Pulse's own step-crossing odometer (see
+  // processPulseGesture's comment) — the Arc/Scrub trig round-trip can land an
+  // intended-exact whole step a hair under it.
+  const EPS = 1e-9;
+  const currentStep = Math.trunc(value + (value >= 0 ? EPS : -EPS));
+  const lastStep = state.lastDispatchedStepIndex ?? currentStep;
+  if (lastStep === currentStep) {
+    return { state, emits: emits.filter((e) => e.trigger !== 'turn') };
+  }
+  return { state: { ...state, lastDispatchedStepIndex: currentStep }, emits };
+}
+
+/**
  * Resolves this frame's gesture (start/move/end) against the current state,
  * dispatching to Arc/Scrub/Tap per `cfg.gesture` (default Arc). See each
  * gesture's own function for what makes it distinct; everything else —
  * bounds, the Reconciliation window, the emitted trigger vocabulary — is
  * shared, which is what lets a downstream binding or interaction not care
- * which gesture drove it.
+ * which gesture drove it. Ticket 05: Pulse write mode intercepts here, before the
+ * per-gesture dispatch, since it changes what an emit MEANS (a step, not a value)
+ * uniformly across all three gestures.
  */
 function processGesture(state, cfg, gestureEvent) {
   const { mode, min, max } = resolveEffectiveRange(cfg);
   const degPerUnit = resolveDegreesPerUnit(cfg.degreesPerUnit);
   const ring = cfg.ringId ?? DEFAULT_RING_ID;
   const gesture = resolveGesture(cfg.gesture);
+  const writeMode = resolveWriteMode(cfg.writeMode);
+
+  if (writeMode === 'pulse') {
+    return processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, gesture);
+  }
 
   if (gesture === 'scrub') {
     return processScrubGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit);
@@ -799,6 +1140,8 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
   const cfg = config || {};
   const { mode, min, max, positions } = resolveEffectiveRange(cfg);
   const ring = cfg.ringId ?? DEFAULT_RING_ID;
+  const writeMode = resolveWriteMode(cfg.writeMode);
+  const dispatchTiming = resolveDispatchTiming(cfg.dispatchTiming, writeMode);
 
   let state = cfg.previousState || createRotaryState(cfg, telemetry);
 
@@ -831,6 +1174,17 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
     if (state.phase === 'reconciling' && state.reconcileStartedAt == null) {
       state = { ...state, reconcileStartedAt: now };
     }
+  }
+
+  // 2b. Pulse's per-frame coalescer (ticket 05): drains state.pulsePendingSteps into
+  //     real 'turn' emits, capped per distinct `now`. Run unconditionally (even with
+  //     no gestureEvent) so a call the Component makes purely to keep draining a
+  //     queue after release still flushes whatever is left — see
+  //     applyPulseFrameCoalescing's own comment.
+  if (writeMode === 'pulse') {
+    const coalesced = applyPulseFrameCoalescing(state, now, min, max, mode, ring);
+    state = coalesced.state;
+    emits = emits.concat(coalesced.emits);
   }
 
   // 3. While idle (never engaged, or released-and-reconciled), telemetry is
@@ -882,6 +1236,20 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
       emits = [...emits, { trigger: 'limit', payload: { value, delta: 0, direction: null, ring } }];
     }
     state = { ...state, atBoundSide: mode === 'continuous' ? null : boundSideOf(value, min, max) };
+  }
+
+  // 4b. Absolute write mode's own dispatch timing + per-frame rate limiting (ticket
+  //     05), applied as the LAST thing before returning — see applyDispatchTiming's
+  //     and applyAbsoluteFrameCap's own comments for why the ordering matters
+  //     (Detented post-processing and Bounded/Continuous haptics above have already
+  //     consumed the un-capped emits by this point). Pulse mode's own cap already ran
+  //     earlier (2b) since it needs to run before telemetry/Detented remapping, not
+  //     after — Pulse never reaches this branch.
+  if (writeMode === 'absolute') {
+    const timed = applyDispatchTiming(state, dispatchTiming, emits, gestureEvent, value, mode === 'detented');
+    const capped = applyAbsoluteFrameCap(timed.state, now, timed.emits);
+    state = capped.state;
+    emits = capped.emits;
   }
 
   const span = max - min;

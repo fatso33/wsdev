@@ -348,6 +348,12 @@ export const COMMON_FIELDS = [
   { path: 'binding.unit', control: 'text', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Unit the SimVar is requested in (e.g. "knots", "degrees").' },
   { path: 'binding.ackEvent', control: 'eventPicker', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Deck Event dispatched by an Acknowledge Indicator action targeting this component.' },
   { path: 'binding.pushEvent', control: 'eventPicker', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Deck Event dispatched on press-and-hold, for spring-loaded/momentary controls.' },
+  // Ticket 05: Pulse write mode's own pair of write events, Rotary-only (a Ring in
+  // Pulse mode ignores Write Event above entirely — see RotaryComponent.js's
+  // writePulseStep()). Shown only when Write Mode is Pulse, same showWhen
+  // convention core.rotary's own Positions field already uses for Range Mode.
+  { path: 'binding.incrementEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.writeMode', equals: 'pulse' }, default: undefined, tooltip: 'Deck Event dispatched once per step turned clockwise, in Pulse write mode.' },
+  { path: 'binding.decrementEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.writeMode', equals: 'pulse' }, default: undefined, tooltip: 'Deck Event dispatched once per step turned counter-clockwise, in Pulse write mode.' },
   { path: 'binding.eventCategory', control: 'text', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Groups related Deck Events for the event picker’s filtering — cosmetic, doesn’t affect behavior.' }
 ];
 
@@ -586,6 +592,18 @@ export const TYPE_FIELDS = {
   // it's reinterpreted per gesture.
   'core.rotary': [
     { path: 'props.gesture', control: 'select', options: [{ value: 'arc', label: 'Arc (turn)' }, { value: 'scrub', label: 'Scrub (drag like a wheel)' }, { value: 'tap', label: 'Tap (discrete steps)' }], tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 'arc', tooltip: 'How the End user turns this knob. Arc turns it by arcing a finger around it — the natural gesture for a circular knob. Scrub drags it like a wheel (a trim wheel or VS wheel) with a straight up/down drag. Tap changes it in discrete steps with no drag at all — tapping the right half increments, the left half decrements. Switching gesture never requires reconfiguring Range, Feel or the binding below.' },
+    // Ticket 05: the write axis. Absolute sends the resolved value itself, same as
+    // every Rotary before this ticket. Pulse sends one increment/decrement per step
+    // and never sends a value at all — for controls that expose no way to set a
+    // value directly (most payware, many stock: a heading bug, a course knob, an
+    // autopilot altitude selector). Switching this never requires reconfiguring
+    // Range/Feel/Gesture above; only which binding fields below apply changes.
+    { path: 'props.writeMode', control: 'select', options: [{ value: 'absolute', label: 'Absolute (writes the value)' }, { value: 'pulse', label: 'Pulse (writes increment/decrement steps)' }], tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 'absolute', tooltip: 'Absolute writes the knob\'s resolved value on every write event, using Write Event below. Pulse writes one increment or decrement per step instead, using Increment/Decrement Event below — for a control the aircraft only lets you nudge, never set directly.' },
+    // Default differs by Write Mode (onChange for Absolute, perDetent for Pulse) —
+    // see rotaryEngine.js's resolveDispatchTiming. The registry's own `default` here
+    // is only what the Inspector shows before an Author picks one; the real
+    // effective default is resolved at runtime against Write Mode.
+    { path: 'props.dispatchTiming', control: 'select', options: [{ value: 'onChange', label: 'On Change (continuously while turning)' }, { value: 'onRelease', label: 'On Release (once, when let go)' }, { value: 'perDetent', label: 'Per Detent (once per step)' }], tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: undefined, tooltip: 'When writes leave this Ring. On Change writes continuously while turning (Absolute\'s default). On Release holds every write until the gesture ends. Per Detent writes once per whole step (Pulse\'s default, and Pulse always writes this way regardless of Gesture) — Absolute can opt into the same discrete feel.' },
     // Ticket 04: the range axis. Bounded (the ticket 01/02 default) clamps at each
     // end like a physical end-stop. Continuous wraps past either limit instead — a
     // heading bug moving from 359 back to 0. Detented ignores Min/Max entirely and
