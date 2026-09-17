@@ -86,6 +86,13 @@ export const TRIGGERS = [
   { id: 'turnStart', fires: 'RotaryComponent — the knob is grabbed', live: true, componentTypes: ['core.rotary'] },
   { id: 'turn', fires: 'RotaryComponent — the knob moves (the knob’s defining interaction)', live: true, componentTypes: ['core.rotary'] },
   { id: 'turnEnd', fires: 'RotaryComponent — the knob is released', live: true, componentTypes: ['core.rotary'] },
+  // Ticket 04 (Continuous/Detented ranges): pure notifications, never a write —
+  // RotaryComponent.js's WRITE_TRIGGER_ALLOWLIST deliberately does not include
+  // either. 'detent' fires when a Detented Ring's turn crosses into a new named
+  // position; 'limit' fires when a Bounded or Detented Ring's turn reaches either
+  // end (Continuous never fires it — it wraps instead of hitting a bound).
+  { id: 'detent', fires: 'RotaryComponent — a Detented Ring\'s turn crosses into a new named position', live: true, componentTypes: ['core.rotary'] },
+  { id: 'limit', fires: 'RotaryComponent — a Bounded or Detented Ring\'s turn reaches either end', live: true, componentTypes: ['core.rotary'] },
   { id: 'detentReached', fires: 'SliderComponent — commit lands on a declared detent', live: true, componentTypes: ['core.slider'] },
   { id: 'increment', fires: 'StepperComponent — + button', live: true, componentTypes: ['core.stepper'] },
   { id: 'decrement', fires: 'StepperComponent — − button', live: true, componentTypes: ['core.stepper'] },
@@ -574,9 +581,23 @@ export const TYPE_FIELDS = {
   // it's reinterpreted per gesture.
   'core.rotary': [
     { path: 'props.gesture', control: 'select', options: [{ value: 'arc', label: 'Arc (turn)' }, { value: 'scrub', label: 'Scrub (drag like a wheel)' }, { value: 'tap', label: 'Tap (discrete steps)' }], tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 'arc', tooltip: 'How the End user turns this knob. Arc turns it by arcing a finger around it — the natural gesture for a circular knob. Scrub drags it like a wheel (a trim wheel or VS wheel) with a straight up/down drag. Tap changes it in discrete steps with no drag at all — tapping the right half increments, the left half decrements. Switching gesture never requires reconfiguring Range, Feel or the binding below.' },
-    { path: 'props.min', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 0, tooltip: 'Lowest value the knob can reach. The knob stops here like a physical end-stop — turning further is absorbed and has to be wound back.' },
-    { path: 'props.max', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 100, tooltip: 'Highest value the knob can reach.' },
-    { path: 'props.degreesPerUnit', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 1, tooltip: 'The knob\'s "feel" — reinterpreted per Gesture above. Arc: degrees of arc travelled per 1 unit of value. Scrub: pixels of straight drag per 1 unit. Tap: units changed by a single tap. Higher means finer/slower for Arc and Scrub; for Tap it is the step size itself.' },
+    // Ticket 04: the range axis. Bounded (the ticket 01/02 default) clamps at each
+    // end like a physical end-stop. Continuous wraps past either limit instead — a
+    // heading bug moving from 359 back to 0. Detented ignores Min/Max entirely and
+    // snaps between the Positions list below instead — a two-position list is just a
+    // short Positions list, not a fourth mode of its own.
+    { path: 'props.rangeMode', control: 'select', options: [{ value: 'bounded', label: 'Bounded (clamps at each end)' }, { value: 'continuous', label: 'Continuous (wraps around, like a heading bug)' }, { value: 'detented', label: 'Detented (snaps between named positions)' }], tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 'bounded', tooltip: 'Bounded clamps at Min/Max like a physical end-stop. Continuous wraps past either limit instead of clamping (359° back to 0°, like a heading bug). Detented ignores Min/Max and snaps between the named Positions below — for a two-position toggle, just author two positions.' },
+    { path: 'props.min', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 0, showWhen: { path: 'props.rangeMode', notEquals: 'detented' }, tooltip: 'Lowest value the knob can reach. The knob stops here like a physical end-stop — turning further is absorbed and has to be wound back. Not used when Range Mode is Detented.' },
+    { path: 'props.max', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 100, showWhen: { path: 'props.rangeMode', notEquals: 'detented' }, tooltip: 'Highest value the knob can reach. Not used when Range Mode is Detented.' },
+    { path: 'props.positions', control: 'rowListEditor', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: undefined,
+      rowSpec: { fields: [
+        { key: 'value', label: 'Value', type: 'text', default: '' },
+        { key: 'label', label: 'Label', type: 'text', default: '' },
+        { key: 'momentary', label: 'Momentary', type: 'checkbox', default: false }
+      ] },
+      showWhen: { path: 'props.rangeMode', equals: 'detented' },
+      tooltip: 'The named positions this Detented Ring snaps between (e.g. OFF / L / R / BOTH / START), evenly spaced across Sweep°. A position marked Momentary fires on arrival and springs back to the previous position on release, the way a magneto\'s START does.' },
+    { path: 'props.degreesPerUnit', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 1, tooltip: 'The knob\'s "feel" — reinterpreted per Gesture above. Arc: degrees of arc travelled per 1 unit of value (or, when Range Mode is Detented, per one step between positions). Scrub: pixels of straight drag per 1 unit. Tap: units changed by a single tap. Higher means finer/slower for Arc and Scrub; for Tap it is the step size itself.' },
     { path: 'props.sweepDegrees', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: 270, tooltip: 'How far the knob visibly rotates across its whole range, in degrees. Purely visual — it does not change the values the knob produces.' },
     { path: 'props.startAngle', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: -135, tooltip: 'Where the indicator points at the minimum value, in degrees clockwise from straight up (12 o\'clock) — same convention as core.gauge\'s Arc Start Angle. Default -135, which puts mid-range straight up over the default 270° sweep.' },
     { path: 'props.faceColor', control: 'color', tier: 'advanced', group: 'Knob', fdwsMin: '1.30', default: undefined, tooltip: 'Fills the knob disc. Leave unset to let this component’s own Background (and its state/conditional variants) show through instead.' },

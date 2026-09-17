@@ -38,8 +38,9 @@
  */
 
 import { BaseComponent } from './BaseComponent.js';
-import { resolveRotary, createRotaryState, resolveGesture } from './rotaryEngine.js';
+import { resolveRotary, createRotaryState, resolveGesture, resolveRangeMode } from './rotaryEngine.js';
 import { buildRotaryFace } from './rotaryFace.js';
+import { SecurityValidator } from '../../core/SecurityValidator.js';
 
 // Fallback only. The real number comes from the host (`getPollPeriodMs()`), which is
 // what makes the engine's Reconciliation timeout derived rather than guessed; this is
@@ -63,24 +64,30 @@ const DEFAULT_START_ANGLE = -135;
 // argument" scan is structurally blind here, since every trigger goes through one
 // call site with `emit.trigger` as a variable (see rotaryEngine.js, where these
 // names originate).
-export const ROTARY_TRIGGERS = ['turnStart', 'turn', 'turnEnd'];
+//
+// Ticket 04 adds 'detent' and 'limit' — both pure notifications (a step was
+// crossed / a bound was hit), never a write.
+export const ROTARY_TRIGGERS = ['turnStart', 'turn', 'turnEnd', 'detent', 'limit'];
 
 /**
  * The subset of `triggers` that also writes to the binding (Absolute write mode).
- * 'turnStart' is the one trigger that never writes — a grab alone changes nothing —
- * and it is excluded BY NAME, not by position.
  *
- * Worth knowing before adding a trigger: because this is a name-based exclusion, a
- * new entry in ROTARY_TRIGGERS starts writing to the sim immediately, with no opt-in.
- * One that should NOT write has to be excluded here explicitly.
+ * Ticket 04: inverted from a name-based EXCLUSION to an explicit ALLOWLIST. With
+ * 'detent'/'limit' added as pure notifications, an exclusion would have started
+ * writing them to the sim by default the moment they were added to ROTARY_TRIGGERS
+ * above — a Detent notification firing a duplicate write on every crossing, on top
+ * of the 'turn' that already wrote. An allowlist means a new trigger has to opt IN
+ * here to drive the sim, rather than opt out.
  *
  * Exported (not inlined) so the tests can pin the derivation itself against a
  * mutated input — the only way to tell it apart from a positional slice.
  * @param {string[]} triggers
  * @returns {string[]}
  */
+const WRITE_TRIGGER_ALLOWLIST = ['turn', 'turnEnd'];
+
 export function deriveWriteTriggers(triggers) {
-  return triggers.filter((trigger) => trigger !== 'turnStart');
+  return triggers.filter((trigger) => WRITE_TRIGGER_ALLOWLIST.includes(trigger));
 }
 
 export const WRITE_TRIGGERS = deriveWriteTriggers(ROTARY_TRIGGERS);
@@ -131,8 +138,10 @@ export class RotaryComponent extends BaseComponent {
     const props = this.def.props || {};
     return {
       gesture: resolveGesture(props.gesture),
+      rangeMode: resolveRangeMode(props.rangeMode),
       min: props.min ?? DEFAULT_MIN,
       max: props.max ?? DEFAULT_MAX,
+      positions: Array.isArray(props.positions) ? props.positions : [],
       degreesPerUnit: props.degreesPerUnit ?? DEFAULT_DEGREES_PER_UNIT,
       sweepDegrees: props.sweepDegrees ?? DEFAULT_SWEEP_DEGREES,
       pollPeriodMs: this.resolvePollPeriodMs(),
@@ -190,6 +199,7 @@ export class RotaryComponent extends BaseComponent {
     this.rotaryState = result.state;
     this.currentValue = result.value;
     this.renderFace(result.angle);
+    this.renderPositions(cfg, result.activePosition);
 
     result.emits.forEach((emit) => {
       this.widget?.handleInteraction?.(this.def, emit.trigger, { ...emit.payload });
@@ -312,6 +322,87 @@ export class RotaryComponent extends BaseComponent {
     if (markup === this.lastFaceMarkup) return;
     this.lastFaceMarkup = markup;
     this.faceNode.innerHTML = markup;
+  }
+
+  /**
+   * Detented-only: renders the named positions around the Face and highlights
+   * whichever one (if any) is currently active. No-ops (and tears itself down) in
+   * any other Range Mode.
+   *
+   * Positioned as a percentage of `this.faceNode` (`.fd-rotary-face`), NOT of
+   * `this.element` — widgets.css keeps the Face exactly square (`100cqmin`) no
+   * matter what rectangle the Author gave the Rotary as a whole, which is what
+   * keeps this circle of markers round on a non-square layout box. The deleted
+   * Selector's own position markers used the identical percentage-radius math
+   * against `this.element` directly, which is exactly what distorted into an
+   * ellipse whenever that box wasn't square.
+   */
+  renderPositions(cfg, activeIndex) {
+    if (!this.faceNode) return;
+
+    if (cfg.rangeMode !== 'detented') {
+      if (this.positionsNode) {
+        this.positionsNode.remove();
+        this.positionsNode = null;
+        this.posNodes = null;
+        this.lastPositionsSignature = undefined;
+      }
+      return;
+    }
+
+    const positions = cfg.positions;
+    if (!this.positionsNode) {
+      const wrap = document.createElement('div');
+      wrap.style.position = 'absolute';
+      wrap.style.inset = '0';
+      // Decorative labels only -- the drag surface underneath must stay the one
+      // handling pointer events.
+      wrap.style.pointerEvents = 'none';
+      this.positionsNode = wrap;
+      this.posNodes = new Map();
+      this.lastPositionsSignature = undefined;
+    }
+    // renderFace() may have just replaced faceNode's ENTIRE innerHTML (not
+    // appended to it), which silently detaches this wrapper -- re-attach on
+    // every call rather than only when first created.
+    if (this.positionsNode.parentNode !== this.faceNode) {
+      this.faceNode.appendChild(this.positionsNode);
+    }
+
+    const signature = JSON.stringify(positions);
+    if (signature !== this.lastPositionsSignature) {
+      this.lastPositionsSignature = signature;
+      this.positionsNode.innerHTML = '';
+      this.posNodes.clear();
+      const props = this.def.props || {};
+      const denom = Math.max(positions.length - 1, 1);
+      const startAngle = props.startAngle ?? DEFAULT_START_ANGLE;
+      const sweep = props.sweepDegrees ?? DEFAULT_SWEEP_DEGREES;
+      positions.forEach((pos, idx) => {
+        const el = document.createElement('div');
+        el.className = 'fd-rotary-position';
+        el.style.position = 'absolute';
+        el.style.transform = 'translate(-50%, -50%)';
+        el.style.fontSize = '9px';
+        el.style.lineHeight = '1';
+        el.style.whiteSpace = 'nowrap';
+        SecurityValidator.setText(el, pos.label !== undefined && pos.label !== '' ? pos.label : pos.value);
+        const angleDeg = startAngle + (positions.length > 1 ? (idx / denom) * sweep : 0) - 90;
+        const angleRad = angleDeg * (Math.PI / 180);
+        const radius = 42; // % of the guaranteed-round Face box, same convention the deleted Selector used against its own (non-square-safe here) box.
+        el.style.left = `${50 + radius * Math.cos(angleRad)}%`;
+        el.style.top = `${50 + radius * Math.sin(angleRad)}%`;
+        this.positionsNode.appendChild(el);
+        this.posNodes.set(idx, el);
+      });
+    }
+
+    this.posNodes.forEach((el, idx) => {
+      const isActive = idx === activeIndex;
+      el.classList.toggle('active', isActive);
+      el.style.color = isActive ? 'var(--accent-cyan, #00e5ff)' : 'rgba(226, 232, 240, 0.6)';
+      el.style.fontWeight = isActive ? '700' : '400';
+    });
   }
 
   /**

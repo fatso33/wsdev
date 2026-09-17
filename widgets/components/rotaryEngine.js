@@ -119,6 +119,61 @@ export function resolveGesture(raw) {
   return VALID_GESTURES.includes(raw) ? raw : DEFAULT_GESTURE;
 }
 
+// Ticket 04: the range axis. Bounded (ticket 01's original, and still the default)
+// clamps at each end like a physical end-stop. Continuous wraps past either limit
+// instead of clamping — a heading bug moving from 359 back to 0. Detented ignores
+// min/max entirely and snaps between a list of named `positions` instead — a value
+// on that Ring means "which position", not a number on an arbitrary scale.
+const DEFAULT_RANGE_MODE = 'bounded';
+const VALID_RANGE_MODES = ['bounded', 'continuous', 'detented'];
+
+/** Same fallback-on-typo convention as resolveGesture. Exported for the same reason. */
+export function resolveRangeMode(raw) {
+  return VALID_RANGE_MODES.includes(raw) ? raw : DEFAULT_RANGE_MODE;
+}
+
+function normalizePositions(raw) {
+  return Array.isArray(raw) ? raw.filter((p) => p && typeof p === 'object') : [];
+}
+
+/**
+ * The numeric [min, max] this Rotary actually operates over this frame. Bounded and
+ * Continuous use the Author's own props.min/max; Detented ignores them entirely and
+ * operates over the authored positions list's own index range instead (0..N-1) —
+ * "value" in that mode means "which named position", not a number on a scale.
+ */
+function resolveEffectiveRange(cfg) {
+  const mode = resolveRangeMode(cfg.rangeMode);
+  const positions = normalizePositions(cfg.positions);
+  if (mode === 'detented') {
+    return { mode, min: 0, max: Math.max(positions.length - 1, 0), positions };
+  }
+  return { mode, min: cfg.min ?? DEFAULT_MIN, max: cfg.max ?? DEFAULT_MAX, positions };
+}
+
+/** Bounded (and Detented, which shares this over its index range) clamps at each
+ * limit; Continuous wraps past either one instead — 359 -> 0, not 359 -> stuck. */
+function resolveDisplayValue(rawValue, min, max, mode) {
+  if (mode === 'continuous') {
+    const span = max - min;
+    if (!(span > 0)) return min;
+    return (((rawValue - min) % span) + span) % span + min;
+  }
+  return clamp(rawValue, min, max);
+}
+
+/**
+ * Deliberately carried over from the deleted Selector's isSamePosition(): an
+ * Enum-unit SimVar arrives as a NUMBER while authored position values are very often
+ * text ("OFF"/"L"/"BOTH") — comparing with `===` would silently never match, the
+ * exact bug the old Selector needed this same coercion to avoid. Returns -1 (not
+ * found) rather than null so it composes directly with an Array index.
+ */
+function matchPositionIndex(positions, rawValue) {
+  if (rawValue === undefined || rawValue === null) return -1;
+  return positions.findIndex((p) => String(p.value) === String(rawValue));
+}
+
 // Deliberate implementation choices, not values pulled from the spec:
 // - The floor stops the Reconciliation window collapsing to a near-zero
 //   duration even on a very fast poll tier.
@@ -173,10 +228,37 @@ function shortestAngleDeltaDeg(fromRad, toRad) {
  */
 export function createRotaryState(config, telemetry) {
   const cfg = config || {};
-  const min = cfg.min ?? DEFAULT_MIN;
-  const max = cfg.max ?? DEFAULT_MAX;
+  const { mode, min, max, positions } = resolveEffectiveRange(cfg);
+
+  if (mode === 'detented') {
+    // Detented matches by String()-coerced identity (see matchPositionIndex), so
+    // unlike Bounded/Continuous it isn't restricted to a numeric telemetry.value —
+    // a position can just as well be driven by a local state var as by a SimVar.
+    const seeded = telemetry && telemetry.value !== undefined && telemetry.value !== null;
+    const matchedIndex = seeded ? matchPositionIndex(positions, telemetry.value) : -1;
+    const index = matchedIndex >= 0
+      ? matchedIndex
+      : clamp(Math.round(cfg.initialValue ?? 0), min, max);
+    return {
+      phase: 'idle',
+      rawValue: index,
+      lastPos: null,
+      pendingDispatchValue: null,
+      reconcileStartedAt: null,
+      atBoundSide: null,
+      // Idle telemetry read that matches no authored position: nothing is active, and
+      // stays that way (never resolves to a stale earlier position) until either a
+      // later telemetry reading matches or the Ring is grabbed — see
+      // applyDetentedPostProcessing's own comment for the bug this avoids.
+      telemetryUnmatched: seeded && matchedIndex < 0,
+      unmatchedValue: seeded && matchedIndex < 0 ? telemetry.value : null,
+      stableIndex: index
+    };
+  }
+
   const seeded = telemetry && typeof telemetry.value === 'number';
   const rawValue = seeded ? telemetry.value : (cfg.initialValue ?? min);
+  const displayValue = resolveDisplayValue(rawValue, min, max, mode);
   return {
     phase: 'idle', // 'idle' | 'engaged' | 'reconciling'
     rawValue,
@@ -187,8 +269,11 @@ export function createRotaryState(config, telemetry) {
     // starts resting at `min` (the common unseeded-by-telemetry case) has
     // not "just reached" that bound by existing there, so the very first
     // grab must not read as a fresh min->min transition and fire a spurious
-    // boundReached cue.
-    atBoundSide: boundSideOf(clamp(rawValue, min, max), min, max)
+    // boundReached cue. Continuous never has a "bound" to reach at all.
+    atBoundSide: mode === 'continuous' ? null : boundSideOf(displayValue, min, max),
+    telemetryUnmatched: false,
+    unmatchedValue: null,
+    stableIndex: null
   };
 }
 
@@ -198,7 +283,7 @@ export function createRotaryState(config, telemetry) {
  * grab alone changes nothing. Tap has its own 'start' (below): it additionally
  * has to decide which way a tap at this position will move the value.
  */
-function startContinuousDrag(state, min, max, ring, gestureEvent) {
+function startContinuousDrag(state, min, max, mode, ring, gestureEvent) {
   const next = {
     ...state,
     phase: 'engaged',
@@ -206,7 +291,7 @@ function startContinuousDrag(state, min, max, ring, gestureEvent) {
     pendingDispatchValue: null,
     reconcileStartedAt: null
   };
-  const value = clamp(state.rawValue, min, max);
+  const value = resolveDisplayValue(state.rawValue, min, max, mode);
   return {
     state: next,
     emits: [{ trigger: 'turnStart', payload: { value, delta: 0, direction: null, ring } }]
@@ -219,11 +304,11 @@ function startContinuousDrag(state, min, max, ring, gestureEvent) {
  * Tap has its own 'end' (below): its value change happens AT release, not
  * during a 'move' that never occurs, so it emits an additional 'turn' first.
  */
-function endContinuousDrag(state, min, max, ring) {
+function endContinuousDrag(state, min, max, mode, ring) {
   if (state.phase !== 'engaged') {
     return { state, emits: [] };
   }
-  const value = clamp(state.rawValue, min, max);
+  const value = resolveDisplayValue(state.rawValue, min, max, mode);
   const next = {
     ...state,
     phase: 'reconciling',
@@ -245,11 +330,11 @@ function endContinuousDrag(state, min, max, ring) {
  * of the (possibly tiny) real radius is what prevents a grab near the center
  * from spinning the Ring out wildly for a small physical finger movement.
  */
-function processArcGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit) {
+function processArcGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit) {
   const minRadius = cfg.minEffectiveRadius ?? DEFAULT_MIN_EFFECTIVE_RADIUS;
 
   if (gestureEvent.type === 'start') {
-    return startContinuousDrag(state, min, max, ring, gestureEvent);
+    return startContinuousDrag(state, min, max, mode, ring, gestureEvent);
   }
 
   if (gestureEvent.type === 'move') {
@@ -294,7 +379,7 @@ function processArcGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit)
     // has to be wound back before the value moves again, rather than the
     // knob instantly snapping to follow the finger the moment it reverses.
     const rawValue = state.rawValue + deltaValue;
-    const value = clamp(rawValue, min, max);
+    const value = resolveDisplayValue(rawValue, min, max, mode);
     const next = { ...state, rawValue, lastPos: curr };
 
     const emits = [];
@@ -308,7 +393,7 @@ function processArcGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit)
   }
 
   if (gestureEvent.type === 'end') {
-    return endContinuousDrag(state, min, max, ring);
+    return endContinuousDrag(state, min, max, mode, ring);
   }
 
   return { state, emits: [] };
@@ -323,9 +408,9 @@ function processArcGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit)
  * No radius/minimum-effective-radius concept applies: a linear drag has no
  * center to measure a radius from.
  */
-function processScrubGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit) {
+function processScrubGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit) {
   if (gestureEvent.type === 'start') {
-    return startContinuousDrag(state, min, max, ring, gestureEvent);
+    return startContinuousDrag(state, min, max, mode, ring, gestureEvent);
   }
 
   if (gestureEvent.type === 'move') {
@@ -341,7 +426,7 @@ function processScrubGesture(state, cfg, gestureEvent, min, max, ring, degPerUni
     // the unclamped raw value so reversing direction has to wind back through
     // whatever overshoot happened before the value actually moves again.
     const rawValue = state.rawValue + deltaValue;
-    const value = clamp(rawValue, min, max);
+    const value = resolveDisplayValue(rawValue, min, max, mode);
     const next = { ...state, rawValue, lastPos: curr };
 
     const emits = [];
@@ -355,7 +440,7 @@ function processScrubGesture(state, cfg, gestureEvent, min, max, ring, degPerUni
   }
 
   if (gestureEvent.type === 'end') {
-    return endContinuousDrag(state, min, max, ring);
+    return endContinuousDrag(state, min, max, mode, ring);
   }
 
   return { state, emits: [] };
@@ -379,7 +464,7 @@ function processScrubGesture(state, cfg, gestureEvent, min, max, ring, degPerUni
  * emitted trigger vocabulary and payload shape identical to Arc/Scrub: an
  * 'end' still always closes with a delta:0/direction:null 'turnEnd'.
  */
-function processTapGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit) {
+function processTapGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit) {
   if (gestureEvent.type === 'start') {
     const next = {
       ...state,
@@ -389,7 +474,7 @@ function processTapGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit)
       pendingDispatchValue: null,
       reconcileStartedAt: null
     };
-    const value = clamp(state.rawValue, min, max);
+    const value = resolveDisplayValue(state.rawValue, min, max, mode);
     return {
       state: next,
       emits: [{ trigger: 'turnStart', payload: { value, delta: 0, direction: null, ring } }]
@@ -422,7 +507,7 @@ function processTapGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit)
     // remembered unclamped raw value just silently eats the next taps in the
     // opposite direction (tapping up at max=20 then back down once would land
     // on 18 instead of 15).
-    const value = clamp(clamp(state.rawValue, min, max) + deltaValue, min, max);
+    const value = resolveDisplayValue(resolveDisplayValue(state.rawValue, min, max, mode) + deltaValue, min, max, mode);
     const rawValue = value;
 
     const emits = [];
@@ -457,19 +542,18 @@ function processTapGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit)
  * which gesture drove it.
  */
 function processGesture(state, cfg, gestureEvent) {
-  const min = cfg.min ?? DEFAULT_MIN;
-  const max = cfg.max ?? DEFAULT_MAX;
+  const { mode, min, max } = resolveEffectiveRange(cfg);
   const degPerUnit = resolveDegreesPerUnit(cfg.degreesPerUnit);
   const ring = cfg.ringId ?? DEFAULT_RING_ID;
   const gesture = resolveGesture(cfg.gesture);
 
   if (gesture === 'scrub') {
-    return processScrubGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit);
+    return processScrubGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit);
   }
   if (gesture === 'tap') {
-    return processTapGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit);
+    return processTapGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit);
   }
-  return processArcGesture(state, cfg, gestureEvent, min, max, ring, degPerUnit);
+  return processArcGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit);
 }
 
 /**
@@ -480,9 +564,13 @@ function processGesture(state, cfg, gestureEvent) {
  *   3. a timeout derived from the actual poll period (never a hardcoded
  *      constant on its own — always `max(floor, pollPeriod * 2)`).
  */
-function applyReconciliation(state, cfg, telemetry, now) {
+function applyReconciliation(state, cfg, telemetry, now, mode, positions) {
   if (state.phase !== 'reconciling') {
     return state;
+  }
+
+  if (mode === 'detented') {
+    return applyDetentedReconciliation(state, cfg, telemetry, now, positions);
   }
 
   if (telemetry && telemetry.dispatchFailed) {
@@ -515,13 +603,53 @@ function applyReconciliation(state, cfg, telemetry, now) {
   return state;
 }
 
+/**
+ * Detented's own Reconciliation logic: `state.pendingDispatchValue` here holds the
+ * INDEX the Ring committed to (set by applyDetentedPostProcessing below), not a raw
+ * number a numeric tolerance could compare against directly — an authored position
+ * value is very often text. The echo/timeout/failure conditions are the same three,
+ * in the same order, just matched by identity (String-coerced) against a position
+ * instead of by numeric closeness.
+ */
+function applyDetentedReconciliation(state, cfg, telemetry, now, positions) {
+  const matchAgainstPending = (value) => {
+    const idx = matchPositionIndex(positions, value);
+    return idx >= 0 && idx === state.pendingDispatchValue;
+  };
+
+  if (telemetry && telemetry.dispatchFailed) {
+    const idx = matchPositionIndex(positions, telemetry.value);
+    if (idx >= 0) return toIdleFromTelemetry(state, idx);
+    return { ...toIdleFromTelemetry(state, state.rawValue), telemetryUnmatched: true, unmatchedValue: telemetry.value };
+  }
+
+  if (telemetry && telemetry.value !== undefined && telemetry.value !== null && matchAgainstPending(telemetry.value)) {
+    return toIdleFromTelemetry(state, state.pendingDispatchValue);
+  }
+
+  const pollPeriod = cfg.pollPeriodMs ?? DEFAULT_POLL_PERIOD_MS;
+  const timeoutMs = Math.max(RECONCILIATION_TIMEOUT_FLOOR_MS, pollPeriod * RECONCILIATION_TIMEOUT_MULTIPLIER);
+  if (state.reconcileStartedAt != null && now - state.reconcileStartedAt >= timeoutMs) {
+    if (telemetry && telemetry.value !== undefined && telemetry.value !== null) {
+      const idx = matchPositionIndex(positions, telemetry.value);
+      if (idx >= 0) return toIdleFromTelemetry(state, idx);
+      return { ...toIdleFromTelemetry(state, state.rawValue), telemetryUnmatched: true, unmatchedValue: telemetry.value };
+    }
+    return toIdleFromTelemetry(state, state.rawValue);
+  }
+
+  return state;
+}
+
 function toIdleFromTelemetry(state, value) {
   return {
     ...state,
     phase: 'idle',
     rawValue: value,
     pendingDispatchValue: null,
-    reconcileStartedAt: null
+    reconcileStartedAt: null,
+    telemetryUnmatched: false,
+    unmatchedValue: null
   };
 }
 
@@ -550,21 +678,100 @@ function deriveHaptics(state, cfg, min, max, emits) {
 }
 
 /**
+ * Detented-only post-processing, run once per resolveRotary call after the shared
+ * gesture/telemetry machinery above has produced this frame's `state`/`emits`
+ * (`emits` still carries the raw index-space `value` those functions produced,
+ * since they know nothing about positions). It:
+ *   - maps that index-space value in every emit this frame onto the matching
+ *     position's own authored `value` — the write triggers (`turn`/`turnEnd`)
+ *     dispatch "OFF"/"L"/"BOTH" to the sim, never a bare index.
+ *   - fires 'detent' (a step was crossed) and, additionally, 'limit' (the step
+ *     crossed is either end of the list) as their own non-writing trigger AND
+ *     haptic cue, exactly the "crossing a step or hitting a bound" split the
+ *     ticket calls for.
+ *   - springs a Momentary position back to the last non-Momentary one on
+ *     release: arrival already reported the Momentary position itself (a
+ *     magneto's START genuinely engages the instant it's reached), but the
+ *     value this frame actually COMMITS — what the write triggers carry, and
+ *     what a later telemetry echo is compared against — is whatever was held
+ *     immediately before, or the control would read as stuck in START forever.
+ */
+function applyDetentedPostProcessing(state, positions, min, max, emits, previousDetentIndex, gestureEvent, ring) {
+  // Idle, with the last telemetry reading matching no authored position: report
+  // that reading verbatim, with nothing highlighted, for as long as nothing new
+  // happens — never resolving to some earlier position and reading as though
+  // the pointer never moved on. (This is the exact bug the old Selector had: a
+  // value matching no position left its pointer aimed at the last valid one.)
+  if (state.telemetryUnmatched && !gestureEvent) {
+    return { state, emits, value: state.unmatchedValue, haptics: [], activeIndex: null };
+  }
+
+  const isTurnEmit = emits.some((e) => e.trigger === 'turn' || e.trigger === 'turnStart' || e.trigger === 'turnEnd');
+  const index = clamp(Math.round(state.rawValue), min, max);
+  const position = positions[index] || null;
+
+  const haptics = [];
+  const extraEmits = [];
+  if (position && isTurnEmit && index !== previousDetentIndex) {
+    extraEmits.push({ trigger: 'detent', payload: { value: position.value, delta: 0, direction: null, ring } });
+    haptics.push('detent');
+    if (index === min || index === max) {
+      extraEmits.push({ trigger: 'limit', payload: { value: position.value, delta: 0, direction: null, ring } });
+      haptics.push('limit');
+    }
+  }
+
+  const stableIndex = (position && !position.momentary) ? index : (state.stableIndex ?? index);
+  const released = gestureEvent && gestureEvent.type === 'end';
+  const springingBack = released && position && position.momentary;
+  const finalIndex = springingBack ? stableIndex : index;
+  const finalPosition = springingBack ? (positions[finalIndex] || null) : position;
+  const finalValue = finalPosition ? finalPosition.value : state.rawValue;
+
+  // Every emit this frame (turnStart/turn/turnEnd from the shared gesture
+  // machinery above) reports the SAME resolved value — they're all one snapshot
+  // of one resolveRotary() call. A spring-back overrides them all identically,
+  // which is what makes turnEnd carry the sprung-back value rather than the
+  // Momentary one it would otherwise have inherited from the gesture functions.
+  const remappedEmits = emits.map((e) => ({ ...e, payload: { ...e.payload, value: finalValue } }));
+
+  const nextState = {
+    ...state,
+    rawValue: finalIndex,
+    detentIndex: finalIndex,
+    telemetryUnmatched: false,
+    unmatchedValue: null,
+    stableIndex,
+    pendingDispatchValue: state.phase === 'reconciling' ? finalIndex : state.pendingDispatchValue
+  };
+
+  return {
+    state: nextState,
+    emits: [...remappedEmits, ...extraEmits],
+    value: finalValue,
+    haptics,
+    activeIndex: position ? finalIndex : null
+  };
+}
+
+/**
  * The engine's single pure entry point. See the file header for the full
  * config/gestureEvent/telemetry shapes.
  */
 export function resolveRotary(config, gestureEvent, telemetry, now) {
   const cfg = config || {};
-  const min = cfg.min ?? DEFAULT_MIN;
-  const max = cfg.max ?? DEFAULT_MAX;
+  const { mode, min, max, positions } = resolveEffectiveRange(cfg);
   const ring = cfg.ringId ?? DEFAULT_RING_ID;
+  const previousDetentIndex = (cfg.previousState && cfg.previousState.detentIndex != null)
+    ? cfg.previousState.detentIndex
+    : null;
 
   let state = cfg.previousState || createRotaryState(cfg, telemetry);
 
   // 1. Resolve any open Reconciliation window first, using this frame's
   //    telemetry, before this frame's gesture (if any) is applied.
   if (state.phase === 'reconciling') {
-    state = applyReconciliation(state, cfg, telemetry, now);
+    state = applyReconciliation(state, cfg, telemetry, now, mode, positions);
   }
 
   // 2. Apply this frame's gesture. A fresh 'start' always wins over a
@@ -587,23 +794,75 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
   //    authoritative. While engaged or reconciling, it is not (checklist
   //    item: "While a Rotary is engaged, inbound telemetry does not override
   //    its value; once released and reconciled, it does.").
-  if (state.phase === 'idle' && telemetry && typeof telemetry.value === 'number' && !telemetry.dispatchFailed) {
-    state = { ...state, rawValue: telemetry.value };
+  if (state.phase === 'idle' && telemetry && !telemetry.dispatchFailed) {
+    if (mode === 'detented') {
+      // See createRotaryState's own comment: matched by coerced identity, so any
+      // defined value is eligible, not only a number.
+      if (telemetry.value !== undefined && telemetry.value !== null) {
+        const idx = matchPositionIndex(positions, telemetry.value);
+        if (idx >= 0) {
+          state = {
+            ...state,
+            rawValue: idx,
+            telemetryUnmatched: false,
+            unmatchedValue: null,
+            stableIndex: (positions[idx] && positions[idx].momentary) ? state.stableIndex : idx
+          };
+        } else {
+          state = { ...state, telemetryUnmatched: true, unmatchedValue: telemetry.value };
+        }
+      }
+    } else if (typeof telemetry.value === 'number') {
+      state = { ...state, rawValue: telemetry.value };
+    }
   }
 
-  const value = clamp(state.rawValue, min, max);
-  const haptics = deriveHaptics(state, cfg, min, max, emits);
-  state = { ...state, atBoundSide: boundSideOf(value, min, max) };
+  // 4. Resolve this frame's display value/angle/haptics/extra triggers.
+  //    Detented is different enough (index/position mapping, the
+  //    detent/limit/Momentary vocabulary) that it gets its own dedicated step
+  //    rather than folding into the numeric Bounded/Continuous path below.
+  let value;
+  let haptics;
+  let activePosition = null;
+  if (mode === 'detented') {
+    const outcome = applyDetentedPostProcessing(state, positions, min, max, emits, previousDetentIndex, gestureEvent, ring);
+    state = outcome.state;
+    emits = outcome.emits;
+    value = outcome.value;
+    haptics = outcome.haptics;
+    activePosition = outcome.activeIndex;
+  } else {
+    value = resolveDisplayValue(state.rawValue, min, max, mode);
+    haptics = mode === 'continuous' ? [] : deriveHaptics(state, cfg, min, max, emits);
+    if (haptics.includes('boundReached')) {
+      haptics = [...haptics, 'limit'];
+      emits = [...emits, { trigger: 'limit', payload: { value, delta: 0, direction: null, ring } }];
+    }
+    state = { ...state, atBoundSide: mode === 'continuous' ? null : boundSideOf(value, min, max) };
+  }
 
   const span = max - min;
   const sweep = cfg.sweepDegrees ?? DEFAULT_SWEEP_DEGREES;
-  const angle = span === 0 ? 0 : ((value - min) / span) * sweep;
+  let angle;
+  if (mode === 'detented') {
+    const denom = Math.max(max, 1);
+    const angleIndex = state.detentIndex != null ? state.detentIndex : (previousDetentIndex ?? 0);
+    angle = (angleIndex / denom) * sweep;
+  } else {
+    angle = span === 0 ? 0 : ((value - min) / span) * sweep;
+  }
 
   return {
     value,
     angle,
     activeRing: ring,
     tier: cfg.tier ?? DEFAULT_TIER,
+    // Ticket 04: which authored position (by index into cfg.positions) is
+    // currently active, when rangeMode is 'detented' — null in every other
+    // mode, and null in Detented too when telemetry matches no position. A
+    // top-level field alongside activeRing/tier, deliberately NOT read off the
+    // opaque `state` bag (see the file header: state is for threading only).
+    activePosition,
     emits,
     haptics,
     state
