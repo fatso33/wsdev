@@ -4523,8 +4523,9 @@ export class StudioInspector {
 
   /**
    * Step 3 Part A (2026-09-04): registry-driven wrapper around the existing,
-   * unmodified renderRowListEditor() (used directly by core.gauge's still-hand-coded
-   * arc.bands, and by this wrapper for everything else). Reads `field.rowSpec.fields`
+   * unmodified renderRowListEditor(). Part B folded core.gauge's then-hand-coded
+   * arc.bands in behind this wrapper too, so this is now renderRowListEditor's ONLY
+   * caller and `propKey` there is always a registry `field.path`. Reads `field.rowSpec.fields`
    * — the per-field "row spec" the registry previously had no way to declare, so every
    * hand-coded call site built its own — filters columns by their own optional
    * `showWhen` (e.g. core.selector's Angle column, lever-mode-only), and always commits
