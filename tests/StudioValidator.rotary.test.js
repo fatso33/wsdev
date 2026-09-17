@@ -95,3 +95,43 @@ describe('the Rotary palette entry', () => {
     expect(proposeWireUp(comp)).toBeNull();
   });
 });
+
+// Code-review fix-pass finding #2 (ticket 05): syncCapabilities() and validate()'s
+// §11 Rule 5 write-event cross-check enumerated writeEvent/ackEvent/pushEvent but not
+// Pulse write mode's incrementEvent/decrementEvent, so a Pulse Ring's real write
+// surface never landed in capabilities.writeEvents.
+describe('Pulse write mode\'s incrementEvent/decrementEvent are tracked as write capabilities (ticket 05)', () => {
+  const pulseRotary = {
+    id: 'rot',
+    type: 'core.rotary',
+    binding: { readSimVar: 'apHdgBugValue', incrementEvent: 'HDG_INC', decrementEvent: 'HDG_DEC' },
+    props: { writeMode: 'pulse', min: 0, max: 360 },
+    layout: { col: 1, row: 1, w: 4, h: 4 }
+  };
+
+  function widgetWith(comp, capabilities) {
+    return {
+      fdws: '1.30', schemaVersion: '1.30.0', id: 'com.test.rotarypulse',
+      meta: { name: 'Rotary Pulse', category: 'Avionics' },
+      layout: { defaultW: 4, defaultH: 4, grid: { columns: 4, rows: 4 } },
+      components: [comp],
+      ...(capabilities ? { capabilities } : {})
+    };
+  }
+
+  it('validate() includes incrementEvent/decrementEvent in capabilitiesSummary.writeEvents', () => {
+    const result = StudioValidator.validate(widgetWith(pulseRotary));
+    expect(result.capabilitiesSummary.writeEvents).toEqual(expect.arrayContaining(['HDG_INC', 'HDG_DEC']));
+  });
+
+  it('validate() raises no "not referenced by any component" warning when capabilities.writeEvents already lists them', () => {
+    const result = StudioValidator.validate(widgetWith(pulseRotary, { writeEvents: ['HDG_INC', 'HDG_DEC'] }));
+    expect(result.warnings.join(' ')).not.toMatch(/is not referenced by any component/);
+  });
+
+  it('syncCapabilities() adds incrementEvent/decrementEvent to def.capabilities.writeEvents', () => {
+    const def = widgetWith(pulseRotary);
+    StudioValidator.syncCapabilities(def);
+    expect(def.capabilities.writeEvents).toEqual(expect.arrayContaining(['HDG_INC', 'HDG_DEC']));
+  });
+});

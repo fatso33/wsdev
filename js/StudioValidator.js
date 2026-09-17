@@ -736,6 +736,20 @@ export class StudioValidator {
             validateBindingValue(comp.id, 'event', comp.binding.pushEvent, 'pushEvent');
             detectedWriteEvents.add(comp.binding.pushEvent.trim());
           }
+          // Rotary rebuild ticket 05 (FDWS v1.30): Pulse write mode's own pair of
+          // write events — RotaryComponent.writePulseStep() self-dispatches one of
+          // these directly, the same way core.rotary already self-dispatches
+          // binding.writeEvent (SELF_DISPATCHING_WRITE_EVENT_TYPES), so — like
+          // ackEvent/pushEvent above — these only need validating and counting, not
+          // the writeEvent-specific "is anything consuming this" gate.
+          if (comp.binding.incrementEvent) {
+            validateBindingValue(comp.id, 'event', comp.binding.incrementEvent, 'incrementEvent');
+            detectedWriteEvents.add(comp.binding.incrementEvent.trim());
+          }
+          if (comp.binding.decrementEvent) {
+            validateBindingValue(comp.id, 'event', comp.binding.decrementEvent, 'decrementEvent');
+            detectedWriteEvents.add(comp.binding.decrementEvent.trim());
+          }
           // FDWS v1.3: a "$context.<key>.value" binding resolves against the popover's
           // injected host context at runtime, not this widget's own state[] — not an
           // undeclared-var warning candidate.
@@ -1027,6 +1041,10 @@ export class StudioValidator {
       if (c.binding?.writeEvent) writeEvents.add(c.binding.writeEvent.trim());
       if (c.binding?.ackEvent) writeEvents.add(c.binding.ackEvent.trim());
       if (c.binding?.pushEvent) writeEvents.add(c.binding.pushEvent.trim());
+      // Ticket 05: Pulse write mode's own pair of write events (see validate()'s
+      // identical addition above for why these count the same way ackEvent/pushEvent do).
+      if (c.binding?.incrementEvent) writeEvents.add(c.binding.incrementEvent.trim());
+      if (c.binding?.decrementEvent) writeEvents.add(c.binding.decrementEvent.trim());
       if (Array.isArray(c.interactions)) {
         c.interactions.forEach((i) => {
           if (i.action?.event) writeEvents.add(i.action.event.trim());

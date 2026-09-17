@@ -487,7 +487,13 @@ export class SecurityValidator {
           // and count them the same way, or an unsanitized identifier here would
           // reach dispatchSimEvent() untouched, and a legitimate one would always
           // trip the §11 Rule 5 "not referenced" warning below.
-          ['ackEvent', 'pushEvent'].forEach((field) => {
+          // incrementEvent/decrementEvent (Rotary rebuild ticket 05, FDWS v1.30):
+          // Pulse write mode's own pair of write events — RotaryComponent.js's
+          // writePulseStep() dispatches one of these DIRECTLY, on the same
+          // self-dispatching path writeEvent uses, so an unsanitized identifier
+          // here would reach dispatchSimEvent() exactly as unguarded as an
+          // unsanitized writeEvent would.
+          ['ackEvent', 'pushEvent', 'incrementEvent', 'decrementEvent'].forEach((field) => {
             if (comp.binding[field]) {
               const clean = SecurityValidator.sanitizeEventName(comp.binding[field]);
               if (clean) {
