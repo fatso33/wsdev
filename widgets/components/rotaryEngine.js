@@ -242,6 +242,11 @@ function normalizePositions(raw) {
  * control could actually rest at"; falls back to `min` (index 0) in the degenerate
  * case where every authored position is Momentary and there is truly nothing else to
  * pick.
+ *
+ * Invariant this relies on: every element of `positions` is a non-null object. The
+ * predicate reads `p.momentary` with no guard, so a null or primitive entry throws.
+ * That holds because the only caller passes a `normalizePositions()`-filtered array.
+ * A second caller must filter the same way, or this needs a `p &&` guard first.
  */
 function firstRestablePositionIndex(positions, min) {
   const idx = positions.findIndex((p) => !p.momentary);
