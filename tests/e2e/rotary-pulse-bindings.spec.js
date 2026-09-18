@@ -26,7 +26,17 @@ async function isUsable(page, selector) {
   }, selector);
 }
 
-async function seedRotary(page) {
+// `tier` defaults to 'full' for tests exercising the data-tier="advanced"
+// dropdown (the escape-hatch shape Write Deck Event also has), but the
+// DEFAULT tier is Guided — and PropertyRegistry.js declares both fields
+// `tier: 'simple', guided: true`, i.e. reachable WITHOUT leaving Guided. Fix
+// pass (code review): the first version of this panel only added the
+// data-tier="advanced" half of Write Deck Event's two-piece shape, so an
+// Author in the default tier still couldn't reach these fields at all —
+// exactly the "hand-edit the JSON" failure ticket 18 exists to close, just
+// moved one layer deeper. Passing tier: null skips the Full-mode click
+// entirely, to prove the Guided-tier picker on its own.
+async function seedRotary(page, { tier = 'full' } = {}) {
   await page.goto('/');
   await page.evaluate(() => {
     const state = window.__studioApp.state;
@@ -41,9 +51,7 @@ async function seedRotary(page) {
     });
     state.selectComponent('seed-rot');
   });
-  // Both new fields carry data-tier="advanced", matching the existing Write
-  // Deck Event field's own tier gating — Full tier is where they're reachable.
-  await page.locator('[data-mode="full"]').click();
+  if (tier) await page.locator(`[data-mode="${tier}"]`).click();
   await page.getByTestId('inspector-tab-data').click();
 }
 
@@ -98,6 +106,38 @@ test('the custom/saved-event picker and free-text raw address are usable, with t
   expect(binding.incrementEvent).toBe('H:GTN750_DirectToPush');
 });
 
+// Fix pass (code review, finding 2): the prior version of this file only
+// exercised the free-text/CUSTOM_OPTION_VALUE half of the custom-event
+// picker, never picking an EXISTING saved custom event from the dropdown
+// (buildCustomOptions()'s "used by another saved widget" list) — a
+// different code path (customSelect's 'change' listener) than the free-text
+// input's.
+test('the custom/saved-event picker can also select an existing saved custom event from the dropdown', async ({ page }) => {
+  await seedRotary(page);
+  await page.evaluate(() => {
+    // A different widget in this Studio's saved-widget library already uses
+    // a custom write event — see extractCustomDeckEvents()'s "used by
+    // another saved widget" provenance, which buildCustomOptions() surfaces.
+    localStorage.setItem('fdws_saved_widgets', JSON.stringify([{
+      id: 'com.test.other', kind: 'widget', fdws: '1.30', schemaVersion: '1.30.0',
+      meta: { name: 'Other Widget', category: 'Avionics' },
+      layout: { defaultW: 4, defaultH: 4, grid: { columns: 4, rows: 4 } },
+      components: [{ id: 'c1', type: 'core.button', layout: { col: 1, row: 1, w: 2, h: 2 }, binding: { writeEvent: 'myBoostEvent' } }]
+    }]));
+    window.__studioApp.state.selectComponent('seed-rot'); // re-select to force a re-render picking up the new saved-widgets scan
+  });
+  await page.locator('#rf-props-writeMode').selectOption('pulse');
+
+  await page.locator('#c-bind-increment').selectOption(CUSTOM_OPTION_VALUE);
+  const customSelect = page.locator('#c-bind-increment-custom-select');
+  await expect(customSelect).toBeVisible();
+  await expect(customSelect.locator('option', { hasText: 'myBoostEvent' })).toHaveCount(1);
+
+  await customSelect.selectOption('myBoostEvent');
+  const binding = await getBinding(page);
+  expect(binding.incrementEvent).toBe('myBoostEvent');
+});
+
 test('setting Write Mode back to Absolute hides both fields but does not discard already-set values', async ({ page }) => {
   await seedRotary(page);
   await page.locator('#rf-props-writeMode').selectOption('pulse');
@@ -120,6 +160,42 @@ test('setting Write Mode back to Absolute hides both fields but does not discard
   await expect(page.locator('#c-bind-decrement')).toHaveValue('com1Swap');
 });
 
+// Fix pass (code review, finding 1 — the blocking bug): reachable in the
+// DEFAULT tier, not just Full. Mirrors Write Deck Event's own Simple/Guided
+// picker (buildConnectSimPicker) rather than the data-tier="advanced"
+// dropdown other tests here exercise.
+test('the Simple/Guided-tier Connect to Simulator picker reaches Increment/Decrement without switching to Full tier', async ({ page }) => {
+  await seedRotary(page, { tier: null }); // stays on the default (Guided) tier
+
+  await expect(page.locator('#rf-props-writeMode')).toBeVisible();
+  expect(await isUsable(page, '#c-connect-increment-category')).toBe('hidden'); // still Absolute mode
+  expect(await isUsable(page, '#c-bind-increment')).toBe('hidden'); // the Full-only dropdown, doubly hidden here
+
+  await page.locator('#rf-props-writeMode').selectOption('pulse');
+
+  const incrementCategory = page.locator('#c-connect-increment-category');
+  const decrementCategory = page.locator('#c-connect-decrement-category');
+  await expect(incrementCategory).toBeVisible();
+  await expect(decrementCategory).toBeVisible();
+
+  await incrementCategory.selectOption('ap');
+  await page.locator('#c-connect-increment-variable').selectOption('apHdgBugInc');
+  await decrementCategory.selectOption('ap');
+  await page.locator('#c-connect-decrement-variable').selectOption('apHdgBugDec');
+
+  const binding = await getBinding(page);
+  expect(binding.incrementEvent).toBe('apHdgBugInc');
+  expect(binding.decrementEvent).toBe('apHdgBugDec');
+
+  // Switching Write Mode back to Absolute hides this picker too, same
+  // value-preservation guarantee as the Full-tier dropdown.
+  await page.locator('#rf-props-writeMode').selectOption('absolute');
+  expect(await isUsable(page, '#c-connect-increment-category')).toBe('hidden');
+  const bindingAfter = await getBinding(page);
+  expect(bindingAfter.incrementEvent).toBe('apHdgBugInc');
+  expect(bindingAfter.decrementEvent).toBe('apHdgBugDec');
+});
+
 test('the Connect… picker (Raw Address tab) commits to incrementEvent/decrementEvent, not writeEvent', async ({ page }) => {
   await seedRotary(page);
   await page.locator('#rf-props-writeMode').selectOption('pulse');
@@ -134,7 +210,16 @@ test('the Connect… picker (Raw Address tab) commits to incrementEvent/decremen
   expect(binding.writeEvent).toBeUndefined();
 });
 
-test('a Pulse Rotary authored entirely through the UI exports a definition that validates cleanly', async ({ page }) => {
+// Fix pass (code review, finding 3): the ticket's own acceptance criterion
+// says "validates AND renders" — the prior version of this test only
+// checked validate(). Device View runs the real RotaryComponent against
+// MockWidgetHost (see rotary-device-preview.spec.js), so switching to it and
+// finding the real knob face proves the Pulse-authored definition doesn't
+// just pass validation on paper, it actually renders through the runtime.
+test('a Pulse Rotary authored entirely through the UI exports a definition that validates AND renders', async ({ page }) => {
+  const pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
   await seedRotary(page);
   await page.locator('#rf-props-writeMode').selectOption('pulse');
   await page.locator('#c-bind-increment').selectOption('apHdgSet');
@@ -144,4 +229,8 @@ test('a Pulse Rotary authored entirely through the UI exports a definition that 
   const result = StudioValidator.validate(widgetDef);
   expect(result.errors, result.errors.join(' | ')).toEqual([]);
   expect((result.blockingIssues || []).map((b) => b.code)).not.toContain('UNWIRED_WRITE_EVENT');
+
+  await page.evaluate(() => window.__studioApp.state.setViewportMode('device'));
+  await expect(page.locator('.fd-rotary-face')).toBeVisible();
+  expect(pageErrors).toEqual([]);
 });

@@ -2319,6 +2319,14 @@ export class StudioInspector {
         </div>
 
         ${comp.type === 'core.rotary' ? `
+        <div class="prop-field" data-tier="simple-only" id="c-bind-increment-simple-field" style="${isPulseRotary ? '' : 'display:none;'}">
+          <label>Connect to Simulator — Increment Event (Pulse Clockwise) <span class="prop-hint" title="Pick a category, then the specific command dispatched once per step turned clockwise. Fills in the same field Advanced mode's Increment Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.">ⓘ</span></label>
+          <div class="connect-sim-picker">${buildConnectSimPicker('write', 'c-connect-increment', binding.incrementEvent)}</div>
+        </div>
+        <div class="prop-hint-block" data-tier="simple-only" id="c-bind-increment-simple-hint" style="font-size:11px;opacity:0.75;margin:-4px 0 8px;${isPulseRotary ? '' : 'display:none;'}">
+          Don't see it? <button type="button" class="btn-mini-inline" id="c-connect-increment-findit">Find it by moving it →</button>
+          or <button type="button" class="btn-mini-inline" id="c-connect-increment-full">switch to Full mode</button> for Raw Address / Custom.
+        </div>
         <div class="prop-field" data-tier="advanced" id="c-bind-increment-field" style="${isPulseRotary ? '' : 'display:none;'}">
           <label>Increment Deck Event (Pulse Clockwise) <span class="prop-hint" title="FDWS v1.30: dispatched once per step turned clockwise, when Write Mode (Range panel) is set to Pulse. Only used in Pulse mode — Absolute mode uses Write Deck Event above instead.">ⓘ</span></label>
           <div class="prop-row-2">
@@ -2336,6 +2344,14 @@ export class StudioInspector {
           <div class="prop-sanitize-diff hidden" id="c-bind-increment-custom-diff"></div>
         </div>
 
+        <div class="prop-field" data-tier="simple-only" id="c-bind-decrement-simple-field" style="${isPulseRotary ? '' : 'display:none;'}">
+          <label>Connect to Simulator — Decrement Event (Pulse Counter-Clockwise) <span class="prop-hint" title="Pick a category, then the specific command dispatched once per step turned counter-clockwise. Fills in the same field Advanced mode's Decrement Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.">ⓘ</span></label>
+          <div class="connect-sim-picker">${buildConnectSimPicker('write', 'c-connect-decrement', binding.decrementEvent)}</div>
+        </div>
+        <div class="prop-hint-block" data-tier="simple-only" id="c-bind-decrement-simple-hint" style="font-size:11px;opacity:0.75;margin:-4px 0 8px;${isPulseRotary ? '' : 'display:none;'}">
+          Don't see it? <button type="button" class="btn-mini-inline" id="c-connect-decrement-findit">Find it by moving it →</button>
+          or <button type="button" class="btn-mini-inline" id="c-connect-decrement-full">switch to Full mode</button> for Raw Address / Custom.
+        </div>
         <div class="prop-field" data-tier="advanced" id="c-bind-decrement-field" style="${isPulseRotary ? '' : 'display:none;'}">
           <label>Decrement Deck Event (Pulse Counter-Clockwise) <span class="prop-hint" title="FDWS v1.30: dispatched once per step turned counter-clockwise, when Write Mode (Range panel) is set to Pulse. Only used in Pulse mode — Absolute mode uses Write Deck Event above instead.">ⓘ</span></label>
           <div class="prop-row-2">
@@ -2517,13 +2533,28 @@ export class StudioInspector {
       };
       wireConnectSimPicker('read', 'c-connect-read', 'readSimVar');
       wireConnectSimPicker('write', 'c-connect-write', 'writeEvent');
+      // Fix pass (code review): the Simple/Guided-tier "Connect to Simulator"
+      // picker is what actually makes a field reachable without leaving the
+      // default tier — the data-tier="advanced" dropdown alone (originally
+      // the only thing added here) left Increment/Decrement invisible by
+      // default despite PropertyRegistry.js declaring both `tier: 'simple',
+      // guided: true`. Mirrors Write Deck Event's own picker exactly, one
+      // level up: category+variable both filtered on kind 'write' (these are
+      // write-kind Deck Events too), landing on incrementEvent/decrementEvent
+      // instead of writeEvent via wireConnectSimPicker's existing
+      // bindingField param.
+      if (comp.type === 'core.rotary') {
+        wireConnectSimPicker('write', 'c-connect-increment', 'incrementEvent');
+        wireConnectSimPicker('write', 'c-connect-decrement', 'decrementEvent');
+      }
 
       // Post-implementation review §7: the 4-category Simple picker above has
       // no escape hatch when an author's value isn't Radios/AP/Lights/Yoke —
       // the category select just has no matching option, with nothing
       // pointing at Raw Address or the SimVar Tester's wiggle-to-find. Same
       // two-link fix on both read and write pickers.
-      ['read', 'write'].forEach((kind) => {
+      const simplePickerKinds = comp.type === 'core.rotary' ? ['read', 'write', 'increment', 'decrement'] : ['read', 'write'];
+      simplePickerKinds.forEach((kind) => {
         body.querySelector(`#c-connect-${kind}-findit`)?.addEventListener('click', () => this.simVarTester?.open());
         body.querySelector(`#c-connect-${kind}-full`)?.addEventListener('click', () => {
           this.uiTier = 'full';
