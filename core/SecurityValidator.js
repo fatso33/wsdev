@@ -9,7 +9,7 @@
 // in widget-studio/js/StudioValidator.js — the exact "two files, easy to forget"
 // gotcha that left both capped at '1.7' when v1.8 shipped. '1.0' is kept as a
 // pre-doc legacy value neither validator ever stopped accepting.
-import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
+import { FDWS_VERSIONS, WRITE_EVENT_BINDING_FIELDS } from '../widgets/PropertyRegistry.js';
 // './' not '../': sync-shared.mjs places this file and deckEvents.js in the
 // SAME directory in both apps (js/core/ and core/), and these import paths are
 // written for those destinations rather than for shared/ itself.
@@ -472,28 +472,18 @@ export class SecurityValidator {
               delete comp.binding.readSimVar;
             }
           }
-          if (comp.binding.writeEvent) {
-            const clean = SecurityValidator.sanitizeEventName(comp.binding.writeEvent);
-            if (clean) {
-              comp.binding.writeEvent = clean;
-              foundWriteEvents.add(clean);
-            } else {
-              delete comp.binding.writeEvent;
-            }
-          }
-          // ackEvent/pushEvent are alternate write-event fields BaseComponent's
-          // resolvePointerEvents() and CompositeWidget's registerDynamicBindings()/
-          // core.ackIndicator already treat as equivalent to writeEvent — sanitize
-          // and count them the same way, or an unsanitized identifier here would
-          // reach dispatchSimEvent() untouched, and a legitimate one would always
-          // trip the §11 Rule 5 "not referenced" warning below.
-          // incrementEvent/decrementEvent (Rotary rebuild ticket 05, FDWS v1.30):
-          // Pulse write mode's own pair of write events — RotaryComponent.js's
-          // writePulseStep() dispatches one of these DIRECTLY, on the same
-          // self-dispatching path writeEvent uses, so an unsanitized identifier
-          // here would reach dispatchSimEvent() exactly as unguarded as an
-          // unsanitized writeEvent would.
-          ['ackEvent', 'pushEvent', 'incrementEvent', 'decrementEvent'].forEach((field) => {
+          // Ticket 17: every write-event binding field (writeEvent, ackEvent,
+          // pushEvent, incrementEvent/decrementEvent today — see
+          // WRITE_EVENT_BINDING_FIELDS's own comment in PropertyRegistry.js)
+          // is sanitized and counted identically here, off that shared list —
+          // an unsanitized identifier in any of them would reach
+          // dispatchSimEvent() unguarded (writeEvent/incrementEvent/
+          // decrementEvent self-dispatch directly; ackEvent/pushEvent are read
+          // by BaseComponent's resolvePointerEvents() / CompositeWidget's
+          // registerDynamicBindings() / core.ackIndicator the same way), and a
+          // legitimate one would always trip the §11 Rule 5 "not referenced"
+          // warning below if left uncounted.
+          WRITE_EVENT_BINDING_FIELDS.forEach((field) => {
             if (comp.binding[field]) {
               const clean = SecurityValidator.sanitizeEventName(comp.binding[field]);
               if (clean) {

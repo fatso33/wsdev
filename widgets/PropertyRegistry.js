@@ -357,6 +357,34 @@ export const COMMON_FIELDS = [
   { path: 'binding.eventCategory', control: 'text', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Groups related Deck Events for the event picker’s filtering — cosmetic, doesn’t affect behavior.' }
 ];
 
+// ---------------------------------------------------------------------------
+// Write-event binding fields — single source, mirrors FDWS_VERSIONS above.
+// Ticket 17: this used to be a hand-listed array duplicated in
+// shared/widgetVarExtractor.js's walkBindingSites(), shared/SecurityValidator.js's
+// sanitizer, and widget-studio/js/StudioValidator.js (two separate call sites) —
+// the exact "update N files by hand" gotcha FDWS_VERSIONS already solved for the
+// version enum, and it already cost a ticket a two-round review miss: ticket 05
+// added binding.incrementEvent/decrementEvent, review round 1 caught
+// SecurityValidator.js missing them, review round 2 caught widgetVarExtractor.js
+// missing them too — the second miss meant a Pulse-only Rotary registered zero
+// placeholder profile mappings on install, a silent failure.
+//
+// Derived from COMMON_FIELDS itself (every `binding.*` field whose control is
+// 'eventPicker') instead of hand-listed a sixth time, so all four consumers
+// automatically pick up a new write-event binding field the moment it's added
+// to COMMON_FIELDS above, with no other edit required. Deliberately excludes:
+//   - binding.readSimVar — a different control ('simVarPicker'), a read not a write.
+//   - ACTIONS[].params' `event` keys (core.dispatchEvent, core.ackIndicator) —
+//     interaction-site writes, not component bindings; none of their paths
+//     start with 'binding.' at all.
+//   - core.rocker's props.zones[].writeEvent — a different shape entirely
+//     (per-zone, not binding.*), deliberately still hand-coded at its own two
+//     call sites in walkBindingSites() and StudioValidator.js.
+// ---------------------------------------------------------------------------
+export const WRITE_EVENT_BINDING_FIELDS = COMMON_FIELDS
+  .filter((f) => f.control === 'eventPicker' && f.path.startsWith('binding.'))
+  .map((f) => f.path.slice('binding.'.length));
+
 export const TYPE_FIELDS = {
   'core.label': [
     { path: 'props.text', control: 'text', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Static label text, shown when nothing overrides it.' },

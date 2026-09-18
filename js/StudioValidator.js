@@ -45,6 +45,7 @@ import {
   ACTIONS,
   VALUE_FORMATS as REGISTRY_VALUE_FORMATS,
   ALLOWED_ASSET_MIME_TYPES,
+  WRITE_EVENT_BINDING_FIELDS,
   getComponentTypes,
   getStateStyleConfig,
   getFieldsForType
@@ -728,28 +729,21 @@ export class StudioValidator {
               }
             }
           }
-          if (comp.binding.ackEvent) {
-            validateBindingValue(comp.id, 'event', comp.binding.ackEvent, 'ackEvent');
-            detectedWriteEvents.add(comp.binding.ackEvent.trim());
-          }
-          if (comp.binding.pushEvent) {
-            validateBindingValue(comp.id, 'event', comp.binding.pushEvent, 'pushEvent');
-            detectedWriteEvents.add(comp.binding.pushEvent.trim());
-          }
-          // Rotary rebuild ticket 05 (FDWS v1.30): Pulse write mode's own pair of
-          // write events — RotaryComponent.writePulseStep() self-dispatches one of
-          // these directly, the same way core.rotary already self-dispatches
-          // binding.writeEvent (SELF_DISPATCHING_WRITE_EVENT_TYPES), so — like
-          // ackEvent/pushEvent above — these only need validating and counting, not
-          // the writeEvent-specific "is anything consuming this" gate.
-          if (comp.binding.incrementEvent) {
-            validateBindingValue(comp.id, 'event', comp.binding.incrementEvent, 'incrementEvent');
-            detectedWriteEvents.add(comp.binding.incrementEvent.trim());
-          }
-          if (comp.binding.decrementEvent) {
-            validateBindingValue(comp.id, 'event', comp.binding.decrementEvent, 'decrementEvent');
-            detectedWriteEvents.add(comp.binding.decrementEvent.trim());
-          }
+          // Ticket 17: every OTHER write-event binding field besides writeEvent
+          // (ackEvent, pushEvent, incrementEvent/decrementEvent today — see
+          // WRITE_EVENT_BINDING_FIELDS's own comment in PropertyRegistry.js) only
+          // needs validating and counting, not the writeEvent-specific "is
+          // anything consuming this" gate above (they self-dispatch directly —
+          // RotaryComponent.writePulseStep() for incrementEvent/decrementEvent,
+          // the same way core.rotary already self-dispatches binding.writeEvent;
+          // ackEvent/pushEvent are read by core.ackIndicator / press-and-hold
+          // directly, not via an interaction row).
+          WRITE_EVENT_BINDING_FIELDS.filter((field) => field !== 'writeEvent').forEach((field) => {
+            if (comp.binding[field]) {
+              validateBindingValue(comp.id, 'event', comp.binding[field], field);
+              detectedWriteEvents.add(comp.binding[field].trim());
+            }
+          });
           // FDWS v1.3: a "$context.<key>.value" binding resolves against the popover's
           // injected host context at runtime, not this widget's own state[] — not an
           // undeclared-var warning candidate.
@@ -1038,13 +1032,11 @@ export class StudioValidator {
 
     (def.components || []).forEach((c) => {
       if (c.binding?.readSimVar) readSimVars.add(c.binding.readSimVar.trim());
-      if (c.binding?.writeEvent) writeEvents.add(c.binding.writeEvent.trim());
-      if (c.binding?.ackEvent) writeEvents.add(c.binding.ackEvent.trim());
-      if (c.binding?.pushEvent) writeEvents.add(c.binding.pushEvent.trim());
-      // Ticket 05: Pulse write mode's own pair of write events (see validate()'s
-      // identical addition above for why these count the same way ackEvent/pushEvent do).
-      if (c.binding?.incrementEvent) writeEvents.add(c.binding.incrementEvent.trim());
-      if (c.binding?.decrementEvent) writeEvents.add(c.binding.decrementEvent.trim());
+      // Ticket 17: every write-event binding field, off the same shared list
+      // validate() uses above.
+      WRITE_EVENT_BINDING_FIELDS.forEach((field) => {
+        if (c.binding?.[field]) writeEvents.add(c.binding[field].trim());
+      });
       if (Array.isArray(c.interactions)) {
         c.interactions.forEach((i) => {
           if (i.action?.event) writeEvents.add(i.action.event.trim());

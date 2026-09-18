@@ -10,6 +10,18 @@
  * dropdown (see flight-deck-pwa/js/ui/PropertyInspector.js and
  * widget-studio/js/StudioInspector.js).
  *
+ * Lives under shared/core/ (not shared/ root) as of ticket 17's fix-pass —
+ * same move CLAUDE.md documents for StateRefPath.js's 2026-09-14 lift into
+ * shared/widgets/utils/: this file needs `../widgets/PropertyRegistry.js` to
+ * resolve both from its own real shared/ location (pc-bridge imports this
+ * file in place, via '../shared/core/widgetVarExtractor.js') and from its
+ * synced destination (js/core/ next to js/widgets/, in both apps). Sitting at
+ * shared/ root (a widgets/ CHILD directory away from PropertyRegistry.js)
+ * couldn't satisfy both; sitting in shared/core/ (a widgets/ SIBLING
+ * directory, mirroring both apps' real core/+widgets/ layout) can — this is
+ * the shape sync-targets.mjs's `widgetVarExtractor` destinations already had,
+ * now mirrored in shared/ itself instead of only downstream.
+ *
  * Only bare, unprefixed identifiers (e.g. "panelBrightnessLevel",
  * "xpndrModeSet") go through this scan. FDWS v1.2 §1.5 raw-namespaced
  * identifiers (`A:`, `L:`, `H:`, `K:` prefixes) are already real
@@ -30,6 +42,18 @@
  * missing `interactions[].action.event` — i.e. every button — since it was
  * written.
  */
+
+// Ticket 17: the write-event binding field set (writeEvent, ackEvent, pushEvent,
+// incrementEvent, decrementEvent today) is now PropertyRegistry.js's own list,
+// not hand-listed again here — see WRITE_EVENT_BINDING_FIELDS's own comment for
+// why. Unlike SecurityValidator.js's identical-looking import (which only
+// resolves from its SYNCED destination, not from shared/ itself — see that
+// file's own header comment), this one resolves correctly everywhere: this
+// file's own shared/core/ location, this file's synced destination (js/core/
+// or core/, sibling to js/widgets/ or widgets/), AND pc-bridge's direct
+// in-place import (pc-bridge/widgetVarRegistry.js), because shared/core/ and
+// shared/widgets/ are siblings, matching every consuming context.
+import { WRITE_EVENT_BINDING_FIELDS } from '../widgets/PropertyRegistry.js';
 
 const PREFIXED_RE = /^(A|L|H|K):/i;
 
@@ -79,15 +103,16 @@ function walkBindingSites(components, visit, path = []) {
     const binding = comp.binding;
     if (binding) {
       if (binding.readSimVar) at({ kind: 'read', source: 'binding', field: 'readSimVar', name: binding.readSimVar });
-      if (binding.writeEvent) at({ kind: 'write', source: 'binding', field: 'writeEvent', name: binding.writeEvent });
-      if (binding.pushEvent) at({ kind: 'write', source: 'binding', field: 'pushEvent', name: binding.pushEvent });
-      if (binding.ackEvent) at({ kind: 'write', source: 'binding', field: 'ackEvent', name: binding.ackEvent });
-      // core.rotary Pulse write mode (ticket 05): a Pulse-only Ring has no
-      // writeEvent at all — its writes live entirely in incrementEvent/
-      // decrementEvent — so both need their own site here or a Pulse-only
-      // Rotary is invisible to every view over this traversal.
-      if (binding.incrementEvent) at({ kind: 'write', source: 'binding', field: 'incrementEvent', name: binding.incrementEvent });
-      if (binding.decrementEvent) at({ kind: 'write', source: 'binding', field: 'decrementEvent', name: binding.decrementEvent });
+      // Ticket 17: every write-event binding field (writeEvent, ackEvent,
+      // pushEvent, incrementEvent/decrementEvent today) gets its own site here,
+      // driven off PropertyRegistry.js's own list instead of one hardcoded `if`
+      // per field — a field missing from this loop is exactly how a Pulse-only
+      // Rotary (incrementEvent/decrementEvent present, writeEvent absent)
+      // registered zero placeholder profile mappings on install before ticket 05's
+      // fix-pass, and why this loop exists instead of another hand-written line.
+      WRITE_EVENT_BINDING_FIELDS.forEach((field) => {
+        if (binding[field]) at({ kind: 'write', source: 'binding', field, name: binding[field] });
+      });
     }
 
     // core.rocker: each zone carries its own writeEvent instead of binding.writeEvent
