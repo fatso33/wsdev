@@ -509,11 +509,20 @@ export class RotaryComponent extends BaseComponent {
     // RotaryDispatchFailure.test.js's "does NOT revert when an early write failed but
     // a later one succeeded", which specifically depends on two separate moves
     // producing two separate, independently-outcomed writes. "At most one value per
-    // animation frame" is instead enforced by the engine itself
-    // (applyAbsoluteFrameCap, keyed off `now`) — real pointer events are timestamped
-    // far enough apart in practice that this rarely bites in the Component, and the
-    // engine's own test suite is what proves the cap holds when it does (many
-    // gesture events driven at a single identical `now`).
+    // animation frame" is instead enforced by the engine itself (applyAbsoluteFrameCap).
+    //
+    // Ticket 20 corrects what this comment used to claim next — that real pointer
+    // events are "timestamped far enough apart in practice that this rarely bites."
+    // That reasoning was inverted, and shipped a cap that never engaged: the engine
+    // compared raw `now` for exact equality, so timestamps far enough apart meant the
+    // per-frame budget reset on EVERY pointermove and the cap was per-event, not
+    // per-frame (measured live at 635 dispatches/sec against a ~240/sec design
+    // ceiling). The engine now compares a quantized frame id instead (rotaryEngine.js's
+    // frameIdOf), so a burst of moves inside one frame really does share one budget
+    // while each move still advances state and repaints. The engine tests that drive
+    // many events at a single identical `now` prove only the exact-equality path —
+    // rotaryEngine.test.js's "DISTINCT, realistic timestamps" block is what proves the
+    // cap holds for timestamps production actually produces.
     const onPointerMove = (e) => {
       if (this.activePointerId === undefined || e.pointerId !== this.activePointerId) return;
       this.resolve({ type: 'move', ...offsetFromCenter(e) }, null);

@@ -66,6 +66,13 @@
  *                                  // is only a fallback for callers that don't know it yet.
  *     reconciliationTolerance: number, // absolute tolerance for the telemetry-echo match;
  *                                  // defaults to 0.1% of the [min,max] span.
+ *     frameQuantumMs: number,      // ticket 20: the width of one "frame" for the two
+ *                                  // per-frame write limiters, in the same unit as
+ *                                  // `now` (default 1000/60). 0 means exact `now`
+ *                                  // equality — pre-ticket-20 behaviour, which only a
+ *                                  // test driving synthetic timestamps should ask for.
+ *                                  // Not an authored FDWS prop: it exists so the
+ *                                  // engine's abstract-time contract stays testable.
  *     ringId: string,              // echoed back as `activeRing` (default 'default')
  *     tier: string,                // echoed back as `tier` (default 'base' — ticket 06
  *                                  // is what actually varies this)
@@ -177,6 +184,50 @@ export function resolveDispatchTiming(raw, writeMode) {
 // this is what makes "never drops steps" hold while still bounding how many writes
 // (and downstream re-renders elsewhere in the app) happen in one paint.
 const MAX_PULSE_STEPS_PER_FRAME = 4;
+
+// Ticket 20. Both per-frame limiters above used to decide "same frame?" by comparing
+// the raw `now` they were handed for exact equality. One resolveRotary() call happens
+// per real pointermove event, each with its own fresh timestamp, so two calls never
+// produced identical floats: `sameFrame` was always false and the per-frame budget
+// reset on every single pointer event. The cap was therefore per-EVENT, not per-frame —
+// effective ceiling `4 x pointer-event-rate` rather than `4 x 60`, which is how a live
+// fast turn measured 635 dispatches/sec against a design ceiling of ~240.
+//
+// Fixed by deriving a quantized frame id from `now` and comparing THAT. The quantum is
+// a config value rather than a hardcoded constant for two reasons:
+//   - the engine takes `now` as an abstract monotonic unit (see the file header), so
+//     a fixed 16.7ms bucket would silently rewrite what "distinct timestamps" means
+//     for every existing test that drives small integers;
+//   - passing `frameQuantumMs: 0` therefore means "exact equality, as before", which is
+//     how a test states that intent explicitly instead of relying on the default
+//     happening to be finer than its own spacing.
+// Quantized buckets are NOT real browser frames, so two moves straddling a boundary can
+// both write. Accepted deliberately (ticket 20): this is a safety valve against a burst,
+// not a precision instrument — occasionally passing one extra write costs nothing, while
+// dropping a Pulse step would cost correctness.
+const DEFAULT_FRAME_QUANTUM_MS = 1000 / 60;
+
+/** Same fallback-on-garbage convention as resolveDegreesPerUnit. A negative or
+ * non-finite quantum has no meaning, so it falls back to the default rather than to 0 —
+ * exact-equality mode has to be asked for deliberately, never arrived at by accident. */
+function resolveFrameQuantumMs(raw) {
+  const n = Number(raw ?? DEFAULT_FRAME_QUANTUM_MS);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_FRAME_QUANTUM_MS;
+  return n;
+}
+
+/**
+ * The frame-identity bucket `now` falls in — the ONLY thing the two per-frame limiters
+ * compare. Deliberately not used anywhere else: `now` is also the elapsed-time clock
+ * applyReconciliation/applyDetentedReconciliation measure their timeout against
+ * (`now - state.reconcileStartedAt >= timeoutMs`), and feeding a bucket index to that
+ * math would turn a 250ms wait into a difference of ~15 and the window would never
+ * close. Frame identity is quantized; the clock never is.
+ */
+function frameIdOf(now, quantumMs) {
+  if (!(quantumMs > 0) || !Number.isFinite(now)) return now;
+  return Math.floor(now / quantumMs);
+}
 
 function normalizePositions(raw) {
   return Array.isArray(raw) ? raw.filter((p) => p && typeof p === 'object') : [];
@@ -777,9 +828,10 @@ function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, deg
  * The per-frame coalescer's Pulse half (ticket 05): drains `state.pulsePendingSteps`
  * into actual 'turn' emits, one emit per whole step (the literal "one increment or
  * decrement per step" the acceptance criteria call for), capped at
- * MAX_PULSE_STEPS_PER_FRAME per distinct `now`. Calls sharing the same `now` (many
- * gesture events landing inside one animation frame) share one cap; a new `now`
- * resets it. A fast flick that queues more steps than the cap allows is never
+ * MAX_PULSE_STEPS_PER_FRAME per distinct frame id. Calls sharing a frame id (many
+ * gesture events landing inside one animation frame — ticket 20: a quantized bucket of
+ * `now`, never raw `now`, see frameIdOf) share one cap; a new frame id resets it. A
+ * fast flick that queues more steps than the cap allows is never
  * dropped: the remainder stays in `pulsePendingSteps` and drains on the NEXT call(s),
  * including calls the Component makes with no gesture at all, purely to keep
  * draining a queue after release (see RotaryComponent's frame scheduling).
@@ -788,13 +840,13 @@ function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, deg
  * 'onRelease' dispatch timing's own gate; steps still queue during the gesture, they
  * just don't drain until it ends.
  */
-function applyPulseFrameCoalescing(state, now, min, max, mode, ring) {
-  const sameFrame = state.frameStamp === now;
+function applyPulseFrameCoalescing(state, frameId, min, max, mode, ring) {
+  const sameFrame = state.frameStamp === frameId;
   const frameEmitCount = sameFrame ? (state.frameEmitCount ?? 0) : 0;
   const pending = state.pulsePendingSteps ?? 0;
 
   if (state.pulseHoldForRelease || pending === 0) {
-    return { state: { ...state, frameStamp: now, frameEmitCount }, emits: [] };
+    return { state: { ...state, frameStamp: frameId, frameEmitCount }, emits: [] };
   }
 
   const capRemaining = Math.max(MAX_PULSE_STEPS_PER_FRAME - frameEmitCount, 0);
@@ -814,7 +866,7 @@ function applyPulseFrameCoalescing(state, now, min, max, mode, ring) {
   const next = {
     ...state,
     pulsePendingSteps: remaining,
-    frameStamp: now,
+    frameStamp: frameId,
     frameEmitCount: frameEmitCount + Math.abs(toEmit)
   };
   return { state: next, emits };
@@ -826,13 +878,15 @@ function applyPulseFrameCoalescing(state, now, min, max, mode, ring) {
  * value, so nothing is lost by only WRITING the latest one per frame — `state.rawValue`
  * itself keeps advancing on every call regardless (the visual angle always tracks the
  * finger exactly); only the emitted/written 'turn' is deduped down to one per distinct
- * `now`. Applied as the very last step before resolveRotary returns, deliberately
+ * frame id (ticket 20: a quantized bucket of `now`, never raw `now` — see frameIdOf;
+ * comparing raw `now` is why this cap never engaged in production at all). Applied as
+ * the very last step before resolveRotary returns, deliberately
  * AFTER Detented post-processing and the Bounded/Continuous haptics derivation have
  * both already consumed the un-capped emits — capping any earlier would make a
  * same-frame repeat move silently stop crossing detents/limits, not just stop writing.
  */
-function applyAbsoluteFrameCap(state, now, emits) {
-  const sameFrame = state.frameStamp === now;
+function applyAbsoluteFrameCap(state, frameId, emits) {
+  const sameFrame = state.frameStamp === frameId;
   let frameEmitCount = sameFrame ? (state.frameEmitCount ?? 0) : 0;
   const filtered = [];
   for (const emit of emits) {
@@ -840,11 +894,11 @@ function applyAbsoluteFrameCap(state, now, emits) {
       filtered.push(emit);
       continue;
     }
-    if (frameEmitCount >= 1) continue; // Suppressed — a later distinct `now` gets the next write.
+    if (frameEmitCount >= 1) continue; // Suppressed — a later frame id gets the next write.
     frameEmitCount += 1;
     filtered.push(emit);
   }
-  return { state: { ...state, frameStamp: now, frameEmitCount }, emits: filtered };
+  return { state: { ...state, frameStamp: frameId, frameEmitCount }, emits: filtered };
 }
 
 /**
@@ -1142,6 +1196,10 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
   const ring = cfg.ringId ?? DEFAULT_RING_ID;
   const writeMode = resolveWriteMode(cfg.writeMode);
   const dispatchTiming = resolveDispatchTiming(cfg.dispatchTiming, writeMode);
+  // Ticket 20: derived ONCE, here, and handed only to the two per-frame limiters.
+  // Everything else below — reconciliation's elapsed-time math, the `reconcileStartedAt`
+  // stamp it measures against — keeps the raw `now`, deliberately (see frameIdOf).
+  const frameId = frameIdOf(now, resolveFrameQuantumMs(cfg.frameQuantumMs));
 
   let state = cfg.previousState || createRotaryState(cfg, telemetry);
 
@@ -1182,7 +1240,7 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
   //     queue after release still flushes whatever is left — see
   //     applyPulseFrameCoalescing's own comment.
   if (writeMode === 'pulse') {
-    const coalesced = applyPulseFrameCoalescing(state, now, min, max, mode, ring);
+    const coalesced = applyPulseFrameCoalescing(state, frameId, min, max, mode, ring);
     state = coalesced.state;
     emits = emits.concat(coalesced.emits);
   }
@@ -1247,7 +1305,7 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
   //     after — Pulse never reaches this branch.
   if (writeMode === 'absolute') {
     const timed = applyDispatchTiming(state, dispatchTiming, emits, gestureEvent, value, mode === 'detented');
-    const capped = applyAbsoluteFrameCap(timed.state, now, timed.emits);
+    const capped = applyAbsoluteFrameCap(timed.state, frameId, timed.emits);
     state = capped.state;
     emits = capped.emits;
   }
