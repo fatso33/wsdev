@@ -706,6 +706,13 @@ function processTapGesture(state, cfg, gestureEvent, min, max, mode, ring, degPe
  * number, not a stale tally this Ring kept for itself. With no readable value at all,
  * there is nothing trustworthy to compare against, so every step is queued regardless
  * and the sim is left to clamp on its own end. Continuous never has a bound to check.
+ *
+ * Ticket 19: since resolveRotary now lets telemetry keep updating `state.rawValue`
+ * while a Pulse Ring is engaged (not just while idle), this check is re-run every
+ * call against whatever the sim reported most recently — never the value frozen at
+ * grab time — with no change needed here. This function has always read the live
+ * `state.rawValue`; it was resolveRotary withholding telemetry from it while engaged
+ * that made it stale, and that is what ticket 19 fixes upstream of this function.
  */
 function queuePulseSteps(state, cfg, steps, min, max, mode) {
   let allowedSteps = steps;
@@ -1248,8 +1255,19 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
   // 3. While idle (never engaged, or released-and-reconciled), telemetry is
   //    authoritative. While engaged or reconciling, it is not (checklist
   //    item: "While a Rotary is engaged, inbound telemetry does not override
-  //    its value; once released and reconciled, it does.").
-  if (state.phase === 'idle' && telemetry && !telemetry.dispatchFailed) {
+  //    its value; once released and reconciled, it does.") -- that rule is about
+  //    Absolute mode specifically: an engaged Absolute Ring OWNS a value, so
+  //    telemetry overwriting it mid-drag would be the sim fighting the user's
+  //    finger. Ticket 19: Pulse owns no value at all (processPulseGesture never
+  //    writes rawValue -- see its own header comment), so there is nothing for
+  //    telemetry to fight while a Pulse Ring is engaged either; it is the ONLY
+  //    source of truth for what to display, exactly as it already is while idle.
+  //    Widened below rather than replacing the 'idle' check, so Absolute's
+  //    engaged freeze is completely untouched. No readable value bound means
+  //    there is nothing trustworthy to show, so a blind Pulse Ring stays blind.
+  const telemetryFollowsWhileEngaged =
+    state.phase === 'engaged' && writeMode === 'pulse' && !!cfg.hasReadableValue;
+  if ((state.phase === 'idle' || telemetryFollowsWhileEngaged) && telemetry && !telemetry.dispatchFailed) {
     if (mode === 'detented') {
       // See createRotaryState's own comment: matched by coerced identity, so any
       // defined value is eligible, not only a number.
