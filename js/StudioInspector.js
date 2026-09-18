@@ -2193,6 +2193,36 @@ export class StudioInspector {
       const stateIsCustom = !!binding.stateVar && !stateVars.some((s) => s.name === binding.stateVar);
       const isFastPoll = Number(binding.pollFrequencyHz) > 2;
 
+      // Ticket 18: PropertyRegistry.js already declares binding.incrementEvent/
+      // decrementEvent (appliesTo core.rotary, showWhen props.writeMode==='pulse')
+      // but this panel is hand-built and never calls getFieldsForType() for
+      // Bindings rows (see this file's renderRegistryFields doc comment) — so
+      // the registry entry alone doesn't make it authorable. Two more
+      // hand-built fields, same shape as Write Deck Event just above, gated
+      // on Pulse mode instead of always shown. Re-evaluated fresh on every
+      // render (this IIFE reruns on COMPONENT_UPDATED — see the subscribe()
+      // in the constructor), so flipping Write Mode elsewhere in this same
+      // panel shows/hides these without needing a reselect, and — since
+      // nothing here ever clears binding.incrementEvent/decrementEvent —
+      // toggling back to Absolute only hides them, it never discards a
+      // value already set.
+      // NOTE: the two field wraps below gate on isPulseRotary via an inline
+      // `style="display:none"`, NOT the shared `.hidden` class the rest of
+      // this panel uses — applyUiMode() (called after every render) does a
+      // blanket `classList.toggle('hidden', ...)` over every `[data-tier]`
+      // element based on tier alone, which would silently stomp a `.hidden`
+      // set here for Pulse-gating instead (found live: the field rendered
+      // visible regardless of Write Mode once in Full tier, since Full
+      // always clears `.hidden` off `data-tier="advanced"` elements).
+      // Inline style is untouched by that pass, so it composes correctly:
+      // hidden if EITHER the tier system's `.hidden` OR this inline
+      // display:none applies. The two custom-event blocks just below don't
+      // carry `data-tier` at all, so the ordinary `.hidden`-class toggle
+      // (matching every other custom block in this panel) is safe for them.
+      const isPulseRotary = comp.type === 'core.rotary' && comp.props?.writeMode === 'pulse';
+      const incrementIsCustom = !!binding.incrementEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.incrementEvent);
+      const decrementIsCustom = !!binding.decrementEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.decrementEvent);
+
       body.innerHTML = `
         <div class="prop-field" data-tier="simple-only">
           <label>Connect to Simulator — Value to Show <span class="prop-hint" title="Pick a category, then the specific value this component should read. Fills in the same field Advanced mode's Read Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.">ⓘ</span></label>
@@ -2288,6 +2318,41 @@ export class StudioInspector {
           <div class="prop-sanitize-diff hidden" id="c-bind-write-custom-diff"></div>
         </div>
 
+        ${comp.type === 'core.rotary' ? `
+        <div class="prop-field" data-tier="advanced" id="c-bind-increment-field" style="${isPulseRotary ? '' : 'display:none;'}">
+          <label>Increment Deck Event (Pulse Clockwise) <span class="prop-hint" title="FDWS v1.30: dispatched once per step turned clockwise, when Write Mode (Range panel) is set to Pulse. Only used in Pulse mode — Absolute mode uses Write Deck Event above instead.">ⓘ</span></label>
+          <div class="prop-row-2">
+            <select id="c-bind-increment" class="prop-select">${buildDefaultOptions('write', binding.incrementEvent)}</select>
+            <button type="button" class="btn-small" id="c-bind-increment-connect" style="flex:0 0 auto;">Connect…</button>
+          </div>
+        </div>
+        <div class="prop-field prop-custom-block ${(isPulseRotary && incrementIsCustom) ? '' : 'hidden'}" id="c-bind-increment-custom-block">
+          <label>Custom Deck Event (used by another saved widget)</label>
+          <select id="c-bind-increment-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.incrementEvent)}</select>
+          <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
+          <div class="prop-paste-row">
+            <input type="text" id="c-bind-increment-custom-input" class="prop-input" value="${incrementIsCustom ? (binding.incrementEvent || '') : ''}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+          </div>
+          <div class="prop-sanitize-diff hidden" id="c-bind-increment-custom-diff"></div>
+        </div>
+
+        <div class="prop-field" data-tier="advanced" id="c-bind-decrement-field" style="${isPulseRotary ? '' : 'display:none;'}">
+          <label>Decrement Deck Event (Pulse Counter-Clockwise) <span class="prop-hint" title="FDWS v1.30: dispatched once per step turned counter-clockwise, when Write Mode (Range panel) is set to Pulse. Only used in Pulse mode — Absolute mode uses Write Deck Event above instead.">ⓘ</span></label>
+          <div class="prop-row-2">
+            <select id="c-bind-decrement" class="prop-select">${buildDefaultOptions('write', binding.decrementEvent)}</select>
+            <button type="button" class="btn-small" id="c-bind-decrement-connect" style="flex:0 0 auto;">Connect…</button>
+          </div>
+        </div>
+        <div class="prop-field prop-custom-block ${(isPulseRotary && decrementIsCustom) ? '' : 'hidden'}" id="c-bind-decrement-custom-block">
+          <label>Custom Deck Event (used by another saved widget)</label>
+          <select id="c-bind-decrement-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.decrementEvent)}</select>
+          <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
+          <div class="prop-paste-row">
+            <input type="text" id="c-bind-decrement-custom-input" class="prop-input" value="${decrementIsCustom ? (binding.decrementEvent || '') : ''}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+          </div>
+          <div class="prop-sanitize-diff hidden" id="c-bind-decrement-custom-diff"></div>
+        </div>
+        ` : ''}
 
         <div class="prop-field prop-custom-block ${stateIsCustom ? '' : 'hidden'}" id="c-bind-state-custom-block">
           <label>Custom / $context reference <span class="prop-hint" title="FDWS v1.3: for a popover widget, bind to data the host passed in via $context.&lt;key&gt;.value — the key must match one declared in the host's Open Widget Popover Context Map. Also used for any other raw stateVar string not in this widget's own state[] list.">ⓘ</span></label>
@@ -2411,11 +2476,20 @@ export class StudioInspector {
       wireBindingKind('write', 'writeEvent');
       wireBindingKind('ack', 'ackEvent');
       wireBindingKind('push', 'pushEvent');
+      if (comp.type === 'core.rotary') {
+        wireBindingKind('increment', 'incrementEvent');
+        wireBindingKind('decrement', 'decrementEvent');
+      }
 
       // Part 5a, Slice 1: additive — the dropdown/custom-input fields above
       // stay the direct-edit escape hatch; Connect is the new recommended path.
       body.querySelector('#c-bind-read-connect')?.addEventListener('click', () => this.openConnectDialog(comp, def, 'read'));
       body.querySelector('#c-bind-write-connect')?.addEventListener('click', () => this.openConnectDialog(comp, def, 'write'));
+      // Ticket 18: both use kind 'write' (increment/decrement events are
+      // write-kind Deck Events same as Write Deck Event above) but target a
+      // different binding field — see openConnectDialog()'s bindingField param.
+      body.querySelector('#c-bind-increment-connect')?.addEventListener('click', () => this.openConnectDialog(comp, def, 'write', 'incrementEvent'));
+      body.querySelector('#c-bind-decrement-connect')?.addEventListener('click', () => this.openConnectDialog(comp, def, 'write', 'decrementEvent'));
 
       // Wires one Connect-to-Simulator category+variable pair (kind: 'read'
       // or 'write') straight onto the same bindingField the Advanced dropdown
@@ -5045,9 +5119,19 @@ export class StudioInspector {
    * this component's own value" (syncFrom, V14) are deliberately not part
    * of this slice — see the plan file's Context section.
    */
-  async openConnectDialog(comp, def, kind) {
+  // Ticket 18: `bindingField` defaults to the read/write pair every existing
+  // caller relies on, but core.rotary's Increment/Decrement Deck Event
+  // fields are also 'write'-kind Deck Events (for catalogue/pairing
+  // purposes) that need to land on binding.incrementEvent/decrementEvent
+  // instead of binding.writeEvent — so it's an explicit override rather
+  // than re-deriving a third case from `kind`. Everything below the initial
+  // `current`/`updates` already reads `bindingField` as a variable except
+  // the self-dispatching pairing branch a few dozen lines down, which is
+  // safe unmodified: core.rotary is in SELF_DISPATCHING_WRITE_EVENT_TYPES,
+  // so proposeWireUp(comp) always returns null for it regardless of which
+  // binding field is actually being set, and that branch is a no-op.
+  async openConnectDialog(comp, def, kind, bindingField = (kind === 'write' ? 'writeEvent' : 'readSimVar')) {
     const isWrite = kind === 'write';
-    const bindingField = isWrite ? 'writeEvent' : 'readSimVar';
     const sanitizeKind = isWrite ? 'event' : 'simvar';
     const current = comp.binding?.[bindingField] || '';
 
