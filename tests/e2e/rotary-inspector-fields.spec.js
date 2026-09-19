@@ -10,10 +10,15 @@ import { resolveFeelFloor } from '../../widgets/components/rotaryEngine.js';
  * (CLAUDE.md's Inspector-visibility gotcha).
  */
 
-const SIMPLE = ['props.gesture', 'props.min', 'props.max', 'props.degreesPerUnit'];
+const SIMPLE = [
+  'props.gesture', 'props.min', 'props.max', 'props.degreesPerUnit',
+  'props.fillStyle', 'props.faceColor', 'props.knurlStyle', 'props.indicatorShape', 'props.indicatorColor',
+  'props.capDiameter', 'props.scaleMajorDivisions', 'props.dropShadow'
+];
 const ADVANCED = [
-  'props.sweepDegrees', 'props.startAngle', 'props.faceColor',
-  'props.rimColor', 'props.rimWidth', 'props.indicatorColor', 'props.indicatorWidth'
+  'props.sweepDegrees', 'props.startAngle',
+  'props.rimColor', 'props.rimWidth', 'props.innerShadow',
+  'props.indicatorWidth', 'props.indicatorLength', 'props.indicatorGlow'
 ];
 const DEAD = ['props.circular', 'props.coarseStep', 'props.fineStep', 'props.pushLabel'];
 

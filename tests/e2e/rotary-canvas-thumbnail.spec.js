@@ -61,3 +61,37 @@ test('a template Rotary carrying only the deleted props still draws, degrading t
   await expect(thumb(page).locator('[data-face-group="rim"]')).toHaveCount(1);
   await expect(thumb(page).locator('[data-face-group="indicator"]')).toHaveCount(1);
 });
+
+test('the thumbnail draws every appearance group the Author has configured, in the same order as the live Face', async ({ page }) => {
+  await page.goto('/');
+  await seedRotary(page, {
+    fillStyle: 'conic', faceColor: '#e2e8f0', innerShadow: 4,
+    knurlStyle: 'teeth', indicatorShape: 'triangle', indicatorGlow: 3,
+    capDiameter: 24, capContent: 'label', capLabel: 'HDG',
+    scaleMajorDivisions: 4, scaleLabels: true, dropShadow: 4
+  });
+
+  const groups = await thumb(page).locator('[data-face-group]').evaluateAll((els) => els.map((el) => el.dataset.faceGroup));
+  expect(groups).toEqual(['depth', 'fill', 'inset', 'rim', 'knurling', 'scale', 'indicator', 'cap']);
+  await expect(thumb(page).locator('[data-face-group="cap"] text')).toHaveText('HDG');
+  await expect(thumb(page).locator('[data-face-group="scale"] text')).toHaveCount(5);
+});
+
+test('the thumbnail follows the preview theme', async ({ page }) => {
+  await page.goto('/');
+  await seedRotary(page, { rimColor: '#1e293b', indicatorColor: '#e2e8f0', faceColor: '#0f172a' });
+  const strokes = () => thumb(page).evaluate((el) => ({
+    rim: el.querySelector('[data-face-group="rim"]').getAttribute('stroke'),
+    pointer: el.querySelector('[data-face-group="indicator"]').getAttribute('stroke'),
+    fill: el.querySelector('[data-face-group="fill"]').getAttribute('fill')
+  }));
+
+  const dark = await strokes();
+  expect(dark).toEqual({ rim: '#1e293b', pointer: '#e2e8f0', fill: '#0f172a' });
+
+  await page.evaluate(() => window.__studioApp.state.setPreviewTheme('light'));
+  const light = await strokes();
+  expect(light.rim).not.toBe(dark.rim);
+  expect(light.pointer).not.toBe(dark.pointer);
+  expect(light.fill).not.toBe(dark.fill);
+});

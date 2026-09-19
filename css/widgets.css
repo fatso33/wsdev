@@ -868,6 +868,10 @@
      inline by RotaryComponent.js so the gesture survives a missing stylesheet. */
   touch-action: none;
   cursor: grab;
+  /* The Face can carry text (a Cap label, scale labels); dragging the knob on a desktop
+     pointer must not start selecting it. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 @supports (width: 1cqmin) {

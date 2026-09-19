@@ -9,6 +9,7 @@ import { resolveThemedColor, resolveThemedColors, resolveThemedBackground } from
 // FDWS v1.30: the Rotary's knob face is a pure config→markup function, so the canvas
 // thumbnail draws the real thing instead of a hand-approximated copy of it.
 import { buildRotaryFace } from '../widgets/components/rotaryFace.js';
+import { resolveRotaryFaceConfig } from '../widgets/components/rotaryFaceConfig.js';
 
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 // Matches studio.css's .fd-widget-preview-scope block — the canvas's own
@@ -862,14 +863,19 @@ export class StudioCanvas {
         face.style.display = 'flex';
         face.style.alignItems = 'center';
         face.style.justifyContent = 'center';
-        face.innerHTML = buildRotaryFace({
-          angle: props.startAngle ?? -135,
-          faceColor: props.faceColor,
-          rimColor: props.rimColor,
-          rimWidth: props.rimWidth,
-          indicatorColor: props.indicatorColor,
-          indicatorWidth: props.indicatorWidth
-        });
+        face.innerHTML = buildRotaryFace(resolveRotaryFaceConfig(props, {
+          valueAngle: 0,
+          startAngle: props.startAngle ?? -135,
+          sweepDegrees: props.sweepDegrees ?? 270,
+          min: props.min ?? 0,
+          max: props.max ?? 100,
+          rangeMode: props.rangeMode,
+          theme,
+          baseTheme,
+          themeMode,
+          componentType: type,
+          layerGroup: comp.layer?.group
+        }));
         const svg = face.querySelector('svg');
         if (svg) {
           svg.style.width = '100%';

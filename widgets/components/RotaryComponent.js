@@ -40,6 +40,7 @@
 import { BaseComponent } from './BaseComponent.js';
 import { resolveRotary, createRotaryState, resolveGesture, resolveRangeMode, resolveWriteMode, resolveDispatchTiming } from './rotaryEngine.js';
 import { buildRotaryFace } from './rotaryFace.js';
+import { resolveRotaryFaceConfig } from './rotaryFaceConfig.js';
 import { SecurityValidator } from '../../core/SecurityValidator.js';
 
 // Fallback only. The real number comes from the host (`getPollPeriodMs()`), which is
@@ -91,6 +92,14 @@ export function deriveWriteTriggers(triggers) {
 }
 
 export const WRITE_TRIGGERS = deriveWriteTriggers(ROTARY_TRIGGERS);
+
+// The inline styles BaseComponent.applyStyles() may write for a state, on the Face wrapper
+// (the registered surface) and on the Component's own element.
+const STATE_SURFACE_PROPERTIES = [
+  'borderWidth', 'borderStyle', 'borderColor', 'borderRadius', 'boxShadow',
+  'background', 'backgroundImage', 'backgroundSize', 'backgroundPosition', 'backgroundRepeat'
+];
+const STATE_ELEMENT_PROPERTIES = ['fontFamily', 'fontSize', 'fontWeight', 'color', 'textShadow', 'webkitTextStroke'];
 
 export class RotaryComponent extends BaseComponent {
   render() {
@@ -228,7 +237,7 @@ export class RotaryComponent extends BaseComponent {
     const result = resolveRotary(cfg, gestureEvent, telemetry, nowOverride ?? this.now());
     this.rotaryState = result.state;
     this.currentValue = result.value;
-    this.renderFace(result.angle);
+    this.renderFace(result.angle, cfg);
     this.renderPositions(cfg, result.activePosition);
 
     result.emits.forEach((emit) => {
@@ -392,18 +401,49 @@ export class RotaryComponent extends BaseComponent {
     this.pulseDrainRaf = requestAnimationFrame(step);
   }
 
-  /** Repaints the Face, skipping the write when the markup is unchanged. */
-  renderFace(angle) {
+  /**
+   * Switches the turning-state style, clearing what the previous state wrote first.
+   * BaseComponent.applyStyles() writes only the border, background and typography
+   * properties the merged style defines, so a property that only the Dragging state
+   * defines would otherwise stay on the knob after release.
+   * @param {string|undefined} stateName
+   */
+  setState(stateName) {
+    if (this.activeStateName === stateName) return;
+    STATE_SURFACE_PROPERTIES.forEach((property) => { if (this.faceNode) this.faceNode.style[property] = ''; });
+    STATE_ELEMENT_PROPERTIES.forEach((property) => { if (this.element) this.element.style[property] = ''; });
+    super.setState(stateName);
+  }
+
+  /**
+   * Repaints the Face, skipping the write when the markup is unchanged.
+   *
+   * The theme is read here, on every repaint, rather than cached: the PWA re-renders
+   * every widget when the theme is toggled, and Widget Studio's preview host answers
+   * per call, so a repaint always draws the theme that is showing now.
+   * @param {number} angle - degrees the knob has turned from its start angle
+   * @param {object} [cfg] - this frame's rotaryConfig()
+   */
+  renderFace(angle, cfg = this.rotaryConfig()) {
     if (!this.faceNode) return;
     const props = this.def.props || {};
-    const markup = buildRotaryFace({
-      angle: (props.startAngle ?? DEFAULT_START_ANGLE) + angle,
-      faceColor: props.faceColor,
-      rimColor: props.rimColor,
-      rimWidth: props.rimWidth,
-      indicatorColor: props.indicatorColor,
-      indicatorWidth: props.indicatorWidth
-    });
+    const theme = (typeof this.widget?.getPreviewTheme === 'function') ? this.widget.getPreviewTheme() : 'dark';
+    const themeConfig = (typeof this.widget?.getThemeConfig === 'function')
+      ? this.widget.getThemeConfig()
+      : { baseTheme: 'dark', themeMode: 'auto' };
+    const markup = buildRotaryFace(resolveRotaryFaceConfig(props, {
+      valueAngle: angle,
+      startAngle: props.startAngle ?? DEFAULT_START_ANGLE,
+      sweepDegrees: cfg.sweepDegrees,
+      min: cfg.min,
+      max: cfg.max,
+      rangeMode: cfg.rangeMode,
+      theme,
+      baseTheme: themeConfig.baseTheme,
+      themeMode: themeConfig.themeMode,
+      componentType: this.def.type,
+      layerGroup: this.def.layer?.group
+    }));
     if (markup === this.lastFaceMarkup) return;
     this.lastFaceMarkup = markup;
     this.faceNode.innerHTML = markup;

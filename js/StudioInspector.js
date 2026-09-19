@@ -3475,9 +3475,7 @@ export class StudioInspector {
       }
 
       case 'core.rotary': {
-        const fieldMount = document.createElement('div');
-        body.appendChild(fieldMount);
-        this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.rotary']);
+        this.renderRegistryFieldGroups(comp, body, REGISTRY_TYPE_FIELDS['core.rotary']);
         break;
       }
 
@@ -4365,6 +4363,37 @@ export class StudioInspector {
     mount.querySelector('#c-bg-image-asset')?.addEventListener('change', (e) => updateBgImage({ assetId: e.target.value }));
     mount.querySelector('#c-bg-image-fit')?.addEventListener('change', (e) => updateBgImage({ fit: e.target.value }));
     mount.querySelector('#c-bg-image-position')?.addEventListener('change', (e) => updateBgImage({ position: e.target.value || undefined }));
+  }
+
+  /**
+   * Renders a type's registry fields under one heading per `group`, in the order the
+   * groups first appear. For a type whose fields are numerous enough to need sections
+   * (core.rotary's Range and six appearance groups); a heading whose fields are all
+   * hidden at the current tier is hidden with them by applySubtitleVisibility().
+   *
+   * Each group renders on its own, so a field's showWhen may only name a sibling in the
+   * same group: that is where its default is looked up when the referenced value is unset.
+   * @param {object} comp
+   * @param {HTMLElement} body
+   * @param {Array<object>} fields - registry rows, each carrying `group`
+   */
+  renderRegistryFieldGroups(comp, body, fields) {
+    const groups = [];
+    fields.forEach((field) => {
+      let group = groups.find((g) => g.name === field.group);
+      if (!group) groups.push(group = { name: field.group, fields: [] });
+      group.fields.push(field);
+    });
+    groups.forEach((group, index) => {
+      const subtitle = document.createElement('div');
+      subtitle.className = 'prop-section-subtitle';
+      if (index > 0) subtitle.style.marginTop = '10px';
+      subtitle.textContent = group.name;
+      body.appendChild(subtitle);
+      const mount = document.createElement('div');
+      body.appendChild(mount);
+      this.renderRegistryFields(comp, mount, group.fields);
+    });
   }
 
   /**
