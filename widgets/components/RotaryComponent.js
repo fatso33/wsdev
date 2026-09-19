@@ -376,10 +376,10 @@ export class RotaryComponent extends BaseComponent {
 
   /**
    * Ticket 05: keeps re-resolving on successive animation frames, with no new
-   * gesture/telemetry, purely to drain whatever `state.pulsePendingSteps` a fast
-   * flick queued beyond one frame's cap (rotaryEngine.js's
-   * applyPulseFrameCoalescing) — so a turn that outran the cap still finishes
-   * delivering every step even after the finger has already lifted.
+   * gesture/telemetry, purely to drain whatever a fast flick queued in
+   * `state.pulsePendingSteps` or `state.pulsePendingCoarseSteps` beyond one frame's cap
+   * (rotaryEngine.js's applyPulseFrameCoalescing) — so a turn that outran the cap still
+   * finishes delivering every step even after the finger has already lifted.
    */
   schedulePulseDrain() {
     if (this.pulseDrainRaf != null) return;

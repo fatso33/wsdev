@@ -85,9 +85,10 @@
  *                                  // A non-positive or non-numeric enter rate is not usable and
  *                                  // is replaced by the default.
  *     accelerationExitRate: number,  // steps per second strictly below which it returns to the
- *                                  // fine tier. Must be under the enter rate; unset, or not
- *                                  // under it, half the enter rate is used, so the gap between
- *                                  // the two is never lost.
+ *                                  // fine tier. Must be above 0 and under the enter rate: unset,
+ *                                  // zero, negative, non-numeric, or not under the enter rate,
+ *                                  // all run half the enter rate, so the gap between the two
+ *                                  // is never lost.
  *     accelerationCoarseStep: number, // how many fine steps one step of travel becomes in the
  *                                  // coarse tier (default 10; below 1 means 1, which makes the
  *                                  // coarse tier move like the fine one). Enforced through the
@@ -200,7 +201,8 @@ export function resolveDispatchTiming(raw, writeMode) {
 // discrete Pulse steps a single resolveRotary() call will hand back as real 'turn'
 // emits when several calls share the same `now` (i.e. land inside one animation
 // frame, per RotaryComponent's frame scheduling). A fast flick can cross far more
-// steps than this in one frame; the excess is queued in `state.pulsePendingSteps`
+// steps than this in one frame; the excess is queued in `state.pulsePendingSteps` (fine
+// steps) or `state.pulsePendingCoarseSteps` (steps taken in Acceleration's coarse tier)
 // and drained on later calls (see applyPulseFrameCoalescing) rather than discarded —
 // this is what makes "never drops steps" hold while still bounding how many writes
 // (and downstream re-renders elsewhere in the app) happen in one paint.
@@ -423,9 +425,9 @@ const DEFAULT_ACCELERATION_COARSE_STEP = 10;
 
 // Rate of turn is judged once per this much elapsed time, from the travel accumulated over
 // all the moves in it, not per pointer event. Two events a millisecond apart carry no
-// speed information of their own, and judging each alone would let ordinary timing jitter
-// carry a steady turn across a threshold. Each window stands alone (memoryless), so the
-// tier follows the turn to within one window.
+// rate information of their own, and judging each alone would let ordinary timing jitter
+// carry a steady turn from one tier to the other. Each window stands alone (memoryless),
+// so the tier follows the turn to within one window.
 const ACCELERATION_SAMPLE_MS = 40;
 
 // A coarse step under 1 would be finer than the fine step, which is no coarse step at all:
@@ -915,9 +917,12 @@ function processTapGesture(state, cfg, gestureEvent, min, max, mode, ring, degPe
 
 /**
  * Queues `steps` (a signed whole-step count — one whole step is one Pulse write) onto
- * `state.pulsePendingSteps`, for the per-frame coalescer (applyPulseFrameCoalescing,
- * run once per resolveRotary call) to drain into real 'turn' emits — capped per
- * frame, never dropped; see that function's own comment for why.
+ * `state.pulsePendingCoarseSteps` when `coarse` is true (the steps were taken in
+ * Acceleration's coarse tier) and onto `state.pulsePendingSteps` otherwise, for the
+ * per-frame coalescer (applyPulseFrameCoalescing, run once per resolveRotary call) to
+ * drain into real 'turn' emits — capped per frame, never dropped by the cap; see that
+ * function's own comment for why. The two queues are kept apart because only the
+ * coarse one is re-checked against a bound after it is queued.
  *
  * Bounded-range advisory clamp (ticket 05 acceptance): a Bounded Ring in Pulse mode
  * stops QUEUEING further steps toward a limit only when `cfg.hasReadableValue` is
@@ -1056,14 +1061,15 @@ function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, deg
 }
 
 /**
- * The per-frame coalescer's Pulse half (ticket 05): drains `state.pulsePendingSteps`
- * into actual 'turn' emits, one emit per whole step (the literal "one increment or
+ * The per-frame coalescer's Pulse half: drains the two Pulse queues,
+ * `state.pulsePendingCoarseSteps` then `state.pulsePendingSteps`, into actual 'turn'
+ * emits, one emit per whole step (the literal "one increment or
  * decrement per step" the acceptance criteria call for), capped at
  * MAX_PULSE_STEPS_PER_FRAME per distinct frame id. Calls sharing a frame id (many
  * gesture events landing inside one animation frame — ticket 20: a quantized bucket of
  * `now`, never raw `now`, see frameIdOf) share one cap; a new frame id resets it. A
  * fast flick that queues more steps than the cap allows is never
- * dropped: the remainder stays in `pulsePendingSteps` and drains on the NEXT call(s),
+ * dropped by the cap: the remainder stays in its queue and drains on the NEXT call(s),
  * including calls the Component makes with no gesture at all, purely to keep
  * draining a queue after release (see RotaryComponent's frame scheduling).
  *
@@ -1079,6 +1085,12 @@ function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, deg
  * toward a bound the sim already reports as reached are dropped, since one coarse fling
  * can queue far more than the distance left. The fine queue is never re-checked; it is
  * only bounded when its steps are queued (see queuePulseSteps).
+ *
+ * The check reads `state.rawValue` as the previous call left it, because resolveRotary
+ * applies a call's telemetry after this runs. So up to one frame's cap of coarse steps
+ * can still go out on the call that carries the bound reading, and the rest are dropped
+ * on the next call. The fine queue's bound check, made when its steps are queued, lags
+ * the sim's reading in the same way.
  *
  * @param {{coarseIsFast: boolean, checkBounds: boolean}} pulse - whether coarse steps are
  *   fast step events, and whether the sim reports a value to check a bound against.
@@ -1486,7 +1498,7 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
     state = gestureResult.state;
     emits = emits.concat(gestureResult.emits);
     // Every grab starts in the fine tier with a fresh rate sample, and a release
-    // returns to it, so no speed is ever carried from one gesture into the next.
+    // returns to it, so no rate of turn is ever carried from one gesture into the next.
     if (gestureEvent.type === 'start') state = { ...state, ...createAccelerationState(now) };
     else if (gestureEvent.type === 'end') state = { ...state, ...createAccelerationState() };
     if (state.phase === 'reconciling' && state.reconcileStartedAt == null) {
@@ -1501,11 +1513,14 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
     state = accelerateTravel(state, resolveAcceleration(cfg, gesture, writeMode, mode, fineFeel, now), 0).state;
   }
 
-  // 2b. Pulse's per-frame coalescer (ticket 05): drains state.pulsePendingSteps into
-  //     real 'turn' emits, capped per distinct `now`. Run unconditionally (even with
-  //     no gestureEvent) so a call the Component makes purely to keep draining a
+  // 2b. Pulse's per-frame coalescer: drains the coarse and fine Pulse queues
+  //     into real 'turn' emits, capped per distinct frame id. Run unconditionally (even
+  //     with no gestureEvent) so a call the Component makes purely to keep draining a
   //     queue after release still flushes whatever is left — see
-  //     applyPulseFrameCoalescing's own comment.
+  //     applyPulseFrameCoalescing's own comment. It runs before this call's telemetry is
+  //     applied (step 3), so the coarse queue's bound check sees the previous call's
+  //     value; telemetry stays after it because moving it ahead would change when the
+  //     fine queue drains.
   if (writeMode === 'pulse') {
     const coalesced = applyPulseFrameCoalescing(state, frameId, min, max, mode, ring, {
       coarseIsFast: cfg.acceleration === true && cfg.accelerationFastEvents === true,
