@@ -11,6 +11,7 @@ import {
   resolveRotaryCreationDefaults,
   resolveFeelReconciliation,
   applyRotaryContextChange,
+  applyRotaryFeelEntry,
   describePulseFeel
 } from '../js/RotaryDefaults.js';
 import { resolveFeelFloor, resolveFeelDefault } from '../widgets/components/rotaryEngine.js';
@@ -262,6 +263,97 @@ describe('a multi-selection goes through the same Feel rule', () => {
   it('reports what it changed so the caller can tell the Author', () => {
     const notes = seed().applyFieldToSelection('props.writeMode', 'pulse');
     expect(notes.map((n) => n.componentId).sort()).toEqual(['a', 'b']);
+  });
+});
+
+describe('a Feel typed into the Feel field', () => {
+  const arcFloor = resolveFeelFloor('arc', 'pulse');
+  const scrubFloor = resolveFeelFloor('scrub', 'pulse');
+  const absoluteFloor = resolveFeelFloor('arc', 'absolute');
+
+  it('is raised to the floor when it is finer, and the Author is told why', () => {
+    const { props, message } = applyRotaryFeelEntry({ writeMode: 'pulse' }, 2);
+    expect(props.degreesPerUnit).toBe(arcFloor);
+    expect(message).toContain('Feel 2');
+    expect(message).toContain('Pulse Arc');
+    expect(message).toContain(`floor of ${arcFloor}`);
+    expect(message).toContain(`set to ${arcFloor}`);
+  });
+
+  it('keeps its sign when it is raised', () => {
+    expect(applyRotaryFeelEntry({ writeMode: 'pulse' }, -2).props.degreesPerUnit).toBe(-arcFloor);
+  });
+
+  it('is judged against the stored Gesture: Scrub has its own floor', () => {
+    expect(applyRotaryFeelEntry({ writeMode: 'pulse', gesture: 'scrub' }, 5).props.degreesPerUnit).toBe(scrubFloor);
+  });
+
+  it('is judged against the Absolute floor in Absolute: zero becomes the smallest Feel', () => {
+    const { props, message } = applyRotaryFeelEntry({}, 0);
+    expect(props.degreesPerUnit).toBe(absoluteFloor);
+    expect(message).toContain('Absolute');
+  });
+
+  it('is kept as typed at the floor and above it, with no message', () => {
+    for (const typed of [arcFloor, arcFloor + 1, -arcFloor, 20]) {
+      const result = applyRotaryFeelEntry({ writeMode: 'pulse' }, typed);
+      expect(result.props.degreesPerUnit).toBe(typed);
+      expect(result.message).toBeNull();
+    }
+  });
+
+  it('has no floor to fall below in Pulse Tap or in Absolute, beyond the smallest Feel', () => {
+    expect(applyRotaryFeelEntry({ writeMode: 'pulse', gesture: 'tap' }, 0.5).message).toBeNull();
+    expect(applyRotaryFeelEntry({ gesture: 'scrub' }, 0.5).message).toBeNull();
+    expect(applyRotaryFeelEntry({ writeMode: 'pulse', gesture: 'tap' }, 0.001).props.degreesPerUnit).toBe(absoluteFloor);
+  });
+
+  it('leaves a cleared field unset', () => {
+    const { props, message } = applyRotaryFeelEntry({ writeMode: 'pulse', degreesPerUnit: 12 }, undefined);
+    expect(props.degreesPerUnit).toBeUndefined();
+    expect(message).toBeNull();
+  });
+
+  it('returns fresh props and keeps every other prop', () => {
+    const before = { writeMode: 'pulse', min: 0, max: 360, degreesPerUnit: 12 };
+    const { props } = applyRotaryFeelEntry(before, 2);
+    expect(props).toEqual({ writeMode: 'pulse', min: 0, max: 360, degreesPerUnit: arcFloor });
+    expect(before.degreesPerUnit).toBe(12);
+  });
+});
+
+describe('a multi-selection Feel edit is raised to the floor per Rotary', () => {
+  const seed = () => {
+    const state = new StudioState();
+    state.widgetDef.components = [
+      { id: 'a', type: 'core.rotary', props: { writeMode: 'pulse', degreesPerUnit: 12 }, binding: {} },
+      { id: 'b', type: 'core.rotary', props: { degreesPerUnit: 12 }, binding: {} },
+      { id: 'c', type: 'core.rotary', props: { writeMode: 'pulse', gesture: 'scrub', degreesPerUnit: 12 }, binding: {} },
+      { id: 'd', type: 'core.rotary', props: { writeMode: 'pulse', gesture: 'tap', degreesPerUnit: 12 }, binding: {} }
+    ];
+    state.multiSelectedIds = new Set(['a', 'b', 'c', 'd']);
+    return state;
+  };
+
+  it('raises each Rotary against its own floor and leaves the ones it does not affect', () => {
+    const state = seed();
+    state.applyFieldToSelection('props.degreesPerUnit', 5);
+    expect(state.getComponent('a').props.degreesPerUnit).toBe(resolveFeelFloor('arc', 'pulse'));
+    expect(state.getComponent('b').props.degreesPerUnit).toBe(5);
+    expect(state.getComponent('c').props.degreesPerUnit).toBe(resolveFeelFloor('scrub', 'pulse'));
+    expect(state.getComponent('d').props.degreesPerUnit).toBe(5);
+  });
+
+  it('reports one note per Rotary it raised', () => {
+    const notes = seed().applyFieldToSelection('props.degreesPerUnit', 5);
+    expect(notes.map((n) => n.componentId).sort()).toEqual(['a', 'c']);
+  });
+
+  it('is one undo step', () => {
+    const state = seed();
+    state.applyFieldToSelection('props.degreesPerUnit', 5);
+    state.undo();
+    for (const id of ['a', 'b', 'c', 'd']) expect(state.getComponent(id).props.degreesPerUnit).toBe(12);
   });
 });
 

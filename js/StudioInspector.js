@@ -21,7 +21,7 @@ import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 import { resolveFeelFloor, resolveGesture, MIN_DEGREES_PER_UNIT } from '../widgets/components/rotaryEngine.js';
-import { applyRotaryContextChange, isRotaryFeelContextPath, describePulseFeel } from './RotaryDefaults.js';
+import { applyRotaryContextChange, applyRotaryFeelEntry, isRotaryFeelContextPath, isRotaryFeelPath, describePulseFeel } from './RotaryDefaults.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -3749,6 +3749,18 @@ export class StudioInspector {
   }
 
   /**
+   * Commits a Feel typed into a Rotary's Feel field, held to the floor of that Rotary's own
+   * context, as ONE update so a single Undo reverts it. A finer value is committed as the
+   * floor and the toast says so; the update always lands, so the rebuilt panel shows what
+   * was stored even when that equals the value already there.
+   */
+  commitRotaryFeelEntry(comp, value) {
+    const { props, message } = applyRotaryFeelEntry(comp.props, value);
+    this.state.updateComponent(comp.id, { props });
+    if (message) showToast(message);
+  }
+
+  /**
    * Generic nested-path commit — clones only the objects along `path` (not
    * the whole component), splices in the leaf value, and commits the ONE
    * top-level key via the existing updateComponent(). Mirrors the manual
@@ -3770,11 +3782,19 @@ export class StudioInspector {
     if (comp.__multiSelect) {
       const notes = this.state.applyFieldToSelection(path, value);
       if (notes.length === 1) showToast(notes[0].message);
-      else if (notes.length > 1) showToast(`Feel was adjusted on ${notes.length} Rotaries to fit the new setting. Ctrl+Z undoes all of it.`);
+      else if (notes.length > 1) {
+        showToast(isRotaryFeelPath(path)
+          ? `Feel was raised to the floor on ${notes.length} Rotaries. Ctrl+Z undoes all of it.`
+          : `Feel was adjusted on ${notes.length} Rotaries to fit the new setting. Ctrl+Z undoes all of it.`);
+      }
       return;
     }
     if (comp.type === 'core.rotary' && isRotaryFeelContextPath(path)) {
       this.commitRotaryFeelContext(comp, path, value);
+      return;
+    }
+    if (comp.type === 'core.rotary' && isRotaryFeelPath(path)) {
+      this.commitRotaryFeelEntry(comp, value);
       return;
     }
     const segs = path.split('.');
@@ -4584,9 +4604,9 @@ export class StudioInspector {
    *
    * The Gesture and write mode go in as stored, unset included: resolveFeelFloor applies
    * the engine's own defaults, so a Rotary that never stored a Gesture is still judged as
-   * the Arc Rotary it runs as. The minimum is only shown, never enforced — a value typed
-   * below it is committed as typed and the engine floors it at runtime, so an Author's
-   * file is never silently rewritten.
+   * the Arc Rotary it runs as. The minimum is also enforced on commit: a value typed below
+   * it is committed as the floor (see commitRotaryFeelEntry), while a file that already
+   * stores a finer Feel is left as authored and floored by the engine at runtime.
    *
    * @returns {{min: number, tooltipNote: string}|null} null when no floor applies.
    */

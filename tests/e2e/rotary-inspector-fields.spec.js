@@ -132,8 +132,8 @@ test('the Positions editor appears only in Detented, and Min/Max only outside it
 });
 
 // The Feel floor: Pulse Arc and Pulse Scrub cannot be configured finer than the engine can
-// dispatch. The Inspector surfaces the floor as the Feel field's minimum and explains it in
-// the tooltip; it does not enforce it. Neither number is written into this file: both come
+// dispatch. The Inspector surfaces the floor as the Feel field's minimum, explains it in
+// the tooltip, and commits the floor in place of a finer typed Feel. Neither number is written into this file: both come
 // from the same shared function the engine calls, so a re-measurement changes one place.
 const FEEL = '#rf-props-degreesPerUnit';
 
@@ -200,16 +200,116 @@ test('the Feel tooltip explains the Pulse floor, in the units the current Gestur
   expect(await feelTooltip(page)).toContain(`${resolveFeelFloor('scrub', 'pulse')} pixels of drag`);
 });
 
-test('a Feel typed below the floor is stored as typed, not clamped', async ({ page }) => {
-  // Deliberate: an authored value is never silently overwritten. The engine floors it at
-  // runtime, so the guarantee holds for a hand-written .fdwidget too; the Inspector only
-  // shows the minimum. Clamping here would look like a fix and quietly rewrite Authoring.
+/** Types into the Feel field and commits with Tab, as an Author would. */
+async function typeFeel(page, text) {
+  await page.locator(FEEL).fill(text);
+  await page.locator(FEEL).press('Tab');
+}
+
+const storedFeel = (page) => page.evaluate(
+  () => window.__studioApp.state.widgetDef.components.find((c) => c.id === 'seed-rot').props.degreesPerUnit
+);
+
+const toast = (page) => page.locator('.studio-toast.visible');
+
+test('a Feel typed below the Pulse Arc floor is committed as the floor, and the field shows it', async ({ page }) => {
   await selectRotary(page, 'build');
   await setWriteMode(page, 'pulse');
-  const below = resolveFeelFloor('arc', 'pulse') / 2;
-  await page.locator(FEEL).fill(String(below));
-  await page.locator(FEEL).press('Tab');
-  const stored = await page.evaluate(() => window.__studioApp.state.widgetDef.components.find((c) => c.id === 'seed-rot').props.degreesPerUnit);
-  expect(stored).toBe(below);
-  await expect(page.locator(FEEL)).toHaveValue(String(below));
+  const floor = resolveFeelFloor('arc', 'pulse');
+  const typed = floor / 3;
+  await typeFeel(page, String(typed));
+
+  expect(await storedFeel(page)).toBe(floor);
+  await expect(page.locator(FEEL)).toHaveValue(String(floor));
+  await expect(toast(page)).toContainText(`Feel ${typed}`);
+  await expect(toast(page)).toContainText('Pulse Arc');
+  await expect(toast(page)).toContainText(`floor of ${floor}`);
+});
+
+test('a negative Feel below the floor is raised to the floor with its sign kept', async ({ page }) => {
+  await selectRotary(page, 'build');
+  await setWriteMode(page, 'pulse');
+  const floor = resolveFeelFloor('arc', 'pulse');
+  await typeFeel(page, String(-floor / 3));
+
+  expect(await storedFeel(page)).toBe(-floor);
+  await expect(page.locator(FEEL)).toHaveValue(String(-floor));
+});
+
+test('Pulse Scrub raises to its own floor', async ({ page }) => {
+  await selectRotary(page, 'build');
+  await setWriteMode(page, 'pulse');
+  await setGesture(page, 'scrub');
+  const floor = resolveFeelFloor('scrub', 'pulse');
+  await typeFeel(page, String(floor / 2));
+
+  expect(await storedFeel(page)).toBe(floor);
+  await expect(page.locator(FEEL)).toHaveValue(String(floor));
+});
+
+test('typing 0 in Absolute commits the smallest Feel rather than 0', async ({ page }) => {
+  await selectRotary(page, 'build');
+  const floor = resolveFeelFloor('arc', 'absolute');
+  await typeFeel(page, '0');
+
+  expect(await storedFeel(page)).toBe(floor);
+  await expect(page.locator(FEEL)).toHaveValue(String(floor));
+  await expect(toast(page)).toContainText('Absolute');
+});
+
+test('a Feel already stored at the floor still shows the floor when a finer one is typed', async ({ page }) => {
+  await selectRotary(page, 'build');
+  await setWriteMode(page, 'pulse');
+  const floor = resolveFeelFloor('arc', 'pulse');
+  await typeFeel(page, String(floor));
+  await typeFeel(page, String(floor / 3));
+
+  expect(await storedFeel(page)).toBe(floor);
+  await expect(page.locator(FEEL)).toHaveValue(String(floor));
+});
+
+test('a Feel at or above the floor is committed as typed with no toast', async ({ page }) => {
+  await selectRotary(page, 'build');
+  await setWriteMode(page, 'pulse');
+  const floor = resolveFeelFloor('arc', 'pulse');
+  for (const typed of [floor, floor + 4]) {
+    await typeFeel(page, String(typed));
+    expect(await storedFeel(page)).toBe(typed);
+    await expect(page.locator(FEEL)).toHaveValue(String(typed));
+  }
+  await expect(toast(page)).toHaveCount(0);
+});
+
+test('a small Feel needs no adjustment where there is no floor: Pulse Tap and Absolute', async ({ page }) => {
+  await selectRotary(page, 'build');
+  await typeFeel(page, '0.5');
+  expect(await storedFeel(page)).toBe(0.5);
+
+  await setWriteMode(page, 'pulse');
+  await setGesture(page, 'tap');
+  await typeFeel(page, '0.25');
+  expect(await storedFeel(page)).toBe(0.25);
+  await expect(toast(page)).toHaveCount(0);
+});
+
+test('clearing the Feel field leaves it unset, with no toast', async ({ page }) => {
+  await selectRotary(page, 'build');
+  await setWriteMode(page, 'pulse');
+  await typeFeel(page, '12');
+  await typeFeel(page, '');
+
+  expect(await storedFeel(page)).toBeUndefined();
+  await expect(toast(page)).toHaveCount(0);
+});
+
+test('raising a typed Feel to the floor is one Ctrl+Z step', async ({ page }) => {
+  await selectRotary(page, 'build');
+  await setWriteMode(page, 'pulse');
+  await typeFeel(page, '12');
+  await typeFeel(page, '2');
+  expect(await storedFeel(page)).toBe(resolveFeelFloor('arc', 'pulse'));
+
+  await page.keyboard.press('Control+z');
+  expect(await storedFeel(page)).toBe(12);
+  await expect(page.locator(FEEL)).toHaveValue('12');
 });

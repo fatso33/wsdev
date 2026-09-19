@@ -5,7 +5,7 @@
 
 import { STUDIO_TEMPLATES } from './StudioTemplates.js';
 import { StudioValidator } from './StudioValidator.js';
-import { applyRotaryContextChange, isRotaryFeelContextPath } from './RotaryDefaults.js';
+import { applyRotaryContextChange, applyRotaryFeelEntry, isRotaryFeelContextPath, isRotaryFeelPath } from './RotaryDefaults.js';
 import { DECK_EVENTS } from '../core/deckEvents.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
@@ -793,7 +793,7 @@ export class StudioState {
    * semantics commitField() already has for single-select.
    * No-ops below 2 selected components.
    * A Rotary's write mode or Gesture goes through RotaryDefaults' Feel rule per Rotary,
-   * since each has its own Feel and its own current context.
+   * and so does a typed Feel, since each has its own Feel and its own current context.
    * @param {string} path - e.g. 'style.typography.color'
    * @param {*} value
    * @returns {{componentId: string, message: string}[]} One entry per Rotary whose Feel was
@@ -813,6 +813,12 @@ export class StudioState {
     comps.forEach((comp) => {
       if (comp.type === 'core.rotary' && isRotaryFeelContextPath(path)) {
         const { props, message } = applyRotaryContextChange(comp.props, segs[1], value);
+        comp.props = props;
+        if (message) notes.push({ componentId: comp.id, message });
+        return;
+      }
+      if (comp.type === 'core.rotary' && isRotaryFeelPath(path)) {
+        const { props, message } = applyRotaryFeelEntry(comp.props, value);
         comp.props = props;
         if (message) notes.push({ componentId: comp.id, message });
         return;

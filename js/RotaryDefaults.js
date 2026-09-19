@@ -1,6 +1,7 @@
 /**
  * Authoring-time defaults for a Rotary: what a new one is created with, what changing its
- * Write Mode does to an existing one, and how the Feel field reads in Pulse.
+ * Write Mode does to an existing one, what typing a Feel does, and how the Feel field reads
+ * in Pulse.
  *
  * Feel is the one value whose right default differs by Write Mode. Absolute's 1 is a
  * heading knob covering 0-360 in a single turn; in Pulse the same number is hundreds of
@@ -13,6 +14,11 @@
  * would fall below the new floor, and never touches a write event: a
  * stored `binding.writeEvent` is kept (so switching back finds it) and is simply not
  * declared for a Pulse Rotary — see isWriteEventFieldSent in PropertyRegistry.js.
+ *
+ * A stored Feel is never below the floor of its context, so a Feel typed into the field
+ * that is finer than the floor is committed as the floor instead. A file that already holds
+ * a finer Feel is not rewritten when it is opened; the engine holds it to the floor at
+ * runtime.
  *
  * @module RotaryDefaults
  */
@@ -70,6 +76,20 @@ function describeContext(gesture, writeMode) {
   const mode = resolveWriteMode(writeMode) === 'pulse' ? 'Pulse' : 'Absolute';
   const resolved = resolveGesture(gesture);
   return `${mode} ${resolved.charAt(0).toUpperCase()}${resolved.slice(1)}`;
+}
+
+/**
+ * A Feel held to a floor: anything finer is raised to the floor, keeping its sign the way
+ * the engine does (the floor applies to the magnitude). The one place the clamp is written,
+ * shared by the Write Mode / Gesture reconciliation and by a typed Feel.
+ * @param {number} feel - A finite Feel.
+ * @param {number} floor - The context's Feel floor, always positive.
+ * @returns {number} `feel` when its magnitude is at or above the floor, else the floor with
+ *   `feel`'s sign (a zero takes the positive floor).
+ */
+function raiseToFloor(feel, floor) {
+  if (Math.abs(feel) >= floor) return feel;
+  return feel < 0 ? -floor : floor;
 }
 
 /**
@@ -131,7 +151,7 @@ export function resolveFeelReconciliation(props, change) {
   }
   if (Math.abs(stored) < floor) {
     return {
-      propsPatch: { degreesPerUnit: stored < 0 ? -floor : floor },
+      propsPatch: { degreesPerUnit: raiseToFloor(stored, floor) },
       message: `Feel ${stored} is finer than ${after} allows, so it was raised to the floor of ${floor}. Ctrl+Z undoes this.`
     };
   }
@@ -151,6 +171,42 @@ export function resolveFeelReconciliation(props, change) {
 export function applyRotaryContextChange(props, key, value) {
   const { propsPatch, message } = resolveFeelReconciliation(props, { [key]: value });
   return { props: { ...(props || {}), [key]: value, ...propsPatch }, message };
+}
+
+/**
+ * Whether a props path is the Feel field, whose typed value goes through applyRotaryFeelEntry.
+ * @param {string} path - A component path such as 'props.degreesPerUnit'.
+ * @returns {boolean}
+ */
+export function isRotaryFeelPath(path) {
+  return path === 'props.degreesPerUnit';
+}
+
+/**
+ * Applies a Feel typed into the Feel field to a Rotary's props, holding it to the floor of
+ * the Rotary's own context: a value finer than the floor is committed as the floor, keeping
+ * its sign, so the Author sees the input replaced rather than accepted and quietly ignored.
+ *
+ * The context is the stored Gesture and write mode, unset ones resolving as the engine
+ * resolves them. A value at or above the floor is committed as typed, and a cleared field
+ * (`undefined`) stays unset: nothing stored is not a value below the floor.
+ *
+ * @param {object|undefined} props - The Rotary's current props.
+ * @param {number|undefined} typed - The Feel the Author entered; `undefined` when cleared.
+ * @returns {{props: object, message: string|null}} A new props object, and the notice for
+ *   the Author when the typed Feel was raised.
+ */
+export function applyRotaryFeelEntry(props, typed) {
+  const next = (degreesPerUnit) => ({ ...(props || {}), degreesPerUnit });
+  if (typeof typed !== 'number' || !Number.isFinite(typed)) return { props: next(typed), message: null };
+
+  const floor = resolveFeelFloor(props?.gesture, props?.writeMode);
+  const value = raiseToFloor(typed, floor);
+  if (value === typed) return { props: next(typed), message: null };
+  return {
+    props: next(value),
+    message: `Feel ${typed} is below the ${describeContext(props?.gesture, props?.writeMode)} floor of ${floor}, so it was set to ${value}. Ctrl+Z undoes this.`
+  };
 }
 
 /**

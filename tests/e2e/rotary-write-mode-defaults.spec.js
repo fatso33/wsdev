@@ -109,10 +109,13 @@ test('changing the Gesture keeps Feel at or above the new floor', async ({ page 
   await page.locator('#rf-props-gesture').selectOption('scrub');
   expect((await rotary(page)).props.degreesPerUnit).toBe(scrubDefault);
 
-  // Adjusted below the Scrub floor, then back to Arc and on to Scrub again.
+  // Still the default, so it follows the Gesture back to Arc.
+  await page.locator('#rf-props-gesture').selectOption('arc');
+  expect((await rotary(page)).props.degreesPerUnit).toBe(PULSE_FEEL);
+
+  // Adjusted to the Arc floor, which is below the Scrub floor: raised on the switch.
   await page.locator(FEEL).fill(String(arcFloor));
   await page.locator(FEEL).press('Tab');
-  await page.locator('#rf-props-gesture').selectOption('arc');
   expect((await rotary(page)).props.degreesPerUnit).toBe(arcFloor);
   await page.locator('#rf-props-gesture').selectOption('scrub');
   expect((await rotary(page)).props.degreesPerUnit).toBe(scrubFloor);
@@ -199,15 +202,25 @@ test('the Feel field reads as steps in Pulse, and as degrees per unit in Absolut
   await expect(page.locator('#rf-props-degreesPerUnit-meaning')).toHaveCount(0);
 });
 
-test('a Feel typed below the floor is described at the floor it will run at', async ({ page }) => {
+test('a stored Feel below the floor is described at the floor it will run at, and is not rewritten', async ({ page }) => {
+  await dropPaletteRotary(page, { writeMode: 'pulse', degreesPerUnit: 2 });
+  const floor = resolveFeelFloor('arc', 'pulse');
+  await expect(page.locator('#rf-props-degreesPerUnit-meaning')).toContainText(`${360 / floor} steps per revolution`);
+  await expect(page.locator('#rf-props-degreesPerUnit-meaning')).toContainText(/floor/i);
+  await expect(page.locator(FEEL)).toHaveValue('2');
+  expect((await rotary(page)).props.degreesPerUnit).toBe(2);
+});
+
+test('a Feel typed below the floor is committed as the floor, which needs no floor note', async ({ page }) => {
   await dropPaletteRotary(page);
   await setWriteMode(page, 'pulse');
   await page.locator(FEEL).fill('2');
   await page.locator(FEEL).press('Tab');
   const floor = resolveFeelFloor('arc', 'pulse');
+  await expect(page.locator(FEEL)).toHaveValue(String(floor));
   await expect(page.locator('#rf-props-degreesPerUnit-meaning')).toContainText(`${360 / floor} steps per revolution`);
-  await expect(page.locator('#rf-props-degreesPerUnit-meaning')).toContainText(/floor/i);
-  expect((await rotary(page)).props.degreesPerUnit).toBe(2);
+  await expect(page.locator('#rf-props-degreesPerUnit-meaning')).not.toContainText(/floor/i);
+  expect((await rotary(page)).props.degreesPerUnit).toBe(floor);
 });
 
 test('a multi-selection commit applies the Feel rule to each Rotary and tells the Author once', async ({ page }) => {
@@ -228,4 +241,29 @@ test('a multi-selection commit applies the Feel rule to each Rotary and tells th
   expect(await feel('m2')).toBe(resolveFeelFloor('arc', 'pulse'));
   expect(await feel('m3')).toBe(20);
   await expect(page.locator('.studio-toast.visible')).toContainText('2 Rotaries');
+});
+
+test('a Feel committed across a multi-selection is raised to the floor of each Rotary, and the toast says so once', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = window.__studioApp.state;
+    const rotary = (id, props) => ({
+      id, type: 'core.rotary', label: id, layout: { col: 1, row: 1, w: 4, h: 4 },
+      binding: { readSimVar: 'apHdgBugValue' }, props, style: {}
+    });
+    state.widgetDef.components.push(
+      rotary('f1', { writeMode: 'pulse', degreesPerUnit: 12 }),
+      rotary('f2', { writeMode: 'pulse', gesture: 'scrub', degreesPerUnit: 12 }),
+      rotary('f3', { degreesPerUnit: 12 })
+    );
+    state.multiSelectedIds = new Set(['f1', 'f2', 'f3']);
+    window.__studioApp.inspector.commitField({ __multiSelect: true }, 'props.degreesPerUnit', 5);
+  });
+
+  const feel = (id) => page.evaluate((cid) => window.__studioApp.state.getComponent(cid).props.degreesPerUnit, id);
+  expect(await feel('f1')).toBe(resolveFeelFloor('arc', 'pulse'));
+  expect(await feel('f2')).toBe(resolveFeelFloor('scrub', 'pulse'));
+  expect(await feel('f3')).toBe(5);
+  await expect(page.locator('.studio-toast.visible')).toContainText('2 Rotaries');
+  await expect(page.locator('.studio-toast.visible')).toContainText(/floor/i);
 });
