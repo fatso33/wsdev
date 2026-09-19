@@ -354,6 +354,28 @@ export function resolveFeelFloor(gesture, writeMode) {
   return MIN_DEGREES_PER_UNIT;
 }
 
+// The Feel a new Pulse Arc or Pulse Scrub Rotary starts with. Absolute's default of 1 is a
+// heading knob covering 0-360 in one turn; in Pulse the same number would be 360 steps per
+// revolution, far finer than a real knob and well below the Feel floor. 12 is 30 steps per
+// revolution for Arc, in the 10-18 range a faithful Pulse Ring occupies, and at that Feel a
+// fast spin peaked at 144 steps/sec against the 240/sec drain ceiling. It must stay above
+// both floors so a default is never one the engine silently overrides.
+const PULSE_FEEL_DEFAULT = 12;
+
+/**
+ * The Feel a Rotary is created with for a Gesture and write mode, in the Gesture's own
+ * unit. Absolute and Pulse Tap keep the engine's long-standing default of 1; Pulse Arc and
+ * Pulse Scrub — the two Gestures that have a Feel floor — get a Feel shaped for a stream
+ * of steps. Both arguments are raw authored values and resolve as the engine would run them.
+ *
+ * @param {string|undefined} gesture - 'arc' | 'scrub' | 'tap'; anything else resolves to Arc.
+ * @param {string|undefined} writeMode - 'absolute' | 'pulse'; anything else resolves to Absolute.
+ * @returns {number} A Feel that is never below resolveFeelFloor for the same arguments.
+ */
+export function resolveFeelDefault(gesture, writeMode) {
+  return resolveFeelFloor(gesture, writeMode) > MIN_DEGREES_PER_UNIT ? PULSE_FEEL_DEFAULT : DEFAULT_DEGREES_PER_UNIT;
+}
+
 /**
  * The effective, always-safe divisor for a configured `degreesPerUnit`.
  * Sign is preserved (a negative value simply reverses the turn direction); only the
@@ -362,7 +384,7 @@ export function resolveFeelFloor(gesture, writeMode) {
  * than to the floor — and that default is then held to the floor like any other value,
  * since the default sits below Pulse Arc's and a typo must not reopen the overrun.
  */
-function resolveDegreesPerUnit(raw, gesture, writeMode) {
+export function resolveDegreesPerUnit(raw, gesture, writeMode) {
   const floor = resolveFeelFloor(gesture, writeMode);
   const n = Number(raw ?? DEFAULT_DEGREES_PER_UNIT);
   if (!Number.isFinite(n)) return Math.max(DEFAULT_DEGREES_PER_UNIT, floor);

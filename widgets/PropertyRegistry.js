@@ -385,6 +385,23 @@ export const WRITE_EVENT_BINDING_FIELDS = COMMON_FIELDS
   .filter((f) => f.control === 'eventPicker' && f.path.startsWith('binding.'))
   .map((f) => f.path.slice('binding.'.length));
 
+/**
+ * Whether a Component ever sends the event stored in one of its write-event binding
+ * fields. A Rotary in Pulse write mode sends binding.incrementEvent/decrementEvent one
+ * step at a time and never sends binding.writeEvent, so a writeEvent left on it (kept so
+ * switching back to Absolute finds it intact) is not a write the Widget makes and must
+ * not be declared as one — in capabilities, or to PC Bridge's install-time registration.
+ * Every consumer of WRITE_EVENT_BINDING_FIELDS that turns a field into a declared write
+ * asks this first, so the rule lives in one place.
+ *
+ * @param {{type?: string, props?: {writeMode?: string}}} comp - A component definition.
+ * @param {string} field - One of WRITE_EVENT_BINDING_FIELDS.
+ * @returns {boolean} false only for writeEvent on a Pulse Rotary.
+ */
+export function isWriteEventFieldSent(comp, field) {
+  return !(comp?.type === 'core.rotary' && field === 'writeEvent' && comp.props?.writeMode === 'pulse');
+}
+
 export const TYPE_FIELDS = {
   'core.label': [
     { path: 'props.text', control: 'text', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Static label text, shown when nothing overrides it.' },
@@ -648,7 +665,7 @@ export const TYPE_FIELDS = {
       ] },
       showWhen: { path: 'props.rangeMode', equals: 'detented' },
       tooltip: 'The named positions this Detented Ring snaps between (e.g. OFF / L / R / BOTH / START), evenly spaced across Sweep°. A position marked Momentary fires on arrival and springs back to the previous position on release, the way a magneto\'s START does.' },
-    { path: 'props.degreesPerUnit', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 1, tooltip: 'The knob\'s "feel" — reinterpreted per Gesture above. Arc: degrees of arc travelled per 1 unit of value (or, when Range Mode is Detented, per one step between positions). Scrub: pixels of straight drag per 1 unit. Tap: units changed by a single tap. Higher means finer/slower for Arc and Scrub; for Tap it is the step size itself. In Pulse write mode, Arc and Scrub have a Feel floor: each step is one write to the sim, and a finer Feel could produce steps faster than the sim link can send them, so the knob would keep moving after the finger lifts. A Feel typed below the floor is kept as typed but runs at the floor. Tap and Absolute have no floor. In Absolute write mode, a negative value reverses the knob\'s turn direction for Arc and Scrub (Tap ignores the sign).' },
+    { path: 'props.degreesPerUnit', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 1, tooltip: 'The knob\'s "feel" — reinterpreted per Gesture above. Arc: degrees of arc travelled per 1 unit of value (or, when Range Mode is Detented, per one step between positions). Scrub: pixels of straight drag per 1 unit. Tap: units changed by a single tap. Higher means finer/slower for Arc and Scrub; for Tap it is the step size itself. In Pulse write mode Feel is the size of one step, since the Ring owns no value: degrees of arc per step for Arc (360 divided by it is the steps per revolution), pixels of drag per step for Scrub. A new Pulse Rotary starts well above the floor below. In Pulse write mode, Arc and Scrub have a Feel floor: each step is one write to the sim, and a finer Feel could produce steps faster than the sim link can send them, so the knob would keep moving after the finger lifts. A Feel typed below the floor is kept as typed but runs at the floor. Tap and Absolute have no floor. In Absolute write mode, a negative value reverses the knob\'s turn direction for Arc and Scrub (Tap ignores the sign).' },
     { path: 'props.sweepDegrees', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: 270, tooltip: 'How far the knob visibly rotates across its whole range, in degrees. Purely visual — it does not change the values the knob produces.' },
     { path: 'props.startAngle', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: -135, tooltip: 'Where the indicator points at the minimum value, in degrees clockwise from straight up (12 o\'clock) — same convention as core.gauge\'s Arc Start Angle. Default -135, which puts mid-range straight up over the default 270° sweep.' },
     { path: 'props.faceColor', control: 'color', tier: 'advanced', group: 'Knob', fdwsMin: '1.30', default: undefined, tooltip: 'Fills the knob disc. Leave unset to let this component’s own Background (and its state/conditional variants) show through instead.' },

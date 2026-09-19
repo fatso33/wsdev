@@ -21,6 +21,7 @@ import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 import { resolveFeelFloor, resolveGesture, MIN_DEGREES_PER_UNIT } from '../widgets/components/rotaryEngine.js';
+import { resolveWriteModeSwitch, describePulseFeel } from './RotaryDefaults.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -2301,6 +2302,10 @@ export class StudioInspector {
           Don't see it? <button type="button" class="btn-mini-inline" id="c-connect-write-findit">Find it by moving it →</button>
           or <button type="button" class="btn-mini-inline" id="c-connect-write-full">switch to Full mode</button> for Raw Address / Custom.
         </div>
+        ${isPulseRotary ? `
+        <div class="prop-hint-block" id="c-bind-write-pulse-note" style="font-size:11px;opacity:0.75;margin:0 0 8px;">
+          Write Deck Event is not used in Pulse mode: this Rotary sends the Increment and Decrement events below instead. ${binding.writeEvent ? 'The value here is kept, so switching back to Absolute finds it, but it is not declared to PC Bridge.' : ''}
+        </div>` : ''}
         <div class="prop-field" data-tier="advanced">
           <label>Write Deck Event (SimConnect Out)</label>
           <div class="prop-row-2">
@@ -3733,6 +3738,18 @@ export class StudioInspector {
   }
 
   /**
+   * Commits a Rotary's Write Mode together with whatever Feel change the switch implies, as
+   * ONE update so a single Undo reverts both. RotaryDefaults.resolveWriteModeSwitch decides
+   * what moves (only a Feel still sitting at the previous mode's default); anything else the
+   * Author set is carried across untouched, and the toast says what changed and why.
+   */
+  commitRotaryWriteMode(comp, nextMode) {
+    const { propsPatch, message } = resolveWriteModeSwitch(comp.props, nextMode);
+    this.state.updateComponent(comp.id, { props: { ...(comp.props || {}), writeMode: nextMode, ...propsPatch } });
+    if (message) showToast(message);
+  }
+
+  /**
    * Generic nested-path commit — clones only the objects along `path` (not
    * the whole component), splices in the leaf value, and commits the ONE
    * top-level key via the existing updateComponent(). Mirrors the manual
@@ -3753,6 +3770,10 @@ export class StudioInspector {
   commitField(comp, path, value) {
     if (comp.__multiSelect) {
       this.state.applyFieldToSelection(path, value);
+      return;
+    }
+    if (comp.type === 'core.rotary' && path === 'props.writeMode') {
+      this.commitRotaryWriteMode(comp, value);
       return;
     }
     const segs = path.split('.');
@@ -4577,6 +4598,17 @@ export class StudioInspector {
     return { min: floor, tooltipNote: `Current Feel floor: ${floor} ${unit} per step.` };
   }
 
+  /**
+   * The Feel field's Pulse reading — label and a live "N steps per revolution" note — or
+   * null for every other field and for a Rotary whose Feel keeps its usual meaning
+   * (Absolute, Tap). Recomputed on every render like resolveFeelFloorHint, so a Write Mode
+   * or Gesture change updates it with no listener.
+   */
+  resolvePulseFeelDescription(comp, field, feel) {
+    if (comp.type !== 'core.rotary' || field.path !== 'props.degreesPerUnit') return null;
+    return describePulseFeel(this.getFieldValue(comp, 'props.gesture'), this.getFieldValue(comp, 'props.writeMode'), feel);
+  }
+
   renderPlainField(comp, field, mount, inputType) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
@@ -4584,14 +4616,16 @@ export class StudioInspector {
     const floorHint = inputType === 'number' ? this.resolveFeelFloorHint(comp, field) : null;
     const tooltip = floorHint ? `${field.tooltip || ''} ${floorHint.tooltipNote}`.trim() : (field.tooltip || '');
     const minAttr = floorHint ? ` min="${floorHint.min}"` : '';
+    const pulseFeel = this.resolvePulseFeelDescription(comp, field, value);
     // 09: data-step-key drives NUMBER_STEP_LOOKUP (wheel/chevron stepping) —
     // keyed by the registry field path itself, so this is the ONLY new
     // attribute a registry-driven number field needs; the lookup table lives
     // entirely in this file, PropertyRegistry.js's field schema is untouched.
     const stepAttr = inputType === 'number' ? ` data-step-key="${escapeHtmlAttr(field.path)}"` : '';
     mount.innerHTML = `
-      <label title="${escapeHtmlAttr(tooltip)}">${escapeHtmlAttr(label)}</label>
+      <label title="${escapeHtmlAttr(tooltip)}">${escapeHtmlAttr(pulseFeel ? pulseFeel.label : label)}</label>
       <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}"${stepAttr}${minAttr} />
+      ${pulseFeel ? `<div class="prop-hint-block" id="${id}-meaning" style="font-size:11px;opacity:0.75;margin-top:2px;">${escapeHtmlAttr(pulseFeel.note)}</div>` : ''}
     `;
     mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
       const raw = e.target.value;

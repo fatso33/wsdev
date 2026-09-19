@@ -9,6 +9,7 @@
  */
 
 import { STUDIO_TEMPLATES } from './StudioTemplates.js';
+import { resolveRotaryCreationDefaults } from './RotaryDefaults.js';
 import { openModal, confirmModal, showToast, confirmAndSwitchWidget } from './StudioModal.js';
 import { StudioValidator, isComponentUnconfigured } from './StudioValidator.js';
 import { DECK_EVENT_NAMES, getDeckEventsByKind } from '../core/deckEvents.js';
@@ -193,9 +194,10 @@ export const PALETTE_ITEMS = [
     icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="12" x2="12" y2="6"/><circle cx="12" cy="12" r="2"/>',
     // Heading-shaped out of the box, matching defaultBinding below: a full turn of
     // the knob covers the full 0-360 range at 1 degree of finger travel per degree
-    // of heading.
-    defaultProps: { min: 0, max: 360, degreesPerUnit: 1 },
-    defaultBinding: { readSimVar: 'apHdgBugValue', writeEvent: 'apHdgSet' },
+    // of heading. Both come from RotaryDefaults.js, which also owns the Pulse-shaped
+    // equivalent an Author gets on switching Write Mode.
+    defaultProps: resolveRotaryCreationDefaults('absolute').props,
+    defaultBinding: resolveRotaryCreationDefaults('absolute').binding,
     defaultLayout: { col: 1, row: 1, w: 4, h: 4 }
   },
   {

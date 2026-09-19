@@ -53,7 +53,7 @@
 // or core/, sibling to js/widgets/ or widgets/), AND pc-bridge's direct
 // in-place import (pc-bridge/widgetVarRegistry.js), because shared/core/ and
 // shared/widgets/ are siblings, matching every consuming context.
-import { WRITE_EVENT_BINDING_FIELDS } from '../widgets/PropertyRegistry.js';
+import { WRITE_EVENT_BINDING_FIELDS, isWriteEventFieldSent } from '../widgets/PropertyRegistry.js';
 
 const PREFIXED_RE = /^(A|L|H|K):/i;
 
@@ -111,7 +111,7 @@ function walkBindingSites(components, visit, path = []) {
       // registered zero placeholder profile mappings on install before ticket 05's
       // fix-pass, and why this loop exists instead of another hand-written line.
       WRITE_EVENT_BINDING_FIELDS.forEach((field) => {
-        if (binding[field]) at({ kind: 'write', source: 'binding', field, name: binding[field] });
+        if (binding[field] && isWriteEventFieldSent(comp, field)) at({ kind: 'write', source: 'binding', field, name: binding[field] });
       });
     }
 

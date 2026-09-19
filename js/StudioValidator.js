@@ -46,6 +46,7 @@ import {
   VALUE_FORMATS as REGISTRY_VALUE_FORMATS,
   ALLOWED_ASSET_MIME_TYPES,
   WRITE_EVENT_BINDING_FIELDS,
+  isWriteEventFieldSent,
   getComponentTypes,
   getStateStyleConfig,
   getFieldsForType
@@ -704,7 +705,7 @@ export class StudioValidator {
           }
           if (comp.binding.writeEvent) {
             validateBindingValue(comp.id, 'event', comp.binding.writeEvent, 'writeEvent');
-            detectedWriteEvents.add(comp.binding.writeEvent.trim());
+            if (isWriteEventFieldSent(comp, 'writeEvent')) detectedWriteEvents.add(comp.binding.writeEvent.trim());
             // Wave 0a (V20): InputComponent/SelectorComponent/SliderComponent
             // dispatch binding.writeEvent themselves (grep dispatchSimEvent
             // shared/widgets/components/*.js) — every other component type
@@ -1035,7 +1036,7 @@ export class StudioValidator {
       // Ticket 17: every write-event binding field, off the same shared list
       // validate() uses above.
       WRITE_EVENT_BINDING_FIELDS.forEach((field) => {
-        if (c.binding?.[field]) writeEvents.add(c.binding[field].trim());
+        if (c.binding?.[field] && isWriteEventFieldSent(c, field)) writeEvents.add(c.binding[field].trim());
       });
       if (Array.isArray(c.interactions)) {
         c.interactions.forEach((i) => {

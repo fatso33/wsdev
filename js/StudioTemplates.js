@@ -14,6 +14,7 @@
  */
 
 import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
+import { HEADING_KNOB_BINDING } from './RotaryDefaults.js';
 
 const LATEST_FDWS_VERSION = FDWS_VERSIONS[FDWS_VERSIONS.length - 1];
 
@@ -512,7 +513,7 @@ export const STUDIO_TEMPLATES = [
         type: 'core.rotary',
         label: 'HDG Rotary Dial',
         layout: { col: 1, row: 4, w: 5, h: 3 },
-        binding: { readSimVar: 'apHdgBugValue', writeEvent: 'apHdgSet' },
+        binding: { ...HEADING_KNOB_BINDING },
         props: { coarseStep: 10, fineStep: 1, circular: true }
       },
       {
