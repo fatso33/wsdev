@@ -4604,11 +4604,12 @@ export class StudioInspector {
    *
    * The Gesture and write mode go in as stored, unset included: resolveFeelFloor applies
    * the engine's own defaults, so a Rotary that never stored a Gesture is still judged as
-   * the Arc Rotary it runs as. The minimum is also enforced on commit: a value typed below
-   * it is committed as the floor (see commitRotaryFeelEntry), while a file that already
-   * stores a finer Feel is left as authored and floored by the engine at runtime.
+   * the Arc Rotary it runs as. A value typed below the minimum is committed as the floor
+   * (see commitRotaryFeelEntry), while a file that already stores a finer Feel is left as
+   * stored and floored by the engine at runtime.
    *
-   * @returns {{min: number, tooltipNote: string}|null} null when no floor applies.
+   * @returns {{min: number, tooltipNote: string}|null} null when the floor is only the
+   *   smallest Feel any Rotary accepts, which the field does not advertise.
    */
   resolveFeelFloorHint(comp, field) {
     if (comp.type !== 'core.rotary' || field.path !== 'props.degreesPerUnit') return null;

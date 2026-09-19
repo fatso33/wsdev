@@ -90,11 +90,47 @@ test('a Feel the Author set below the floor is raised to it on the switch, and t
 test('raising a Feel to the floor is one undo step', async ({ page }) => {
   await dropPaletteRotary(page, { degreesPerUnit: 2 });
   await setWriteMode(page, 'pulse');
-  await page.evaluate(() => window.__studioApp.state.undo());
 
-  const r = await rotary(page);
-  expect(r.props.writeMode).toBeUndefined();
-  expect(r.props.degreesPerUnit).toBe(2);
+  const raised = await rotary(page);
+  expect(raised.props.writeMode).toBe('pulse');
+  expect(raised.props.degreesPerUnit).toBe(resolveFeelFloor('arc', 'pulse'));
+  await expect(page.locator('.studio-toast.visible')).toContainText(/floor/i);
+
+  await page.keyboard.press('Control+z');
+  const undone = await rotary(page);
+  expect(undone.props.writeMode).toBeUndefined();
+  expect(undone.props.degreesPerUnit).toBe(2);
+});
+
+test('a Gesture change that raises Feel is one undo step', async ({ page }) => {
+  const arcFloor = resolveFeelFloor('arc', 'pulse');
+  await dropPaletteRotary(page, { writeMode: 'pulse', degreesPerUnit: arcFloor });
+  await page.locator('#rf-props-gesture').selectOption('scrub');
+
+  const raised = await rotary(page);
+  expect(raised.props.gesture).toBe('scrub');
+  expect(raised.props.degreesPerUnit).toBe(resolveFeelFloor('scrub', 'pulse'));
+
+  await page.keyboard.press('Control+z');
+  const undone = await rotary(page);
+  expect(undone.props.gesture).toBeUndefined();
+  expect(undone.props.degreesPerUnit).toBe(arcFloor);
+});
+
+test('a Gesture change that moves an untouched Feel to the new default is one undo step', async ({ page }) => {
+  const tapDefault = resolveFeelDefault('tap', 'pulse');
+  await dropPaletteRotary(page, { writeMode: 'pulse', gesture: 'tap', degreesPerUnit: tapDefault });
+  await page.locator('#rf-props-gesture').selectOption('arc');
+
+  const moved = await rotary(page);
+  expect(moved.props.gesture).toBe('arc');
+  expect(moved.props.degreesPerUnit).toBe(PULSE_FEEL);
+  expect(PULSE_FEEL).not.toBe(tapDefault);
+
+  await page.keyboard.press('Control+z');
+  const undone = await rotary(page);
+  expect(undone.props.gesture).toBe('tap');
+  expect(undone.props.degreesPerUnit).toBe(tapDefault);
 });
 
 test('changing the Gesture keeps Feel at or above the new floor', async ({ page }) => {

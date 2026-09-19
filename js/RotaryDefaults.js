@@ -9,16 +9,17 @@
  * they sit next to the Feel floor they must clear; this module only decides where they
  * apply.
  *
- * A Write Mode or Gesture change never lowers or rewrites a Feel the Author chose. It moves
- * Feel to the new default only when Feel still equals the old default, raises a Feel that
- * would fall below the new floor, and never touches a write event: a
- * stored `binding.writeEvent` is kept (so switching back finds it) and is simply not
- * declared for a Pulse Rotary — see isWriteEventFieldSent in PropertyRegistry.js.
+ * A Write Mode or Gesture change moves Feel to the new default only when Feel still equals
+ * the old default, and raises a Feel that would fall below the new floor to that floor. Any
+ * other Feel, including every one at or above the new floor, is left exactly as the Author
+ * set it. It never touches a write event: a stored `binding.writeEvent` is kept (so
+ * switching back finds it) and is simply not declared for a Pulse Rotary — see
+ * isWriteEventFieldSent in PropertyRegistry.js.
  *
- * A stored Feel is never below the floor of its context, so a Feel typed into the field
- * that is finer than the floor is committed as the floor instead. A file that already holds
- * a finer Feel is not rewritten when it is opened; the engine holds it to the floor at
- * runtime.
+ * A Feel typed into the field is held to the floor of its context too: a finer one is
+ * committed as the floor. Together these keep the Feel Studio stores at or above the floor
+ * of its own context. A file that already holds a finer Feel is not rewritten when it is
+ * opened; the engine holds it to the floor at runtime.
  *
  * @module RotaryDefaults
  */
@@ -103,8 +104,8 @@ export function isRotaryFeelContextPath(path) {
 }
 
 /**
- * What a change of write mode or Gesture should do to a Rotary's stored Feel, so that a
- * stored Feel is never below the floor of the context it is in.
+ * What a change of write mode or Gesture should do to a Rotary's stored Feel, so that the
+ * Feel it leaves is not below the floor of the context it moves to.
  *
  *  - Feel still exactly equals the old context's default: it moves to the new context's
  *    default.
@@ -213,8 +214,8 @@ export function applyRotaryFeelEntry(props, typed) {
  * How the Feel field should read for a Pulse Rotary: in Pulse, Feel is the size of one
  * step, not degrees per unit of a value the Ring does not own.
  *
- * The note reports the Feel the engine will actually run, so a value authored below the
- * Feel floor is shown at the floor rather than as typed.
+ * The note reports the Feel the engine will actually run, so a stored or loaded Feel below
+ * the Feel floor is described at the floor rather than as authored.
  *
  * @param {string|undefined} gesture - Raw authored Gesture; unset resolves to Arc.
  * @param {string|undefined} writeMode - Raw authored write mode.
