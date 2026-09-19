@@ -56,6 +56,8 @@
  *                                  //   tap:   units moved by a single discrete tap.
  *                                  // Used as a divisor for arc/scrub, so its magnitude is
  *                                  // floored at MIN_DEGREES_PER_UNIT below — 0 is not reachable.
+ *                                  // In Pulse write mode, arc and scrub are floored higher
+ *                                  // still: see resolveFeelFloor.
  *     minEffectiveRadius: number,  // px floor for the grab radius (default 24 — roughly
  *                                  // a fingertip contact radius; see ADR 0001)
  *     sweepDegrees: number,        // visual sweep the returned `angle` is mapped onto
@@ -308,18 +310,63 @@ const RECONCILIATION_TIMEOUT_MULTIPLIER = 2;
 // and the knob was permanently dead until the widget was rebuilt. Floored here rather
 // than in the registry because the engine is the only layer every caller goes through
 // — Studio's preview host, the PWA and a raw `.fdwidget` import alike.
-const MIN_DEGREES_PER_UNIT = 0.01;
+/** The smallest Feel magnitude any Rotary can resolve to: the guard that keeps the
+ * divisor above zero. It is also the "no Feel floor applies" value returned by
+ * resolveFeelFloor, so a caller can tell a real floor from an exempt case by comparing
+ * against it. */
+export const MIN_DEGREES_PER_UNIT = 0.01;
+
+// The Feel floor. Pulse emits one write per step and the frame coalescer drains at most
+// MAX_PULSE_STEPS_PER_FRAME (4) per frame, ~240 steps/sec. A Feel fine enough that an
+// ordinary turn generates steps faster than that queues the surplus (never dropped, so
+// the value landed on is the value turned to) and keeps dispatching long after the finger
+// lifts. Flooring Feel where the step stream is unbounded keeps a human turn under the
+// ceiling so the queue never forms; the drain itself is untouched.
+//
+// Arc's 6 is measured: the fastest observed turn was 3.05-3.65 rev/s, which puts the
+// ceiling out of reach above roughly 4.5-5.5 degrees per step. Scrub's 10 is a reasoned
+// estimate by analogy, not a measurement — drag speed has never been measured. Lowering
+// a floor is safe (existing Widgets stay valid and gain headroom); raising one silently
+// changes the feel of every Widget authored at it.
+const PULSE_ARC_FEEL_FLOOR_DEGREES = 6;
+const PULSE_SCRUB_FEEL_FLOOR_PIXELS = 10;
+
+/**
+ * The smallest Feel a Rotary honours for a given Gesture and write mode, in the
+ * Gesture's own unit (degrees of arc for Arc, pixels of drag for Scrub).
+ *
+ * Only Pulse Arc and Pulse Scrub have a floor. Pulse Tap is exempt (one tap is one
+ * step) and Absolute is exempt in every Gesture (it writes the Ring's value, deduped to
+ * one write per frame, so no queue can form); both return MIN_DEGREES_PER_UNIT. Range
+ * mode does not participate. Both arguments are raw authored values: an unset or
+ * unrecognised one resolves to the engine's own default, so a Rotary that never stored
+ * a Gesture or write mode is judged exactly as the engine will run it.
+ *
+ * @param {string|undefined} gesture - 'arc' | 'scrub' | 'tap'; anything else resolves to Arc.
+ * @param {string|undefined} writeMode - 'absolute' | 'pulse'; anything else resolves to Absolute.
+ * @returns {number} The floor, always >= MIN_DEGREES_PER_UNIT.
+ */
+export function resolveFeelFloor(gesture, writeMode) {
+  if (resolveWriteMode(writeMode) !== 'pulse') return MIN_DEGREES_PER_UNIT;
+  const resolved = resolveGesture(gesture);
+  if (resolved === 'arc') return PULSE_ARC_FEEL_FLOOR_DEGREES;
+  if (resolved === 'scrub') return PULSE_SCRUB_FEEL_FLOOR_PIXELS;
+  return MIN_DEGREES_PER_UNIT;
+}
 
 /**
  * The effective, always-safe divisor for a configured `degreesPerUnit`.
  * Sign is preserved (a negative value simply reverses the turn direction); only the
- * magnitude is floored. A non-finite value has no usable magnitude or sign at all, so
- * it falls back to the default rather than to the floor.
+ * magnitude is floored, at the Feel floor for this Gesture and write mode. A non-finite
+ * value has no usable magnitude or sign at all, so it falls back to the default rather
+ * than to the floor — and that default is then held to the floor like any other value,
+ * since the default sits below Pulse Arc's and a typo must not reopen the overrun.
  */
-function resolveDegreesPerUnit(raw) {
+function resolveDegreesPerUnit(raw, gesture, writeMode) {
+  const floor = resolveFeelFloor(gesture, writeMode);
   const n = Number(raw ?? DEFAULT_DEGREES_PER_UNIT);
-  if (!Number.isFinite(n)) return DEFAULT_DEGREES_PER_UNIT;
-  const magnitude = Math.max(Math.abs(n), MIN_DEGREES_PER_UNIT);
+  if (!Number.isFinite(n)) return Math.max(DEFAULT_DEGREES_PER_UNIT, floor);
+  const magnitude = Math.max(Math.abs(n), floor);
   return n < 0 ? -magnitude : magnitude;
 }
 
@@ -976,10 +1023,10 @@ function applyDispatchTiming(state, timing, emits, gestureEvent, value, isDetent
  */
 function processGesture(state, cfg, gestureEvent) {
   const { mode, min, max } = resolveEffectiveRange(cfg);
-  const degPerUnit = resolveDegreesPerUnit(cfg.degreesPerUnit);
   const ring = cfg.ringId ?? DEFAULT_RING_ID;
   const gesture = resolveGesture(cfg.gesture);
   const writeMode = resolveWriteMode(cfg.writeMode);
+  const degPerUnit = resolveDegreesPerUnit(cfg.degreesPerUnit, gesture, writeMode);
 
   if (writeMode === 'pulse') {
     return processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, gesture);

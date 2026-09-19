@@ -20,6 +20,7 @@ import { openColorPickerPopover } from './ColorPickerPopover.js';
 import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS as REGISTRY_TYPE_FIELDS, COMMON_FIELDS as REGISTRY_COMMON_FIELDS, VALUE_FORMATS as REGISTRY_VALUE_FORMATS, getFieldsForType, getStateStyleConfig } from '../widgets/PropertyRegistry.js';
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
+import { resolveFeelFloor, resolveGesture, MIN_DEGREES_PER_UNIT } from '../widgets/components/rotaryEngine.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -4553,18 +4554,44 @@ export class StudioInspector {
     return { value: field.default, dimmed: false };
   }
 
+  /**
+   * A Rotary's Feel field has a minimum only in Pulse Arc and Pulse Scrub, and which one
+   * (and in what unit) depends on two sibling props, so it cannot be a static registry
+   * key: it is computed here at render time. renderInner() rebuilds the whole panel on
+   * every commit, so a Gesture or write mode change re-runs this with no listener.
+   *
+   * The Gesture and write mode go in as stored, unset included: resolveFeelFloor applies
+   * the engine's own defaults, so a Rotary that never stored a Gesture is still judged as
+   * the Arc Rotary it runs as. The minimum is only shown, never enforced — a value typed
+   * below it is committed as typed and the engine floors it at runtime, so an Author's
+   * file is never silently rewritten.
+   *
+   * @returns {{min: number, tooltipNote: string}|null} null when no floor applies.
+   */
+  resolveFeelFloorHint(comp, field) {
+    if (comp.type !== 'core.rotary' || field.path !== 'props.degreesPerUnit') return null;
+    const gesture = this.getFieldValue(comp, 'props.gesture');
+    const floor = resolveFeelFloor(gesture, this.getFieldValue(comp, 'props.writeMode'));
+    if (floor <= MIN_DEGREES_PER_UNIT) return null;
+    const unit = resolveGesture(gesture) === 'scrub' ? 'pixels of drag' : 'degrees of arc';
+    return { min: floor, tooltipNote: `Current Feel floor: ${floor} ${unit} per step.` };
+  }
+
   renderPlainField(comp, field, mount, inputType) {
     const label = this.humanizeFieldLabel(field.path);
     const id = this.fieldDomId(field.path);
     const { value } = this.resolveEffectiveValue(comp, field);
+    const floorHint = inputType === 'number' ? this.resolveFeelFloorHint(comp, field) : null;
+    const tooltip = floorHint ? `${field.tooltip || ''} ${floorHint.tooltipNote}`.trim() : (field.tooltip || '');
+    const minAttr = floorHint ? ` min="${floorHint.min}"` : '';
     // 09: data-step-key drives NUMBER_STEP_LOOKUP (wheel/chevron stepping) —
     // keyed by the registry field path itself, so this is the ONLY new
     // attribute a registry-driven number field needs; the lookup table lives
     // entirely in this file, PropertyRegistry.js's field schema is untouched.
     const stepAttr = inputType === 'number' ? ` data-step-key="${escapeHtmlAttr(field.path)}"` : '';
     mount.innerHTML = `
-      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}"${stepAttr} />
+      <label title="${escapeHtmlAttr(tooltip)}">${escapeHtmlAttr(label)}</label>
+      <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}"${stepAttr}${minAttr} />
     `;
     mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
       const raw = e.target.value;

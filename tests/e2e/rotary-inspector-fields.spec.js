@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { resolveFeelFloor } from '../../widgets/components/rotaryEngine.js';
 
 /**
  * "Every property shipped here has a working Property Inspector control, with sensible
@@ -128,4 +129,87 @@ test('the Positions editor appears only in Detented, and Min/Max only outside it
   expect(await isUsable(page, 'props.positions')).toBe('missing');
   expect(await isUsable(page, 'props.min')).toMatch(/^(input|select)$/);
   expect(await isUsable(page, 'props.max')).toMatch(/^(input|select)$/);
+});
+
+// The Feel floor: Pulse Arc and Pulse Scrub cannot be configured finer than the engine can
+// dispatch. The Inspector surfaces the floor as the Feel field's minimum and explains it in
+// the tooltip; it does not enforce it. Neither number is written into this file: both come
+// from the same shared function the engine calls, so a re-measurement changes one place.
+const FEEL = '#rf-props-degreesPerUnit';
+
+/** The Feel field's `min` attribute, or null when it has none. */
+async function feelMinimum(page) {
+  return page.evaluate((sel) => document.querySelector(sel)?.getAttribute('min') ?? null, FEEL);
+}
+
+/** The tooltip on the Feel field's label. */
+async function feelTooltip(page) {
+  return page.evaluate((sel) => document.querySelector(sel)?.closest('.prop-field')?.querySelector('label')?.title ?? '', FEEL);
+}
+
+async function setWriteMode(page, mode) {
+  await page.locator('#rf-props-writeMode').selectOption(mode);
+}
+
+async function setGesture(page, gesture) {
+  await page.locator('#rf-props-gesture').selectOption(gesture);
+}
+
+test('Pulse shows the Arc floor as the Feel minimum, even when no Gesture was ever set', async ({ page }) => {
+  await selectRotary(page, 'build');
+  expect(await feelMinimum(page)).toBeNull();
+  await setWriteMode(page, 'pulse');
+  // The seeded Rotary stores no props.gesture at all, yet is an Arc Rotary.
+  expect(await page.evaluate(() => window.__studioApp.state.widgetDef.components.find((c) => c.id === 'seed-rot').props.gesture)).toBeUndefined();
+  expect(await isUsable(page, 'props.degreesPerUnit')).toBe('input');
+  expect(await feelMinimum(page)).toBe(String(resolveFeelFloor('arc', 'pulse')));
+});
+
+test('the Feel minimum follows the Gesture without reopening the panel', async ({ page }) => {
+  await selectRotary(page, 'build');
+  await setWriteMode(page, 'pulse');
+  await setGesture(page, 'scrub');
+  expect(await feelMinimum(page)).toBe(String(resolveFeelFloor('scrub', 'pulse')));
+  await setGesture(page, 'arc');
+  expect(await feelMinimum(page)).toBe(String(resolveFeelFloor('arc', 'pulse')));
+});
+
+test('Pulse Tap has no Feel minimum: one tap is one step', async ({ page }) => {
+  await selectRotary(page, 'build');
+  await setWriteMode(page, 'pulse');
+  await setGesture(page, 'tap');
+  expect(await isUsable(page, 'props.degreesPerUnit')).toBe('input');
+  expect(await feelMinimum(page)).toBeNull();
+});
+
+test('Absolute has no Feel minimum in any Gesture', async ({ page }) => {
+  await selectRotary(page, 'build');
+  for (const gesture of ['arc', 'scrub', 'tap']) {
+    await setGesture(page, gesture);
+    expect(await feelMinimum(page), gesture).toBeNull();
+  }
+});
+
+test('the Feel tooltip explains the Pulse floor, in the units the current Gesture uses', async ({ page }) => {
+  await selectRotary(page, 'build');
+  expect(await feelTooltip(page)).toMatch(/floor/i);
+
+  await setWriteMode(page, 'pulse');
+  expect(await feelTooltip(page)).toContain(`${resolveFeelFloor('arc', 'pulse')} degrees of arc`);
+  await setGesture(page, 'scrub');
+  expect(await feelTooltip(page)).toContain(`${resolveFeelFloor('scrub', 'pulse')} pixels of drag`);
+});
+
+test('a Feel typed below the floor is stored as typed, not clamped', async ({ page }) => {
+  // Deliberate: an authored value is never silently overwritten. The engine floors it at
+  // runtime, so the guarantee holds for a hand-written .fdwidget too; the Inspector only
+  // shows the minimum. Clamping here would look like a fix and quietly rewrite Authoring.
+  await selectRotary(page, 'build');
+  await setWriteMode(page, 'pulse');
+  const below = resolveFeelFloor('arc', 'pulse') / 2;
+  await page.locator(FEEL).fill(String(below));
+  await page.locator(FEEL).press('Tab');
+  const stored = await page.evaluate(() => window.__studioApp.state.widgetDef.components.find((c) => c.id === 'seed-rot').props.degreesPerUnit);
+  expect(stored).toBe(below);
+  await expect(page.locator(FEEL)).toHaveValue(String(below));
 });
