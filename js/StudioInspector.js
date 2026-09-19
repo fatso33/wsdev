@@ -21,7 +21,7 @@ import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 import { resolveFeelFloor, resolveGesture, MIN_DEGREES_PER_UNIT } from '../widgets/components/rotaryEngine.js';
-import { resolveWriteModeSwitch, describePulseFeel } from './RotaryDefaults.js';
+import { applyRotaryContextChange, isRotaryFeelContextPath, describePulseFeel } from './RotaryDefaults.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -3738,14 +3738,13 @@ export class StudioInspector {
   }
 
   /**
-   * Commits a Rotary's Write Mode together with whatever Feel change the switch implies, as
-   * ONE update so a single Undo reverts both. RotaryDefaults.resolveWriteModeSwitch decides
-   * what moves (only a Feel still sitting at the previous mode's default); anything else the
-   * Author set is carried across untouched, and the toast says what changed and why.
+   * Commits a Rotary's Write Mode or Gesture together with whatever Feel change it implies,
+   * as ONE update so a single Undo reverts both. RotaryDefaults decides what moves; anything
+   * else the Author set is carried across untouched, and the toast says what changed and why.
    */
-  commitRotaryWriteMode(comp, nextMode) {
-    const { propsPatch, message } = resolveWriteModeSwitch(comp.props, nextMode);
-    this.state.updateComponent(comp.id, { props: { ...(comp.props || {}), writeMode: nextMode, ...propsPatch } });
+  commitRotaryFeelContext(comp, path, value) {
+    const { props, message } = applyRotaryContextChange(comp.props, path.slice('props.'.length), value);
+    this.state.updateComponent(comp.id, { props });
     if (message) showToast(message);
   }
 
@@ -3769,11 +3768,13 @@ export class StudioInspector {
    */
   commitField(comp, path, value) {
     if (comp.__multiSelect) {
-      this.state.applyFieldToSelection(path, value);
+      const notes = this.state.applyFieldToSelection(path, value);
+      if (notes.length === 1) showToast(notes[0].message);
+      else if (notes.length > 1) showToast(`Feel was adjusted on ${notes.length} Rotaries to fit the new setting. Ctrl+Z undoes all of it.`);
       return;
     }
-    if (comp.type === 'core.rotary' && path === 'props.writeMode') {
-      this.commitRotaryWriteMode(comp, value);
+    if (comp.type === 'core.rotary' && isRotaryFeelContextPath(path)) {
+      this.commitRotaryFeelContext(comp, path, value);
       return;
     }
     const segs = path.split('.');

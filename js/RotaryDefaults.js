@@ -8,8 +8,9 @@
  * they sit next to the Feel floor they must clear; this module only decides where they
  * apply.
  *
- * A Write Mode switch never rewrites a value the Author chose. It moves Feel only when
- * Feel still equals the previous mode's default, and it never touches a write event: a
+ * A Write Mode or Gesture change never lowers or rewrites a Feel the Author chose. It moves
+ * Feel to the new default only when Feel still equals the old default, raises a Feel that
+ * would fall below the new floor, and never touches a write event: a
  * stored `binding.writeEvent` is kept (so switching back finds it) and is simply not
  * declared for a Pulse Rotary — see isWriteEventFieldSent in PropertyRegistry.js.
  *
@@ -59,34 +60,97 @@ export function resolveRotaryCreationDefaults(writeMode) {
 }
 
 /**
- * What switching a Rotary's Write Mode should change, given the props it has now.
- *
- * Feel moves from the old mode's default to the new mode's default only when it is stored
- * and still exactly equals the old default: that is the one case where nothing the Author
- * chose is being replaced. Any other stored value, and an unset one, is left alone. A
- * Gesture whose Feel means the same in both modes (Tap) resolves to the same default on
- * both sides and so never changes.
- *
- * @param {object|undefined} props - The Rotary's current props, before the switch.
- * @param {string|undefined} nextWriteMode - 'absolute' | 'pulse'.
- * @returns {{propsPatch: object, message: string|null}} `propsPatch` is spread onto props
- *   alongside the new writeMode; `message` says what changed and why, or is null when
- *   nothing did.
+ * The context Feel is judged in: the pair of write mode and Gesture, which together fix a
+ * Feel's default and its floor. Named as an Author would read it.
+ * @param {string|undefined} gesture
+ * @param {string|undefined} writeMode
+ * @returns {string} e.g. "Pulse Arc".
  */
-export function resolveWriteModeSwitch(props, nextWriteMode) {
-  const gesture = props?.gesture;
+function describeContext(gesture, writeMode) {
+  const mode = resolveWriteMode(writeMode) === 'pulse' ? 'Pulse' : 'Absolute';
+  const resolved = resolveGesture(gesture);
+  return `${mode} ${resolved.charAt(0).toUpperCase()}${resolved.slice(1)}`;
+}
+
+/**
+ * Whether a props path is one whose change moves a Rotary's Feel default and floor, and so
+ * has to go through applyRotaryContextChange rather than a plain field commit.
+ * @param {string} path - A component path such as 'props.writeMode'.
+ * @returns {boolean}
+ */
+export function isRotaryFeelContextPath(path) {
+  return path === 'props.writeMode' || path === 'props.gesture';
+}
+
+/**
+ * What a change of write mode or Gesture should do to a Rotary's stored Feel, so that a
+ * stored Feel is never below the floor of the context it is in.
+ *
+ *  - Feel still exactly equals the old context's default: it moves to the new context's
+ *    default.
+ *  - Any other stored Feel finer than the new floor is raised to the floor, keeping its
+ *    sign the way the engine does (the floor applies to the magnitude).
+ *  - Any other stored Feel at or above the new floor is left alone.
+ *  - An unset or non-numeric Feel is left as it is: nothing stored means nothing to
+ *    overwrite, and the engine already runs it at the default held to the floor.
+ *
+ * "Still the default" is judged by equality, so an Author-typed value that happens to equal
+ * the old default is indistinguishable from an untouched one and moves with it. That is
+ * accepted rather than tracked: recording "touched" would put authoring state in the file.
+ * Nothing changes when neither the write mode nor the Gesture does, since the floor has not
+ * moved.
+ *
+ * @param {object|undefined} props - The Rotary's current props, before the change.
+ * @param {{writeMode?: string, gesture?: string}} change - The prop being changed and its new value.
+ * @returns {{propsPatch: object, message: string|null}} `propsPatch` holds only Feel, or is
+ *   empty; `message` says which of the two adjustments happened and why, or is null.
+ */
+export function resolveFeelReconciliation(props, change) {
+  const none = { propsPatch: {}, message: null };
+  const previousGesture = props?.gesture;
   const previousMode = resolveWriteMode(props?.writeMode);
-  const nextMode = resolveWriteMode(nextWriteMode);
-  const from = resolveFeelDefault(gesture, previousMode);
-  const to = resolveFeelDefault(gesture, nextMode);
-  if (previousMode === nextMode || from === to || props?.degreesPerUnit !== from) {
-    return { propsPatch: {}, message: null };
+  const nextGesture = 'gesture' in change ? change.gesture : previousGesture;
+  const nextMode = resolveWriteMode('writeMode' in change ? change.writeMode : props?.writeMode);
+  if (previousMode === nextMode && resolveGesture(previousGesture) === resolveGesture(nextGesture)) return none;
+
+  const stored = props?.degreesPerUnit;
+  if (typeof stored !== 'number' || !Number.isFinite(stored)) return none;
+
+  const from = resolveFeelDefault(previousGesture, previousMode);
+  const to = resolveFeelDefault(nextGesture, nextMode);
+  const floor = resolveFeelFloor(nextGesture, nextMode);
+  const before = describeContext(previousGesture, previousMode);
+  const after = describeContext(nextGesture, nextMode);
+
+  if (stored === from) {
+    if (from === to) return none;
+    return {
+      propsPatch: { degreesPerUnit: to },
+      message: `Feel was still at the default for ${before} (${from}), so it moved to the default for ${after} (${to}). Ctrl+Z undoes this.`
+    };
   }
-  const modeLabel = (mode) => (mode === 'pulse' ? 'Pulse' : 'Absolute');
-  return {
-    propsPatch: { degreesPerUnit: to },
-    message: `Write Mode is now ${modeLabel(nextMode)}: Feel was still at the ${modeLabel(previousMode)} default (${from}), so it moved to the ${modeLabel(nextMode)} default (${to}). A Feel you set yourself is never changed. Ctrl+Z undoes this.`
-  };
+  if (Math.abs(stored) < floor) {
+    return {
+      propsPatch: { degreesPerUnit: stored < 0 ? -floor : floor },
+      message: `Feel ${stored} is finer than ${after} allows, so it was raised to the floor of ${floor}. Ctrl+Z undoes this.`
+    };
+  }
+  return none;
+}
+
+/**
+ * Applies a write mode or Gesture change to a Rotary's props together with the Feel
+ * adjustment that change implies, so both land as one update.
+ *
+ * @param {object|undefined} props - The Rotary's current props.
+ * @param {'writeMode'|'gesture'} key - The prop being changed.
+ * @param {*} value - Its new value.
+ * @returns {{props: object, message: string|null}} A new props object, and the notice for the
+ *   Author when Feel was adjusted.
+ */
+export function applyRotaryContextChange(props, key, value) {
+  const { propsPatch, message } = resolveFeelReconciliation(props, { [key]: value });
+  return { props: { ...(props || {}), [key]: value, ...propsPatch }, message };
 }
 
 /**

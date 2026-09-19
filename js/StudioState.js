@@ -5,6 +5,7 @@
 
 import { STUDIO_TEMPLATES } from './StudioTemplates.js';
 import { StudioValidator } from './StudioValidator.js';
+import { applyRotaryContextChange, isRotaryFeelContextPath } from './RotaryDefaults.js';
 import { DECK_EVENTS } from '../core/deckEvents.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
@@ -791,20 +792,31 @@ export class StudioState {
    * merges. Wholesale-overwrites the leaf at `path` — same "last write wins"
    * semantics commitField() already has for single-select.
    * No-ops below 2 selected components.
+   * A Rotary's write mode or Gesture goes through RotaryDefaults' Feel rule per Rotary,
+   * since each has its own Feel and its own current context.
    * @param {string} path - e.g. 'style.typography.color'
    * @param {*} value
+   * @returns {{componentId: string, message: string}[]} One entry per Rotary whose Feel was
+   *   adjusted; empty otherwise.
    */
   applyFieldToSelection(path, value) {
+    const notes = [];
     const ids = [...this.multiSelectedIds];
-    if (ids.length < 2) return;
+    if (ids.length < 2) return notes;
     const comps = ids.map((id) => this.getComponent(id)).filter(Boolean);
-    if (comps.length < 2) return;
+    if (comps.length < 2) return notes;
 
     this.saveHistory(`Bulk Style Edit (${comps.length} components)`);
     const segs = path.split('.');
     const topKey = segs[0];
     const cloneLevel = (obj) => (Array.isArray(obj) ? [...obj] : (obj && typeof obj === 'object' ? { ...obj } : {}));
     comps.forEach((comp) => {
+      if (comp.type === 'core.rotary' && isRotaryFeelContextPath(path)) {
+        const { props, message } = applyRotaryContextChange(comp.props, segs[1], value);
+        comp.props = props;
+        if (message) notes.push({ componentId: comp.id, message });
+        return;
+      }
       if (segs.length === 1) {
         comp[topKey] = value;
         return;
@@ -820,6 +832,7 @@ export class StudioState {
     });
     StudioValidator.syncCapabilities(this.widgetDef);
     this.notify('WIDGET_LAYOUT_UPDATED', {});
+    return notes;
   }
 
   getComponent(id) {
