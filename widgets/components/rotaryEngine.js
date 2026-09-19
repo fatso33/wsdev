@@ -76,8 +76,21 @@
  *                                  // Not an authored FDWS prop: it exists so the
  *                                  // engine's abstract-time contract stays testable.
  *     ringId: string,              // echoed back as `activeRing` (default 'default')
- *     tier: string,                // echoed back as `tier` (default 'base' — ticket 06
- *                                  // is what actually varies this)
+ *     acceleration: boolean,       // true turns Acceleration on (default off). Returned `tier`
+ *                                  // is then 'base' or 'coarse'; with it off, always 'base'.
+ *                                  // Inert for the Tap gesture and the Detented range, which
+ *                                  // have no rate of turn and no continuous value to scale.
+ *     accelerationEnterRate: number, // steps per second (one step is one unit of Feel) at or
+ *                                  // above which the Ring enters the coarse tier (default 20).
+ *     accelerationExitRate: number,  // steps per second strictly below which it returns to the
+ *                                  // fine tier. Must be under the enter rate; when it is not,
+ *                                  // half the enter rate is used, so the gap is never lost.
+ *     accelerationCoarseStep: number, // how many fine steps one step of travel becomes in the
+ *                                  // coarse tier (default 10). Enforced through the Feel floor:
+ *                                  // see resolveCoarseFeel.
+ *     accelerationFastEvents: boolean, // the caller has both fast step events bound. Pulse only:
+ *                                  // coarse steps are then tagged `fast` and NOT multiplied,
+ *                                  // since the aircraft's own fast event is the coarse step.
  *     previousState: object|undefined, // the `state` this module returned last call
  *   }
  *
@@ -392,6 +405,115 @@ export function resolveDegreesPerUnit(raw, gesture, writeMode) {
   return n < 0 ? -magnitude : magnitude;
 }
 
+// Acceleration: exactly two tiers, 'base' (the fine step) and 'coarse'. A continuous
+// velocity curve is rejected on purpose: a multiplier that differs every frame makes an
+// exact value unreachable. The tier is a hysteresis state machine, and it forgets nothing
+// it should not: dropping back to fine is immediate, with no momentum and no decay.
+const TIER_COARSE = 'coarse';
+const DEFAULT_ACCELERATION_ENTER_RATE = 20;
+const ACCELERATION_EXIT_RATIO = 0.5;
+const DEFAULT_ACCELERATION_COARSE_STEP = 10;
+
+// Rate of turn is judged once per this much elapsed time, from the travel accumulated over
+// all the moves in it, not per pointer event. Two events a millisecond apart carry no
+// speed information of their own, and judging each alone would let ordinary timing jitter
+// carry a steady turn across a threshold. Each window stands alone (memoryless), so the
+// tier follows the turn to within one window.
+const ACCELERATION_SAMPLE_MS = 40;
+
+function resolveCoarseStep(raw) {
+  const n = Number(raw ?? DEFAULT_ACCELERATION_COARSE_STEP);
+  return Number.isFinite(n) && n >= 1 ? n : DEFAULT_ACCELERATION_COARSE_STEP;
+}
+
+/**
+ * The Feel a Rotary runs at in the coarse tier: the fine Feel divided by the coarse step,
+ * then held to the Feel floor for this Gesture and write mode like any other Feel. The
+ * floor constrains the Feel the Rotary actually runs at, so a coarse step cannot make the
+ * step rate exceed what the floor guards against: in Pulse Arc and Pulse Scrub it caps the
+ * coarse step at fine Feel / floor, and everywhere it keeps the divisor above zero.
+ * A fine Feel already below the floor runs at the floor, so the coarse Feel is the floor too.
+ *
+ * @param {number|undefined} rawFeel - The authored Feel, resolved exactly as resolveDegreesPerUnit does.
+ * @param {string|undefined} gesture - 'arc' | 'scrub' | 'tap'.
+ * @param {string|undefined} writeMode - 'absolute' | 'pulse'.
+ * @param {number|undefined} coarseStep - How many fine steps one step of travel becomes; below 1 or non-finite means the default.
+ * @returns {number} A Feel whose magnitude is at least resolveFeelFloor and at most the fine Feel's; the sign of the fine Feel.
+ */
+export function resolveCoarseFeel(rawFeel, gesture, writeMode, coarseStep) {
+  const fine = resolveDegreesPerUnit(rawFeel, gesture, writeMode);
+  return resolveDegreesPerUnit(fine / resolveCoarseStep(coarseStep), gesture, writeMode);
+}
+
+/**
+ * Everything one call's gesture functions need to accelerate, or null when Acceleration
+ * does not apply. It does not apply when it is off, to Tap (a tap has no rate of turn),
+ * or to a Detented range (each step is a named position, not a quantity to scale).
+ *
+ * With fast step events (Pulse only) the coarse tier is not multiplied: the aircraft's own
+ * fast event is the coarse step, so scaling the step count as well would compound it.
+ */
+function resolveAcceleration(cfg, gesture, writeMode, rangeMode, fineFeel, now) {
+  if (cfg.acceleration !== true || gesture === 'tap' || rangeMode === 'detented') return null;
+  const enterRaw = Number(cfg.accelerationEnterRate ?? DEFAULT_ACCELERATION_ENTER_RATE);
+  const enterRate = Number.isFinite(enterRaw) && enterRaw > 0 ? enterRaw : DEFAULT_ACCELERATION_ENTER_RATE;
+  // The exit rate must stay strictly under the entry rate or the gap that prevents
+  // chatter is gone, so an authored value that is not under it falls back to half of it.
+  const exitRaw = Number(cfg.accelerationExitRate ?? enterRate * ACCELERATION_EXIT_RATIO);
+  const exitRate = Number.isFinite(exitRaw) && exitRaw > 0 && exitRaw < enterRate ? exitRaw : enterRate * ACCELERATION_EXIT_RATIO;
+  const fastEvents = writeMode === 'pulse' && cfg.accelerationFastEvents === true;
+  const coarseFeel = resolveCoarseFeel(cfg.degreesPerUnit, gesture, writeMode, cfg.accelerationCoarseStep);
+  return { now, enterRate, exitRate, fastEvents, coarseScale: fastEvents ? 1 : Math.abs(fineFeel / coarseFeel) };
+}
+
+function createAccelerationState(now = null) {
+  return { accelTier: DEFAULT_TIER, accelSampleStart: now, accelSampleTravel: 0 };
+}
+
+/**
+ * Advances the tier for one move and scales that move's travel by it.
+ *
+ * `travelUnits` is finger travel in units of the FINE Feel, whatever the tier. Measuring
+ * the rate at the fine Feel is what keeps the tier from feeding back on itself: were it
+ * measured at the coarse Feel, entering the coarse tier would inflate its own reading.
+ * The tier is decided before this move's travel is scaled, so a move that ends a slow
+ * window is already unscaled.
+ *
+ * @returns {{state: object, deltaValue: number, coarse: boolean}}
+ */
+function accelerateTravel(state, accel, travelUnits) {
+  if (!accel) return { state, deltaValue: travelUnits, coarse: false };
+  let tier = state.accelTier ?? DEFAULT_TIER;
+  let sampleTravel = (state.accelSampleTravel ?? 0) + Math.abs(travelUnits);
+  let sampleStart = state.accelSampleStart ?? accel.now;
+  const elapsed = accel.now - sampleStart;
+  if (elapsed >= ACCELERATION_SAMPLE_MS) {
+    const rate = (sampleTravel * 1000) / elapsed;
+    if (tier === TIER_COARSE) tier = rate < accel.exitRate ? DEFAULT_TIER : TIER_COARSE;
+    else tier = rate >= accel.enterRate ? TIER_COARSE : DEFAULT_TIER;
+    sampleTravel = 0;
+    sampleStart = accel.now;
+  }
+  const coarse = tier === TIER_COARSE;
+  return {
+    state: { ...state, accelTier: tier, accelSampleStart: sampleStart, accelSampleTravel: sampleTravel },
+    deltaValue: coarse ? travelUnits * accel.coarseScale : travelUnits,
+    coarse
+  };
+}
+
+/**
+ * Adds a move's value change to the unclamped raw value. A Bounded Ring normally absorbs
+ * overshoot past a bound like a physical end-stop, so it must be wound back before the
+ * value moves again. A coarse step multiplies how much can be absorbed at once, which would
+ * leave an exact value near the bound unreachable after slowing down; so a coarse move
+ * clamps at the bound and carries no overshoot.
+ */
+function advanceRawValue(rawValue, deltaValue, coarse, min, max, mode) {
+  const next = rawValue + deltaValue;
+  return coarse && mode === 'bounded' ? clamp(next, min, max) : next;
+}
+
 function clamp(value, min, max) {
   const lo = Math.min(min, max);
   const hi = Math.max(min, max);
@@ -416,6 +538,9 @@ function shortestAngleDeltaDeg(fromRad, toRad) {
  *     into whole steps.
  *   - pulsePendingSteps: whole Pulse steps queued but not yet handed back as 'turn'
  *     emits, drained by applyPulseFrameCoalescing.
+ *   - pulsePendingFastSteps: the same, for steps taken in the coarse tier of a Rotary with
+ *     fast step events. Kept apart so a queued step stays a fast step after the Ring has
+ *     slowed to the fine tier, and drained ahead of pulsePendingSteps.
  *   - pulseHoldForRelease: true while an 'onRelease'-timed Pulse gesture is still
  *     engaged — the coalescer holds pending steps rather than draining them.
  *   - frameStamp / frameEmitCount: the per-frame coalescer's own bookkeeping, shared
@@ -428,6 +553,7 @@ function createDispatchState() {
   return {
     pulseAccumulator: 0,
     pulsePendingSteps: 0,
+    pulsePendingFastSteps: 0,
     pulseHoldForRelease: false,
     frameStamp: null,
     frameEmitCount: 0,
@@ -483,7 +609,8 @@ export function createRotaryState(config, telemetry) {
       // correctly reads as "nothing has moved yet" rather than firing a spurious
       // detent/limit on a bare grab that never turned.
       detentIndex: index,
-      ...createDispatchState()
+      ...createDispatchState(),
+      ...createAccelerationState()
     };
   }
 
@@ -505,7 +632,8 @@ export function createRotaryState(config, telemetry) {
     telemetryUnmatched: false,
     unmatchedValue: null,
     stableIndex: null,
-    ...createDispatchState()
+    ...createDispatchState(),
+    ...createAccelerationState()
   };
 }
 
@@ -562,7 +690,7 @@ function endContinuousDrag(state, min, max, mode, ring) {
  * of the (possibly tiny) real radius is what prevents a grab near the center
  * from spinning the Ring out wildly for a small physical finger movement.
  */
-function processArcGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit) {
+function processArcGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, accel) {
   const minRadius = cfg.minEffectiveRadius ?? DEFAULT_MIN_EFFECTIVE_RADIUS;
 
   if (gestureEvent.type === 'start') {
@@ -603,16 +731,17 @@ function processArcGesture(state, cfg, gestureEvent, min, max, mode, ring, degPe
       const tangentialDisplacement = ddx * tangentX + ddy * tangentY;
       deltaAngleDeg = (tangentialDisplacement / minRadius) * (180 / Math.PI);
     }
-    const deltaValue = deltaAngleDeg / degPerUnit;
+    const stepped = accelerateTravel(state, accel, deltaAngleDeg / degPerUnit);
+    const deltaValue = stepped.deltaValue;
 
     // Accumulate into the *unclamped* raw value, never the clamped display
     // value. This is what makes a bound reached mid-gesture behave like a
     // physical end-stop: continuing to turn past the limit is "absorbed" and
     // has to be wound back before the value moves again, rather than the
     // knob instantly snapping to follow the finger the moment it reverses.
-    const rawValue = state.rawValue + deltaValue;
+    const rawValue = advanceRawValue(state.rawValue, deltaValue, stepped.coarse, min, max, mode);
     const value = resolveDisplayValue(rawValue, min, max, mode);
-    const next = { ...state, rawValue, lastPos: curr };
+    const next = { ...stepped.state, rawValue, lastPos: curr };
 
     const emits = [];
     if (deltaValue !== 0) {
@@ -640,7 +769,7 @@ function processArcGesture(state, cfg, gestureEvent, min, max, mode, ring, degPe
  * No radius/minimum-effective-radius concept applies: a linear drag has no
  * center to measure a radius from.
  */
-function processScrubGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit) {
+function processScrubGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, accel) {
   if (gestureEvent.type === 'start') {
     return startContinuousDrag(state, min, max, mode, ring, gestureEvent);
   }
@@ -652,14 +781,15 @@ function processScrubGesture(state, cfg, gestureEvent, min, max, mode, ring, deg
     const prev = state.lastPos;
     const curr = { dx: gestureEvent.dx, dy: gestureEvent.dy };
     const deltaPixels = prev.dy - curr.dy; // up (dy decreasing) is positive
-    const deltaValue = deltaPixels / degPerUnit;
+    const stepped = accelerateTravel(state, accel, deltaPixels / degPerUnit);
+    const deltaValue = stepped.deltaValue;
 
     // Same "absorb the overshoot at a bound" behaviour as Arc: accumulate into
     // the unclamped raw value so reversing direction has to wind back through
     // whatever overshoot happened before the value actually moves again.
-    const rawValue = state.rawValue + deltaValue;
+    const rawValue = advanceRawValue(state.rawValue, deltaValue, stepped.coarse, min, max, mode);
     const value = resolveDisplayValue(rawValue, min, max, mode);
-    const next = { ...state, rawValue, lastPos: curr };
+    const next = { ...stepped.state, rawValue, lastPos: curr };
 
     const emits = [];
     if (deltaValue !== 0) {
@@ -788,7 +918,7 @@ function processTapGesture(state, cfg, gestureEvent, min, max, mode, ring, degPe
  * `state.rawValue`; it was resolveRotary withholding telemetry from it while engaged
  * that made it stale, and that is what ticket 19 fixes upstream of this function.
  */
-function queuePulseSteps(state, cfg, steps, min, max, mode) {
+function queuePulseSteps(state, cfg, steps, min, max, mode, fast = false) {
   let allowedSteps = steps;
   if (steps !== 0 && mode !== 'continuous' && cfg.hasReadableValue && typeof state.rawValue === 'number') {
     const known = state.rawValue;
@@ -796,7 +926,8 @@ function queuePulseSteps(state, cfg, steps, min, max, mode) {
     else if (steps < 0 && known <= min) allowedSteps = 0;
   }
   if (allowedSteps === 0) return state;
-  return { ...state, pulsePendingSteps: (state.pulsePendingSteps ?? 0) + allowedSteps };
+  const queue = fast ? 'pulsePendingFastSteps' : 'pulsePendingSteps';
+  return { ...state, [queue]: (state[queue] ?? 0) + allowedSteps };
 }
 
 /**
@@ -818,7 +949,7 @@ function queuePulseSteps(state, cfg, steps, min, max, mode) {
  * the tapped direction on release — the discrete-action shape a payware tap-to-pulse
  * control (many autopilot knobs) actually has.
  */
-function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, gesture) {
+function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, gesture, accel) {
   if (gestureEvent.type === 'start') {
     const value = resolveDisplayValue(state.rawValue, min, max, mode);
     const next = {
@@ -860,7 +991,8 @@ function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, deg
       deltaValue = deltaAngleDeg / degPerUnit;
     }
 
-    const accumulator = (state.pulseAccumulator ?? 0) + deltaValue;
+    const stepped = accelerateTravel(state, accel, deltaValue);
+    const accumulator = (state.pulseAccumulator ?? 0) + stepped.deltaValue;
     // Nudged by a tiny epsilon before truncating: the trig round-trip above (degrees
     // -> radians -> degrees) lands a value that SHOULD be an exact whole step (e.g.
     // exactly 10 degrees of arc at degreesPerUnit=10) a hair under it instead (e.g.
@@ -871,9 +1003,9 @@ function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, deg
     const nudged = accumulator + (accumulator >= 0 ? EPS : -EPS);
     const steps = Math.trunc(nudged);
     const nextAccumulator = accumulator - steps;
-    let next = { ...state, lastPos: curr, pulseAccumulator: nextAccumulator };
+    let next = { ...stepped.state, lastPos: curr, pulseAccumulator: nextAccumulator };
     if (steps !== 0) {
-      next = queuePulseSteps(next, cfg, steps, min, max, mode);
+      next = queuePulseSteps(next, cfg, steps, min, max, mode, !!accel?.fastEvents && stepped.coarse);
     }
     return { state: next, emits: [] };
   }
@@ -920,35 +1052,46 @@ function processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, deg
  * Held (emits nothing, cap untouched) while `state.pulseHoldForRelease` is true —
  * 'onRelease' dispatch timing's own gate; steps still queue during the gesture, they
  * just don't drain until it ends.
+ *
+ * The two queues (fast steps, then ordinary steps) share the one per-frame cap. Emits from
+ * the fast queue carry `payload.fast`, which is how the Component knows to send the
+ * aircraft's fast step event for them.
  */
 function applyPulseFrameCoalescing(state, frameId, min, max, mode, ring) {
   const sameFrame = state.frameStamp === frameId;
   const frameEmitCount = sameFrame ? (state.frameEmitCount ?? 0) : 0;
+  const pendingFast = state.pulsePendingFastSteps ?? 0;
   const pending = state.pulsePendingSteps ?? 0;
 
-  if (state.pulseHoldForRelease || pending === 0) {
+  if (state.pulseHoldForRelease || (pending === 0 && pendingFast === 0)) {
     return { state: { ...state, frameStamp: frameId, frameEmitCount }, emits: [] };
   }
 
-  const capRemaining = Math.max(MAX_PULSE_STEPS_PER_FRAME - frameEmitCount, 0);
-  const magnitude = Math.min(Math.abs(pending), capRemaining);
-  const toEmit = Math.sign(pending) * magnitude;
-  const remaining = pending - toEmit;
-
+  let capRemaining = Math.max(MAX_PULSE_STEPS_PER_FRAME - frameEmitCount, 0);
   const value = resolveDisplayValue(state.rawValue, min, max, mode);
   const emits = [];
-  for (let i = 0; i < Math.abs(toEmit); i++) {
-    emits.push({
-      trigger: 'turn',
-      payload: { value, delta: Math.sign(toEmit), direction: toEmit > 0 ? 'cw' : 'ccw', ring }
-    });
-  }
+
+  const drain = (queued, fast) => {
+    const magnitude = Math.min(Math.abs(queued), capRemaining);
+    const toEmit = Math.sign(queued) * magnitude;
+    for (let i = 0; i < magnitude; i++) {
+      emits.push({
+        trigger: 'turn',
+        payload: { value, delta: Math.sign(toEmit), direction: toEmit > 0 ? 'cw' : 'ccw', ring, ...(fast ? { fast: true } : {}) }
+      });
+    }
+    capRemaining -= magnitude;
+    return queued - toEmit;
+  };
+  const remainingFast = drain(pendingFast, true);
+  const remaining = drain(pending, false);
 
   const next = {
     ...state,
     pulsePendingSteps: remaining,
+    pulsePendingFastSteps: remainingFast,
     frameStamp: frameId,
-    frameEmitCount: frameEmitCount + Math.abs(toEmit)
+    frameEmitCount: frameEmitCount + emits.length
   };
   return { state: next, emits };
 }
@@ -1043,24 +1186,25 @@ function applyDispatchTiming(state, timing, emits, gestureEvent, value, isDetent
  * per-gesture dispatch, since it changes what an emit MEANS (a step, not a value)
  * uniformly across all three gestures.
  */
-function processGesture(state, cfg, gestureEvent) {
+function processGesture(state, cfg, gestureEvent, now) {
   const { mode, min, max } = resolveEffectiveRange(cfg);
   const ring = cfg.ringId ?? DEFAULT_RING_ID;
   const gesture = resolveGesture(cfg.gesture);
   const writeMode = resolveWriteMode(cfg.writeMode);
   const degPerUnit = resolveDegreesPerUnit(cfg.degreesPerUnit, gesture, writeMode);
+  const accel = resolveAcceleration(cfg, gesture, writeMode, mode, degPerUnit, now);
 
   if (writeMode === 'pulse') {
-    return processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, gesture);
+    return processPulseGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, gesture, accel);
   }
 
   if (gesture === 'scrub') {
-    return processScrubGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit);
+    return processScrubGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, accel);
   }
   if (gesture === 'tap') {
     return processTapGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit);
   }
-  return processArcGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit);
+  return processArcGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, accel);
 }
 
 /**
@@ -1307,9 +1451,13 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
     if (gestureEvent.type === 'start' && state.phase === 'reconciling') {
       state = { ...state, phase: 'idle', pendingDispatchValue: null, reconcileStartedAt: null };
     }
-    const gestureResult = processGesture(state, cfg, gestureEvent);
+    const gestureResult = processGesture(state, cfg, gestureEvent, now);
     state = gestureResult.state;
     emits = emits.concat(gestureResult.emits);
+    // Every grab starts in the base tier with a fresh rate sample, and a release
+    // returns to it, so no speed is ever carried from one gesture into the next.
+    if (gestureEvent.type === 'start') state = { ...state, ...createAccelerationState(now) };
+    else if (gestureEvent.type === 'end') state = { ...state, ...createAccelerationState() };
     if (state.phase === 'reconciling' && state.reconcileStartedAt == null) {
       state = { ...state, reconcileStartedAt: now };
     }
@@ -1417,7 +1565,7 @@ export function resolveRotary(config, gestureEvent, telemetry, now) {
     value,
     angle,
     activeRing: ring,
-    tier: cfg.tier ?? DEFAULT_TIER,
+    tier: cfg.acceleration === true ? (state.accelTier ?? DEFAULT_TIER) : DEFAULT_TIER,
     // Ticket 04: which authored position (by index into cfg.positions) is
     // currently active, when rangeMode is 'detented' — null in every other
     // mode, and null in Detented too when telemetry matches no position. A

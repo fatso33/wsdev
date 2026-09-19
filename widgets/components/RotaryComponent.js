@@ -157,6 +157,15 @@ export class RotaryComponent extends BaseComponent {
       max: props.max ?? DEFAULT_MAX,
       positions: Array.isArray(props.positions) ? props.positions : [],
       degreesPerUnit: props.degreesPerUnit ?? DEFAULT_DEGREES_PER_UNIT,
+      // Acceleration is threaded through as authored; the engine owns every default and
+      // guard. Fast step events count as bound only as a pair, since a coarse turn in
+      // the direction with no fast event would otherwise fall back to the ordinary one
+      // while the engine had already stopped multiplying its steps.
+      acceleration: props.acceleration === true,
+      accelerationEnterRate: props.accelerationEnterRate,
+      accelerationExitRate: props.accelerationExitRate,
+      accelerationCoarseStep: props.accelerationCoarseStep,
+      accelerationFastEvents: !!(this.def.binding?.fastIncrementEvent && this.def.binding?.fastDecrementEvent),
       sweepDegrees: props.sweepDegrees ?? DEFAULT_SWEEP_DEGREES,
       pollPeriodMs: this.resolvePollPeriodMs(),
       previousState: this.rotaryState
@@ -236,7 +245,7 @@ export class RotaryComponent extends BaseComponent {
         // really did take. `undefined` means nothing actually went out (no write event
         // bound, or a skipped repeat): no outcome, so it must not clear a real failure.
         const outcome = cfg.writeMode === 'pulse'
-          ? this.writePulseStep(emit.payload.delta)
+          ? this.writePulseStep(emit.payload.delta, emit.payload.fast === true)
           : this.writeValue(emit.payload.value);
         if (outcome === false) this.pendingDispatchFailure = true;
         else if (outcome === true) this.pendingDispatchFailure = false;
@@ -247,7 +256,7 @@ export class RotaryComponent extends BaseComponent {
     // (rotaryEngine.js's applyPulseFrameCoalescing) — keep re-resolving on later
     // animation frames, even with no further gesture, until the queue drains, so a
     // turn that outran the cap still finishes delivering every step after release.
-    if (this.rotaryState?.pulsePendingSteps) {
+    if (this.hasPulseStepsWaiting()) {
       this.schedulePulseDrain();
     }
 
@@ -345,14 +354,24 @@ export class RotaryComponent extends BaseComponent {
    * its magnitude is always exactly 1 (one step, one write) per rotaryEngine.js's own
    * per-step emit construction.
    * @param {number} delta
+   * @param {boolean} [fast] - a coarse-tier step of a Rotary with fast step events: sends
+   *   the aircraft's fast event for that direction instead of the ordinary one.
    * @returns {boolean|undefined} same contract as writeValue() — true/false on a real
    *   outcome, undefined when nothing went out (no matching event bound, or delta 0).
    */
-  writePulseStep(delta) {
+  writePulseStep(delta, fast = false) {
     if (!delta) return undefined;
-    const event = delta > 0 ? this.def.binding?.incrementEvent : this.def.binding?.decrementEvent;
+    const binding = this.def.binding;
+    const fastEvent = delta > 0 ? binding?.fastIncrementEvent : binding?.fastDecrementEvent;
+    const event = (fast && fastEvent) || (delta > 0 ? binding?.incrementEvent : binding?.decrementEvent);
     if (!event) return undefined;
     return this.widget?.dispatchSimEvent?.(event, 1);
+  }
+
+  /** Whether any Pulse step, ordinary or fast, is still queued in the engine's state. */
+  hasPulseStepsWaiting() {
+    const state = this.rotaryState;
+    return !!(state && (state.pulsePendingSteps || state.pulsePendingFastSteps));
   }
 
   /**
@@ -367,7 +386,7 @@ export class RotaryComponent extends BaseComponent {
     if (typeof requestAnimationFrame !== 'function') return;
     const step = (timestamp) => {
       this.pulseDrainRaf = null;
-      if (!this.rotaryState || !this.rotaryState.pulsePendingSteps) return;
+      if (!this.hasPulseStepsWaiting()) return;
       this.resolve(null, null, timestamp);
     };
     this.pulseDrainRaf = requestAnimationFrame(step);

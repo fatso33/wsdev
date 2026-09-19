@@ -2225,6 +2225,30 @@ export class StudioInspector {
       const incrementIsCustom = !!binding.incrementEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.incrementEvent);
       const decrementIsCustom = !!binding.decrementEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.decrementEvent);
 
+      // Acceleration's fast step events: only a Pulse Rotary with Acceleration enabled ever
+      // sends them. Gated like Increment/Decrement above (inline display, so the tier pass
+      // cannot undo it) and, like them, never cleared when hidden, so switching Acceleration
+      // off and on again finds the events still set. Advanced tier only: they are for
+      // aircraft that expose a dedicated fast step event, which is the uncommon case.
+      const isFastEventRotary = isPulseRotary && comp.props?.acceleration === true;
+      const fastEventFields = (kind, field, label, direction) => {
+        const isCustom = !!binding[field] && !getDeckEventsByKind('write').some((e) => e.name === binding[field]);
+        return `
+        <div class="prop-field" data-tier="advanced" id="c-bind-${kind}-field" style="${isFastEventRotary ? '' : 'display:none;'}">
+          <label>${label} <span class="prop-hint" title="FDWS v1.30: dispatched once per step turned ${direction} at the coarse Acceleration speed, in place of the ordinary event above, when Write Mode is Pulse and Acceleration is on. Bind both fast events or neither: a single one is ignored.">ⓘ</span></label>
+          <select id="c-bind-${kind}" class="prop-select">${buildDefaultOptions('write', binding[field])}</select>
+        </div>
+        <div class="prop-field prop-custom-block ${(isFastEventRotary && isCustom) ? '' : 'hidden'}" id="c-bind-${kind}-custom-block">
+          <label>Custom Deck Event (used by another saved widget)</label>
+          <select id="c-bind-${kind}-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding[field])}</select>
+          <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
+          <div class="prop-paste-row">
+            <input type="text" id="c-bind-${kind}-custom-input" class="prop-input" value="${isCustom ? (binding[field] || '') : ''}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+          </div>
+          <div class="prop-sanitize-diff hidden" id="c-bind-${kind}-custom-diff"></div>
+        </div>`;
+      };
+
       body.innerHTML = `
         <div class="prop-field" data-tier="simple-only">
           <label>Connect to Simulator — Value to Show <span class="prop-hint" title="Pick a category, then the specific value this component should read. Fills in the same field Advanced mode's Read Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.">ⓘ</span></label>
@@ -2374,6 +2398,8 @@ export class StudioInspector {
           </div>
           <div class="prop-sanitize-diff hidden" id="c-bind-decrement-custom-diff"></div>
         </div>
+        ${fastEventFields('fastincrement', 'fastIncrementEvent', 'Fast Increment Deck Event (Coarse Clockwise)', 'clockwise')}
+        ${fastEventFields('fastdecrement', 'fastDecrementEvent', 'Fast Decrement Deck Event (Coarse Counter-Clockwise)', 'counter-clockwise')}
         ` : ''}
 
         <div class="prop-field prop-custom-block ${stateIsCustom ? '' : 'hidden'}" id="c-bind-state-custom-block">
@@ -2501,6 +2527,8 @@ export class StudioInspector {
       if (comp.type === 'core.rotary') {
         wireBindingKind('increment', 'incrementEvent');
         wireBindingKind('decrement', 'decrementEvent');
+        wireBindingKind('fastincrement', 'fastIncrementEvent');
+        wireBindingKind('fastdecrement', 'fastDecrementEvent');
       }
 
       // Part 5a, Slice 1: additive — the dropdown/custom-input fields above

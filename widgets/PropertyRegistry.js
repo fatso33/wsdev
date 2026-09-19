@@ -354,6 +354,11 @@ export const COMMON_FIELDS = [
   // convention core.rotary's own Positions field already uses for Range Mode.
   { path: 'binding.incrementEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.writeMode', equals: 'pulse' }, default: undefined, tooltip: 'Deck Event dispatched once per step turned clockwise, in Pulse write mode.' },
   { path: 'binding.decrementEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.writeMode', equals: 'pulse' }, default: undefined, tooltip: 'Deck Event dispatched once per step turned counter-clockwise, in Pulse write mode.' },
+  // Acceleration's dedicated fast step events, Rotary-only. Sent instead of repeating the
+  // ordinary pair above at the coarse speed, in Pulse write mode with Acceleration on.
+  // They only take effect as a pair: see RotaryComponent.js's rotaryConfig().
+  { path: 'binding.fastIncrementEvent', control: 'eventPicker', tier: 'advanced', group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.acceleration', equals: true }, default: undefined, tooltip: 'Deck Event dispatched once per step turned clockwise at the coarse speed, in Pulse write mode with Acceleration enabled: the aircraft\'s own fast step event, sent instead of repeating the Increment Event. Bind both fast events or neither.' },
+  { path: 'binding.fastDecrementEvent', control: 'eventPicker', tier: 'advanced', group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.acceleration', equals: true }, default: undefined, tooltip: 'Deck Event dispatched once per step turned counter-clockwise at the coarse speed, in Pulse write mode with Acceleration enabled: the aircraft\'s own fast step event, sent instead of repeating the Decrement Event. Bind both fast events or neither.' },
   { path: 'binding.eventCategory', control: 'text', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Groups related Deck Events for the event picker’s filtering — cosmetic, doesn’t affect behavior.' }
 ];
 
@@ -391,15 +396,21 @@ export const WRITE_EVENT_BINDING_FIELDS = COMMON_FIELDS
  * step at a time and never sends binding.writeEvent, so a writeEvent left on it (kept so
  * switching back to Absolute finds it intact) is not a write the Widget makes and must
  * not be declared as one — in capabilities, or to PC Bridge's install-time registration.
- * Every consumer of WRITE_EVENT_BINDING_FIELDS that turns a field into a declared write
- * asks this first, so the rule lives in one place.
+ * The same holds for the fast step events, which only a Pulse Rotary with Acceleration
+ * enabled ever sends. Every consumer of WRITE_EVENT_BINDING_FIELDS that turns a field
+ * into a declared write asks this first, so the rule lives in one place.
  *
- * @param {{type?: string, props?: {writeMode?: string}}} comp - A component definition.
+ * @param {{type?: string, props?: {writeMode?: string, acceleration?: boolean}}} comp - A component definition.
  * @param {string} field - One of WRITE_EVENT_BINDING_FIELDS.
- * @returns {boolean} false only for writeEvent on a Pulse Rotary.
+ * @returns {boolean} false for writeEvent on a Pulse Rotary, and for a fast step event on a Rotary that is not Pulse with Acceleration on.
  */
 export function isWriteEventFieldSent(comp, field) {
-  return !(comp?.type === 'core.rotary' && field === 'writeEvent' && comp.props?.writeMode === 'pulse');
+  if (comp?.type !== 'core.rotary') return true;
+  if (field === 'writeEvent') return comp.props?.writeMode !== 'pulse';
+  if (field === 'fastIncrementEvent' || field === 'fastDecrementEvent') {
+    return comp.props?.writeMode === 'pulse' && comp.props?.acceleration === true;
+  }
+  return true;
 }
 
 export const TYPE_FIELDS = {
@@ -666,6 +677,13 @@ export const TYPE_FIELDS = {
       showWhen: { path: 'props.rangeMode', equals: 'detented' },
       tooltip: 'The named positions this Detented Ring snaps between (e.g. OFF / L / R / BOTH / START), evenly spaced across Sweep°. A position marked Momentary fires on arrival and springs back to the previous position on release, the way a magneto\'s START does.' },
     { path: 'props.degreesPerUnit', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 1, tooltip: 'The knob\'s "feel" — reinterpreted per Gesture above. Arc: degrees of arc travelled per 1 unit of value (or, when Range Mode is Detented, per one step between positions). Scrub: pixels of straight drag per 1 unit. Tap: units changed by a single tap. Higher means finer/slower for Arc and Scrub; for Tap it is the step size itself. In Pulse write mode Feel is the size of one step, since the Ring owns no value: degrees of arc per step for Arc (360 divided by it is the steps per revolution), pixels of drag per step for Scrub. A new Pulse Rotary starts well above the floor below. In Pulse write mode, Arc and Scrub have a higher Feel floor: each step is one write to the sim, and a finer Feel could produce steps faster than the sim link can send them, so the knob would keep moving after the finger lifts. Absolute and Pulse Tap have a floor of 0.01. A Feel typed below the floor is committed as the floor instead; a file that already stores a finer Feel keeps it as stored but runs at the floor. In Absolute write mode, a negative value reverses the knob\'s turn direction for Arc and Scrub (Tap ignores the sign).' },
+    // Acceleration: two discrete tiers (the fine step Feel gives, and a coarse step), never a
+    // continuous curve. Off by default and enabled per Rotary; the detail fields carry a
+    // showWhen on the enable flag so a Rotary without Acceleration shows none of them.
+    { path: 'props.acceleration', control: 'checkbox', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: false, tooltip: 'Turn faster to move in larger steps. Off by default: a radio being tuned across a wide range needs it, a heading bug does not. There are exactly two speeds, the fine step Feel already gives and a coarse step, with nothing in between, so an exact value is always reachable by slowing down, and slowing down returns to the fine step straight away. Arc and Scrub only: a Tap Rotary and a Detented Rotary have no rate of turn to measure, so they ignore it.' },
+    { path: 'props.accelerationCoarseStep', control: 'number', tier: 'simple', guided: true, group: 'Range', fdwsMin: '1.30', default: 10, showWhen: { path: 'props.acceleration', equals: true }, tooltip: 'How many fine steps one step of travel becomes at the coarse speed: 10 makes a fast turn move ten times as far as a slow one. The Feel floor still holds at the coarse speed, so in Pulse write mode the coarse step cannot make an Arc or Scrub Rotary finer than the floor: at a Feel of 12 and an Arc floor of 6, the most it can be is 2. For a bigger jump in Pulse, bind the aircraft\'s Fast Increment and Decrement Events under Bindings; the coarse speed then sends those instead, and this number is not used.' },
+    { path: 'props.accelerationEnterRate', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: 20, showWhen: { path: 'props.acceleration', equals: true }, tooltip: 'How fast the turn must be to switch to the coarse speed, in steps per second, where one step is one unit of Feel. The Rotary switches at or above this rate, so a higher number asks for a faster turn.' },
+    { path: 'props.accelerationExitRate', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: 10, showWhen: { path: 'props.acceleration', equals: true }, tooltip: 'The rate, in steps per second, below which the Rotary returns to the fine step. Keep it under the Enter Rate: the gap between the two is what stops a steady turn near the threshold flickering between speeds. If it is not under the Enter Rate, half the Enter Rate is used.' },
     { path: 'props.sweepDegrees', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: 270, tooltip: 'How far the knob visibly rotates across its whole range, in degrees. Purely visual — it does not change the values the knob produces.' },
     { path: 'props.startAngle', control: 'number', tier: 'advanced', group: 'Range', fdwsMin: '1.30', default: -135, tooltip: 'Where the indicator points at the minimum value, in degrees clockwise from straight up (12 o\'clock) — same convention as core.gauge\'s Arc Start Angle. Default -135, which puts mid-range straight up over the default 270° sweep.' },
     { path: 'props.faceColor', control: 'color', tier: 'advanced', group: 'Knob', fdwsMin: '1.30', default: undefined, tooltip: 'Fills the knob disc. Leave unset to let this component’s own Background (and its state/conditional variants) show through instead.' },

@@ -742,7 +742,7 @@ export class StudioValidator {
           WRITE_EVENT_BINDING_FIELDS.filter((field) => field !== 'writeEvent').forEach((field) => {
             if (comp.binding[field]) {
               validateBindingValue(comp.id, 'event', comp.binding[field], field);
-              detectedWriteEvents.add(comp.binding[field].trim());
+              if (isWriteEventFieldSent(comp, field)) detectedWriteEvents.add(comp.binding[field].trim());
             }
           });
           // FDWS v1.3: a "$context.<key>.value" binding resolves against the popover's
