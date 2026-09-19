@@ -30,7 +30,7 @@ const WRITE_VALUE_FORMATS = ['HZ_INT', 'KHZ_INT', 'MHZ_FLOAT', 'BCD_HEX', 'RAW_I
 export class SecurityValidator {
   // Event Name Whitelist Regex: Max 64 chars, case-tolerant alphanumeric, underscore, colon, dot,
   // hyphen. Case must be preserved (not normalized) — this now covers three distinct things that
-  // are all case-sensitive: default Deck Event names (shared/deckEvents.js, camelCase, e.g.
+  // are all case-sensitive: default Deck Event names (shared/core/deckEvents.js, camelCase, e.g.
   // "com1Swap"), custom Deck Event names a widget author chose, and raw SimConnect H:/K: escape-
   // hatch identifiers (FDWS v1.2 §1.5) — MSFS H:Events in particular only fire if the exact
   // declared casing is sent; forcing uppercase here would silently break them.
