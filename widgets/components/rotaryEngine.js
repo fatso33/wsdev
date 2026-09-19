@@ -311,9 +311,9 @@ const RECONCILIATION_TIMEOUT_MULTIPLIER = 2;
 // than in the registry because the engine is the only layer every caller goes through
 // — Studio's preview host, the PWA and a raw `.fdwidget` import alike.
 /** The smallest Feel magnitude any Rotary can resolve to: the guard that keeps the
- * divisor above zero. It is also the "no Feel floor applies" value returned by
- * resolveFeelFloor, so a caller can tell a real floor from an exempt case by comparing
- * against it. */
+ * divisor above zero. It is the Feel floor of Absolute and of Pulse Tap, and the lowest
+ * value resolveFeelFloor returns, so a caller can tell a Feel floor set by the step
+ * stream (Pulse Arc, Pulse Scrub) from the smallest one by comparing against it. */
 export const MIN_DEGREES_PER_UNIT = 0.01;
 
 // The Feel floor. Pulse emits one write per step and the frame coalescer drains at most
@@ -335,10 +335,10 @@ const PULSE_SCRUB_FEEL_FLOOR_PIXELS = 10;
  * The smallest Feel a Rotary honours for a given Gesture and write mode, in the
  * Gesture's own unit (degrees of arc for Arc, pixels of drag for Scrub).
  *
- * Only Pulse Arc and Pulse Scrub have a floor. Pulse Tap is exempt (one tap is one
- * step) and Absolute is exempt in every Gesture (it writes the Ring's value, deduped to
- * one write per frame, so no queue can form); both return MIN_DEGREES_PER_UNIT. Range
- * mode does not participate. Both arguments are raw authored values: an unset or
+ * Pulse Arc and Pulse Scrub have a higher floor, because each step is one write to the
+ * sim. Pulse Tap (one tap is one step) and Absolute in every Gesture (it writes the
+ * Ring's value, deduped to one write per frame, so no queue can form) have the smallest
+ * floor, MIN_DEGREES_PER_UNIT. Range mode does not participate. Both arguments are raw authored values: an unset or
  * unrecognised one resolves to the engine's own default, so a Rotary that never stored
  * a Gesture or write mode is judged exactly as the engine will run it.
  *
@@ -356,17 +356,17 @@ export function resolveFeelFloor(gesture, writeMode) {
 
 // The Feel a new Pulse Arc or Pulse Scrub Rotary starts with. Absolute's default of 1 is a
 // heading knob covering 0-360 in one turn; in Pulse the same number would be 360 steps per
-// revolution, far finer than a real knob and well below the Feel floor. 12 is 30 steps per
+// revolution, far finer than a real knob and well below the Pulse Arc Feel floor. 12 is 30 steps per
 // revolution for Arc, in the 10-18 range a faithful Pulse Ring occupies, and at that Feel a
 // fast spin peaked at 144 steps/sec against the 240/sec drain ceiling. It must stay above
-// both floors so a default is never one the engine silently overrides.
+// both Pulse floors so a default is never one the engine silently overrides.
 const PULSE_FEEL_DEFAULT = 12;
 
 /**
  * The Feel a Rotary is created with for a Gesture and write mode, in the Gesture's own
  * unit. Absolute and Pulse Tap keep the engine's long-standing default of 1; Pulse Arc and
- * Pulse Scrub — the two Gestures that have a Feel floor — get a Feel shaped for a stream
- * of steps. Both arguments are raw authored values and resolve as the engine would run them.
+ * Pulse Scrub, whose Feel floor is higher than the smallest Feel, get a Feel shaped for a
+ * stream of steps. Both arguments are raw authored values and resolve as the engine would run them.
  *
  * @param {string|undefined} gesture - 'arc' | 'scrub' | 'tap'; anything else resolves to Arc.
  * @param {string|undefined} writeMode - 'absolute' | 'pulse'; anything else resolves to Absolute.

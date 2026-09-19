@@ -280,7 +280,7 @@ test('a Feel at or above the floor is committed as typed with no toast', async (
   await expect(toast(page)).toHaveCount(0);
 });
 
-test('a small Feel needs no adjustment where there is no floor: Pulse Tap and Absolute', async ({ page }) => {
+test('a Feel at or above 0.01 needs no adjustment in Absolute and Pulse Tap', async ({ page }) => {
   await selectRotary(page, 'build');
   await typeFeel(page, '0.5');
   expect(await storedFeel(page)).toBe(0.5);

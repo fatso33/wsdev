@@ -229,8 +229,9 @@ export function describePulseFeel(gesture, writeMode, feel) {
 
   const running = Math.abs(resolveDegreesPerUnit(feel, resolvedGesture, 'pulse'));
   const floor = resolveFeelFloor(resolvedGesture, 'pulse');
-  // Absolute has no floor, so resolving as Absolute yields the authored magnitude with the
-  // engine's own handling of unset and non-finite values, before the Pulse floor applies.
+  // Absolute holds Feel only to the smallest floor, so resolving as Absolute yields the
+  // authored magnitude with the engine's own handling of unset and non-finite values,
+  // before the Pulse floor applies.
   const authored = Math.abs(resolveDegreesPerUnit(feel, resolvedGesture, 'absolute'));
   const floorNote = authored < floor
     ? ` Runs at the Feel floor of ${floor}; a finer Feel is not honoured.`
