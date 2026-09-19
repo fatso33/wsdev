@@ -160,7 +160,7 @@ export class RotaryComponent extends BaseComponent {
       // Acceleration is threaded through as authored; the engine owns every default and
       // guard. Fast step events count as bound only as a pair, since a coarse turn in
       // the direction with no fast event would otherwise fall back to the ordinary one
-      // while the engine had already stopped multiplying its steps.
+      // while the engine had already stopped scaling its steps.
       acceleration: props.acceleration === true,
       accelerationEnterRate: props.accelerationEnterRate,
       accelerationExitRate: props.accelerationExitRate,
@@ -371,7 +371,7 @@ export class RotaryComponent extends BaseComponent {
   /** Whether any Pulse step, ordinary or fast, is still queued in the engine's state. */
   hasPulseStepsWaiting() {
     const state = this.rotaryState;
-    return !!(state && (state.pulsePendingSteps || state.pulsePendingFastSteps));
+    return !!(state && (state.pulsePendingSteps || state.pulsePendingCoarseSteps));
   }
 
   /**

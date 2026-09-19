@@ -2235,7 +2235,7 @@ export class StudioInspector {
         const isCustom = !!binding[field] && !getDeckEventsByKind('write').some((e) => e.name === binding[field]);
         return `
         <div class="prop-field" data-tier="advanced" id="c-bind-${kind}-field" style="${isFastEventRotary ? '' : 'display:none;'}">
-          <label>${label} <span class="prop-hint" title="FDWS v1.30: dispatched once per step turned ${direction} at the coarse Acceleration speed, in place of the ordinary event above, when Write Mode is Pulse and Acceleration is on. Bind both fast events or neither: a single one is ignored.">ⓘ</span></label>
+          <label>${label} <span class="prop-hint" title="FDWS v1.30: dispatched once per step turned ${direction} in the coarse Acceleration tier, in place of the ordinary event above, when Write Mode is Pulse and Acceleration is on. Bind both fast events or neither: a single one is ignored.">ⓘ</span></label>
           <select id="c-bind-${kind}" class="prop-select">${buildDefaultOptions('write', binding[field])}</select>
         </div>
         <div class="prop-field prop-custom-block ${(isFastEventRotary && isCustom) ? '' : 'hidden'}" id="c-bind-${kind}-custom-block">
@@ -4667,7 +4667,10 @@ export class StudioInspector {
     const { value } = this.resolveEffectiveValue(comp, field);
     const floorHint = inputType === 'number' ? this.resolveFeelFloorHint(comp, field) : null;
     const tooltip = floorHint ? `${field.tooltip || ''} ${floorHint.tooltipNote}`.trim() : (field.tooltip || '');
-    const minAttr = floorHint ? ` min="${floorHint.min}"` : '';
+    // A registry `min` is advertised the same way, so the browser's own constraint and
+    // the chevron/wheel stepping both respect it; the engine owns what a lower value does.
+    const registryMin = inputType === 'number' && Number.isFinite(field.min) ? field.min : null;
+    const minAttr = floorHint ? ` min="${floorHint.min}"` : (registryMin !== null ? ` min="${registryMin}"` : '');
     const pulseFeel = this.resolvePulseFeelDescription(comp, field, value);
     // 09: data-step-key drives NUMBER_STEP_LOOKUP (wheel/chevron stepping) —
     // keyed by the registry field path itself, so this is the ONLY new

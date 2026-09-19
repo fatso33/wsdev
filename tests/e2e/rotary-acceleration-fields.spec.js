@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * "An Author can configure the thresholds and the coarse step in the Property
- * Inspector, hidden unless Acceleration is enabled", and can bind the aircraft's fast
- * step events (Rotary rebuild, Acceleration).
+ * An Author can configure Acceleration's thresholds and coarse step in the Property
+ * Inspector, hidden unless Acceleration is enabled, and can bind the aircraft's fast
+ * step events.
  *
  * Driven through the real Inspector DOM, measuring visibility via offsetParent rather
  * than `.hidden` (the tier attribute sits on a wrapper, not the field). A showWhen-false
@@ -71,6 +71,14 @@ test('the Enable checkbox and the coarse step are reachable on the Build tier; t
   expect(await usable(page, domId('props.accelerationCoarseStep'))).toBe('input');
   expect(await usable(page, domId('props.accelerationEnterRate'))).toBe('hidden');
   expect(await usable(page, domId('props.accelerationExitRate'))).toBe('hidden');
+});
+
+test('the coarse step advertises its minimum of 1, and the Enter Rate advertises none', async ({ page }) => {
+  await seedRotary(page);
+  await page.locator(domId('props.acceleration')).check();
+  const minOf = (path) => page.evaluate((sel) => document.querySelector(sel)?.getAttribute('min') ?? null, domId(path));
+  expect(await minOf('props.accelerationCoarseStep')).toBe('1');
+  expect(await minOf('props.accelerationEnterRate')).toBeNull();
 });
 
 test('an Author can set the coarse step and both thresholds, and they commit to the widget definition', async ({ page }) => {
