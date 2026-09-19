@@ -10,9 +10,9 @@
 // gotcha that left both capped at '1.7' when v1.8 shipped. '1.0' is kept as a
 // pre-doc legacy value neither validator ever stopped accepting.
 import { FDWS_VERSIONS, WRITE_EVENT_BINDING_FIELDS } from '../widgets/PropertyRegistry.js';
-// './' not '../': sync-shared.mjs places this file and deckEvents.js in the
-// SAME directory in both apps (js/core/ and core/), and these import paths are
-// written for those destinations rather than for shared/ itself.
+// './' not '../': this file and deckEvents.js sit in the SAME directory —
+// shared/core/, and js/core/ / core/ in both apps after sync-shared.mjs
+// copies them — so this sibling import resolves in place too.
 import { DECK_EVENT_NAMES } from './deckEvents.js';
 
 // FDWS v1.27: the write-side encodings a suggested binding may name. Mirrors
