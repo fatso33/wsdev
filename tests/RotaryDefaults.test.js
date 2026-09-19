@@ -302,10 +302,11 @@ describe('a Feel typed into the Feel field', () => {
     }
   });
 
-  it('needs no adjustment at or above 0.01 in Absolute and Pulse Tap, and raises a finer Feel to 0.01', () => {
+  it('needs no adjustment at or above 0.01 in Absolute and Pulse Tap, and raises a finer Feel to 0.01 in both', () => {
     expect(applyRotaryFeelEntry({ writeMode: 'pulse', gesture: 'tap' }, 0.5).message).toBeNull();
     expect(applyRotaryFeelEntry({ gesture: 'scrub' }, 0.5).message).toBeNull();
     expect(applyRotaryFeelEntry({ writeMode: 'pulse', gesture: 'tap' }, 0.001).props.degreesPerUnit).toBe(absoluteFloor);
+    expect(applyRotaryFeelEntry({ gesture: 'scrub' }, 0.001).props.degreesPerUnit).toBe(absoluteFloor);
   });
 
   it('leaves a cleared field unset', () => {

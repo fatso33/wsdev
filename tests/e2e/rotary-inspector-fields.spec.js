@@ -174,7 +174,7 @@ test('the Feel minimum follows the Gesture without reopening the panel', async (
   expect(await feelMinimum(page)).toBe(String(resolveFeelFloor('arc', 'pulse')));
 });
 
-test('Pulse Tap has no Feel minimum: one tap is one step', async ({ page }) => {
+test('the Feel field advertises no min attribute in Pulse Tap: one tap is one step', async ({ page }) => {
   await selectRotary(page, 'build');
   await setWriteMode(page, 'pulse');
   await setGesture(page, 'tap');
@@ -182,7 +182,7 @@ test('Pulse Tap has no Feel minimum: one tap is one step', async ({ page }) => {
   expect(await feelMinimum(page)).toBeNull();
 });
 
-test('Absolute has no Feel minimum in any Gesture', async ({ page }) => {
+test('the Feel field advertises no min attribute in Absolute, in any Gesture', async ({ page }) => {
   await selectRotary(page, 'build');
   for (const gesture of ['arc', 'scrub', 'tap']) {
     await setGesture(page, gesture);

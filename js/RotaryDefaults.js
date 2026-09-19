@@ -219,7 +219,7 @@ export function applyRotaryFeelEntry(props, typed) {
  *
  * @param {string|undefined} gesture - Raw authored Gesture; unset resolves to Arc.
  * @param {string|undefined} writeMode - Raw authored write mode.
- * @param {number|undefined} feel - The Feel as currently stored or defaulted; unset resolves to the default.
+ * @param {number|undefined} feel - The Feel as currently stored; unset resolves as the engine runs it, to its default of 1 held to the floor (so the Arc floor, not the creation default).
  * @returns {{label: string, note: string}|null} null for Absolute and for Tap, where Feel keeps its usual meaning.
  */
 export function describePulseFeel(gesture, writeMode, feel) {

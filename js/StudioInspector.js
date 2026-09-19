@@ -4597,9 +4597,11 @@ export class StudioInspector {
   }
 
   /**
-   * A Rotary's Feel field has a minimum only in Pulse Arc and Pulse Scrub, and which one
-   * (and in what unit) depends on two sibling props, so it cannot be a static registry
-   * key: it is computed here at render time. renderInner() rebuilds the whole panel on
+   * A Rotary's Feel field advertises a minimum, as its `min` attribute and a tooltip note,
+   * only in Pulse Arc and Pulse Scrub. Which floor that is (and in what unit) depends on
+   * two sibling props, so it cannot be a static registry key: it is computed here at
+   * render time. The smallest floor of Absolute and Pulse Tap is enforced on commit but
+   * not advertised. renderInner() rebuilds the whole panel on
    * every commit, so a Gesture or write mode change re-runs this with no listener.
    *
    * The Gesture and write mode go in as stored, unset included: resolveFeelFloor applies
