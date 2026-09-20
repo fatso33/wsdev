@@ -39,7 +39,7 @@
 
 import { BaseComponent } from './BaseComponent.js';
 import { resolveRotary, createRotaryState, resolveGesture, resolveRangeMode, resolveWriteMode, resolveDispatchTiming } from './rotaryEngine.js';
-import { buildRotaryFace } from './rotaryFace.js';
+import { buildRotaryFace, rotaryLabelRadius } from './rotaryFace.js';
 import { resolveRotaryFaceConfig } from './rotaryFaceConfig.js';
 import { SecurityValidator } from '../../core/SecurityValidator.js';
 
@@ -99,7 +99,11 @@ const STATE_SURFACE_PROPERTIES = [
   'borderWidth', 'borderStyle', 'borderColor', 'borderRadius', 'boxShadow',
   'background', 'backgroundImage', 'backgroundSize', 'backgroundPosition', 'backgroundRepeat'
 ];
-const STATE_ELEMENT_PROPERTIES = ['fontFamily', 'fontSize', 'fontWeight', 'color', 'textShadow', 'webkitTextStroke'];
+const STATE_ELEMENT_PROPERTIES = ['fontFamily', 'fontSize', 'fontWeight', 'color', 'textShadow', 'webkitTextStroke', 'justifyContent', 'alignItems'];
+
+// Where a position label sits, as a percentage of the Face box, until the Face has been drawn
+// and can say where its rim actually is.
+const DEFAULT_LABEL_RADIUS = 42;
 
 export class RotaryComponent extends BaseComponent {
   render() {
@@ -405,7 +409,8 @@ export class RotaryComponent extends BaseComponent {
    * Switches the turning-state style, clearing what the previous state wrote first.
    * BaseComponent.applyStyles() writes only the border, background and typography
    * properties the merged style defines, so a property that only the Dragging state
-   * defines would otherwise stay on the knob after release.
+   * defines would otherwise stay on the knob after release. The style rules are re-applied
+   * against the last telemetry seen, since clearing would otherwise drop what only a rule sets.
    * @param {string|undefined} stateName
    */
   setState(stateName) {
@@ -413,6 +418,9 @@ export class RotaryComponent extends BaseComponent {
     STATE_SURFACE_PROPERTIES.forEach((property) => { if (this.faceNode) this.faceNode.style[property] = ''; });
     STATE_ELEMENT_PROPERTIES.forEach((property) => { if (this.element) this.element.style[property] = ''; });
     super.setState(stateName);
+    if (Array.isArray(this.def.style?.rules) && this.def.style.rules.length > 0 && this.lastAllState) {
+      this.applyStyles(undefined, this.lastAllState);
+    }
   }
 
   /**
@@ -431,7 +439,7 @@ export class RotaryComponent extends BaseComponent {
     const themeConfig = (typeof this.widget?.getThemeConfig === 'function')
       ? this.widget.getThemeConfig()
       : { baseTheme: 'dark', themeMode: 'auto' };
-    const markup = buildRotaryFace(resolveRotaryFaceConfig(props, {
+    const faceConfig = resolveRotaryFaceConfig(props, {
       valueAngle: angle,
       startAngle: props.startAngle ?? DEFAULT_START_ANGLE,
       sweepDegrees: cfg.sweepDegrees,
@@ -443,7 +451,9 @@ export class RotaryComponent extends BaseComponent {
       themeMode: themeConfig.themeMode,
       componentType: this.def.type,
       layerGroup: this.def.layer?.group
-    }));
+    });
+    this.labelRadius = rotaryLabelRadius(faceConfig);
+    const markup = buildRotaryFace(faceConfig);
     if (markup === this.lastFaceMarkup) return;
     this.lastFaceMarkup = markup;
     this.faceNode.innerHTML = markup;
@@ -494,7 +504,8 @@ export class RotaryComponent extends BaseComponent {
       this.faceNode.appendChild(this.positionsNode);
     }
 
-    const signature = JSON.stringify(positions);
+    const radius = this.labelRadius ?? DEFAULT_LABEL_RADIUS;
+    const signature = JSON.stringify([positions, radius]);
     if (signature !== this.lastPositionsSignature) {
       this.lastPositionsSignature = signature;
       this.positionsNode.innerHTML = '';
@@ -514,7 +525,6 @@ export class RotaryComponent extends BaseComponent {
         SecurityValidator.setText(el, pos.label !== undefined && pos.label !== '' ? pos.label : pos.value);
         const angleDeg = startAngle + (positions.length > 1 ? (idx / denom) * sweep : 0) - 90;
         const angleRad = angleDeg * (Math.PI / 180);
-        const radius = 42; // % of the guaranteed-round Face box, same convention the deleted Selector used against its own (non-square-safe here) box.
         el.style.left = `${50 + radius * Math.cos(angleRad)}%`;
         el.style.top = `${50 + radius * Math.sin(angleRad)}%`;
         this.positionsNode.appendChild(el);
@@ -634,6 +644,7 @@ export class RotaryComponent extends BaseComponent {
   }
 
   update(val, allState) {
+    this.lastAllState = allState;
     super.update(val, allState);
     const num = Number(val);
     if (val === null || val === undefined || !Number.isFinite(num)) return;

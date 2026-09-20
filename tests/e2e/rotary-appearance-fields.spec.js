@@ -135,17 +135,19 @@ test('giving the scale divisions reveals every scale detail', async ({ page }) =
   }
 });
 
-test('a property that has been set stays visible after it stops applying, at every tier, with a way to clear it', async ({ page }) => {
-  await seedRotary(page, 'build', { knurlStyle: 'none', knurlCount: 40, capDiameter: 0, capLabel: 'HDG', capContent: 'none' });
-  // Both are set to a real value and neither applies to the configuration they sit in.
-  expect(await usable(page, 'props.knurlCount')).toBe('input');
-  expect(await usable(page, 'props.capLabel')).toBe('input');
-  await expect(page.locator('.prop-showwhen-note', { hasText: 'still set to "40"' })).toBeVisible();
+for (const tier of ['build', 'guided', 'full']) {
+  test(`a property that has been set stays visible after it stops applying, with a way to clear it, on the ${tier} tier`, async ({ page }) => {
+    await seedRotary(page, tier, { knurlStyle: 'none', knurlCount: 40, capDiameter: 0, capLabel: 'HDG', capContent: 'none' });
+    // Both are set to a real value and neither applies to the configuration they sit in.
+    expect(await usable(page, 'props.knurlCount')).toBe('input');
+    expect(await usable(page, 'props.capLabel')).toBe('input');
+    await expect(page.locator('.prop-showwhen-note', { hasText: 'still set to "40"' })).toBeVisible();
 
-  await page.locator('.prop-showwhen-note', { hasText: 'still set to "40"' }).getByRole('button', { name: 'Clear' }).click();
-  expect(await storedProp(page, 'knurlCount')).toBeUndefined();
-  expect(await usable(page, 'props.knurlCount')).toBe('missing');
-});
+    await page.locator('.prop-showwhen-note', { hasText: 'still set to "40"' }).getByRole('button', { name: 'Clear' }).click();
+    expect(await storedProp(page, 'knurlCount')).toBeUndefined();
+    expect(await usable(page, 'props.knurlCount')).toBe('missing');
+  });
+}
 
 test('every appearance control commits what the Author enters', async ({ page }) => {
   await seedRotary(page, 'full', { fillStyle: 'linear', knurlStyle: 'grooves', capDiameter: 20, capContent: 'label', scaleMajorDivisions: 4 });

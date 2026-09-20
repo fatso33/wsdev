@@ -17,6 +17,11 @@ const EVERYTHING = {
   dropShadow: 6
 };
 
+// Every measurement below is about the groups being drawn; a Face that ignored the
+// appearance properties would pass each of them trivially, so each one starts here.
+const ALL_GROUPS = ['depth', 'fill', 'inset', 'rim', 'knurling', 'scale', 'indicator', 'cap'];
+const expectEveryGroupDrawn = (m) => expect(Object.keys(m.groups).sort()).toEqual([...ALL_GROUPS].sort());
+
 async function placeRotaries(page, layouts) {
   await page.goto('/');
   await page.evaluate(({ props, layouts: boxes }) => {
@@ -48,6 +53,7 @@ const measure = (locator) => locator.evaluate((face) => {
 test('the Face is square and as large as the shorter side of its layout box, with every group on', async ({ page }) => {
   await placeRotaries(page, [{ col: 1, row: 1, w: 8, h: 4 }]);
   const m = await measure(page.locator('.fd-rotary-face').first());
+  expectEveryGroupDrawn(m);
   expect(m.face.w).toBeCloseTo(m.face.h, 0);
   expect(m.svg.w).toBeCloseTo(m.svg.h, 0);
   expect(m.face.w).toBeCloseTo(Math.min(m.host.w, m.host.h), 0);
@@ -57,6 +63,8 @@ test('the Face is square and as large as the shorter side of its layout box, wit
 test('nothing is drawn outside the Face\'s own box, shadow, scale labels and all', async ({ page }) => {
   await placeRotaries(page, [{ col: 1, row: 1, w: 6, h: 6 }]);
   const m = await measure(page.locator('.fd-rotary-face').first());
+  expectEveryGroupDrawn(m);
+  expect(m.parts.length).toBeGreaterThan(100);
   const tolerance = m.svg.w * 0.012;
   for (const part of m.parts) {
     expect(part.x).toBeGreaterThanOrEqual(-tolerance);
@@ -70,6 +78,8 @@ test('every group keeps the same proportions at a small and at a large size', as
   await placeRotaries(page, [{ col: 1, row: 1, w: 3, h: 3 }, { col: 5, row: 1, w: 7, h: 7 }]);
   const [small, large] = await Promise.all([0, 1].map((i) => measure(page.locator('.fd-rotary-face').nth(i))));
   expect(large.svg.w).toBeGreaterThan(small.svg.w * 1.8);
+  expectEveryGroupDrawn(small);
+  expectEveryGroupDrawn(large);
   for (const group of Object.keys(small.groups)) {
     const relative = (m) => ({
       x: m.groups[group].x / m.svg.w, y: m.groups[group].y / m.svg.w,

@@ -17,18 +17,20 @@
  * Nothing here uses `id`, `<defs>`, `<clipPath>` or a CSS filter. An id would be shared
  * by every Rotary drawn into one document and would stop resolving if the instance that
  * defined it were hidden, and Safari does not apply CSS filters to SVG children. So the
- * gradients, glow and shadows are all stacks of plain shapes.
+ * gradients, glow and shadows are all stacks of plain shapes. A gradient of opaque
+ * colours is a stack that paints over itself; one with a translucent colour is a set of
+ * shapes that do not overlap, so alpha is not added up where they would have.
  *
  * Six groups, each marked `data-face-group="<name>"` so tests (and the canvas
  * thumbnail's own assertions) can address a group rather than one opaque blob. Drawn
  * back to front:
- *   depth      the drop shadow beneath the knob
+ *   depth      the drop shadow: a ring around the knob, offset downward, clear under it
  *   fill       the disc: solid, or a linear / radial / conic blend of two colours
  *   inset      the inner shadow: darkening rings just inside the rim
  *   rim        the ring around the edge
  *   knurling   grip marks in a band just inside the rim; turns with the Face
  *   scale      graduations around the knob; static, like the bezel it stands for
- *   indicator  the pointer that shows the value; turns with the Face
+ *   indicator  the mark that shows the value; turns with the Face
  *   cap        the static centre: a disc, optionally with a label or icon
  *
  * ---------------------------------------------------------------------------
@@ -56,10 +58,10 @@
  *
  *   Indicator
  *   indicatorShape: string    'line' (default) | 'dot' | 'triangle'
- *   indicatorColor: string    pointer colour
+ *   indicatorColor: string    indicator colour
  *   indicatorWidth: number    line thickness, dot radius, or triangle half-width
- *   indicatorLength: number   pointer length inward from the rim (line and triangle)
- *   indicatorGlow: number     spread of the glow behind the pointer; 0 or unset is none
+ *   indicatorLength: number   indicator length inward from the rim (line and triangle)
+ *   indicatorGlow: number     spread of the glow behind the indicator; 0 or unset is none
  *
  *   Cap
  *   capDiameter: number       0 or unset draws no cap
@@ -118,14 +120,15 @@ const MAX_DROP_SHADOW = 15;
 const MAX_TICK_LENGTH = 20;
 const MIN_KNOB_RADIUS = 12;
 
-// Stack sizes. A gradient is drawn as opaque layers painted over one another, so each
-// layer is a step of colour; more layers is smoother and more markup.
+// Step counts. An opaque gradient is layers painted over one another and a translucent one
+// is bands that meet edge to edge; either way each is a step of colour, so more is smoother
+// and more markup.
 const LINEAR_STEPS = 24;
 const RADIAL_STEPS = 20;
 const CONIC_WEDGES = 72;
-// Each conic wedge runs this far into the next one, which paints over the overlap, so
-// anti-aliasing at a shared edge blends two opaque colours instead of exposing what is
-// underneath.
+// Each opaque conic wedge runs this far into the next one, which paints over the overlap,
+// so anti-aliasing at a shared edge blends two opaque colours instead of exposing what is
+// underneath. Translucent wedges cannot overlap without doubling their alpha there.
 const CONIC_OVERLAP_DEGREES = 0.8;
 // A conic fill has two highlights, the way brushed metal catches a light from either
 // side. The colour peaks at CONIC_HIGHLIGHT_DEGREES and again half a turn later.
@@ -136,6 +139,8 @@ const INSET_PEAK_OPACITY = 0.34;
 const SHADOW_LAYERS = 5;
 const SHADOW_LAYER_OPACITY = 0.1;
 
+// How far inside the knob's rim a position label is centred.
+const LABEL_INSET = 2;
 const LABEL_RESERVE = 9;
 const LABEL_FONT_SIZE = 5.5;
 const MAX_TEXT_LENGTH = 12;
@@ -232,10 +237,74 @@ function mixColors(from, to, t) {
 }
 
 /**
+ * The disc as bands that meet edge to edge and never overlap, so a translucent colour
+ * keeps the alpha it was authored with across the whole disc. A shared edge is
+ * anti-aliased on both sides, which leaves a faint seam; that is the price of not
+ * stacking alpha, and an opaque fill avoids it by overlapping instead.
+ */
+function buildTranslucentFill(style, from, to, radius) {
+  const layers = [];
+  if (style === 'linear') {
+    const edge = (k) => {
+      const y = CENTER - radius + (2 * radius * k) / LINEAR_STEPS;
+      const half = Math.sqrt(Math.max(0, radius * radius - (y - CENTER) ** 2));
+      return { y: round(y), left: round(CENTER - half), right: round(CENTER + half) };
+    };
+    for (let k = 0; k < LINEAR_STEPS; k++) {
+      const top = edge(k);
+      const bottom = edge(k + 1);
+      // Along the top chord, down the right-hand arc, back along the bottom chord, up the left.
+      layers.push(
+        `<path d="M${top.left} ${top.y}L${top.right} ${top.y}A${radius} ${radius} 0 0 1 ${bottom.right} ${bottom.y}`
+        + `L${bottom.left} ${bottom.y}A${radius} ${radius} 0 0 1 ${top.left} ${top.y}Z"`
+        + ` fill="${mixColors(from, to, k / (LINEAR_STEPS - 1))}"/>`
+      );
+    }
+    return layers.join('');
+  }
+  if (style === 'radial') {
+    for (let k = 0; k < RADIAL_STEPS; k++) {
+      const outer = radius * (1 - k / RADIAL_STEPS);
+      const colour = mixColors(from, to, k / (RADIAL_STEPS - 1));
+      if (k === RADIAL_STEPS - 1) {
+        layers.push(`<circle cx="${CENTER}" cy="${CENTER}" r="${round(outer)}" fill="${colour}"/>`);
+      } else {
+        const width = radius / RADIAL_STEPS;
+        layers.push(
+          `<circle cx="${CENTER}" cy="${CENTER}" r="${round(outer - width / 2)}" fill="none"`
+          + ` stroke="${colour}" stroke-width="${round(width)}"/>`
+        );
+      }
+    }
+    return layers.join('');
+  }
+  return buildConicWedges(from, to, radius, 0);
+}
+
+/** Conic wedges around the centre; `overlap` is how far each runs into the next. */
+function buildConicWedges(from, to, radius, overlap) {
+  const layers = [];
+  // Colour follows (1 + cos(2 * (theta - highlight))) / 2: two lobes around the circle.
+  const step = 360 / CONIC_WEDGES;
+  for (let k = 0; k < CONIC_WEDGES; k++) {
+    const start = k * step;
+    const middle = start + step / 2;
+    const t = (1 + Math.cos((2 * (middle - CONIC_HIGHLIGHT_DEGREES) * Math.PI) / 180)) / 2;
+    const a = polar(radius, start);
+    const b = polar(radius, start + step + overlap);
+    layers.push(
+      `<path d="M${CENTER} ${CENTER}L${a.x} ${a.y}A${radius} ${radius} 0 0 1 ${b.x} ${b.y}Z" fill="${mixColors(from, to, t)}"/>`
+    );
+  }
+  return layers.join('');
+}
+
+/**
  * The disc, drawn as opaque layers painted over one another. Returns null when a
  * non-solid fill cannot be built (an unblendable colour), so the caller can fall back.
  */
 function buildBlendedFill(style, from, to, radius) {
+  if (from.a < 1 || to.a < 1) return buildTranslucentFill(style, from, to, radius);
   const layers = [];
   if (style === 'linear') {
     // Each layer is the part of the disc at or below a horizontal line, so a later layer
@@ -262,19 +331,7 @@ function buildBlendedFill(style, from, to, radius) {
     }
     return layers.join('');
   }
-  // Conic. Colour follows (1 + cos(2 * (theta - highlight))) / 2: two lobes around the circle.
-  const step = 360 / CONIC_WEDGES;
-  for (let k = 0; k < CONIC_WEDGES; k++) {
-    const start = k * step;
-    const middle = start + step / 2;
-    const t = (1 + Math.cos((2 * (middle - CONIC_HIGHLIGHT_DEGREES) * Math.PI) / 180)) / 2;
-    const a = polar(radius, start);
-    const b = polar(radius, start + step + CONIC_OVERLAP_DEGREES);
-    layers.push(
-      `<path d="M${CENTER} ${CENTER}L${a.x} ${a.y}A${radius} ${radius} 0 0 1 ${b.x} ${b.y}Z" fill="${mixColors(from, to, t)}"/>`
-    );
-  }
-  return layers.join('');
+  return buildConicWedges(from, to, radius, CONIC_OVERLAP_DEGREES);
 }
 
 /**
@@ -502,29 +559,31 @@ function buildScale(config, plan) {
 }
 
 /**
- * The drop shadow: stacked, offset, translucent discs. The knob has already shrunk by
- * `size` so the shadow's full extent stays inside the viewBox.
+ * The drop shadow: stacked, offset, translucent rings. Each layer is a disc with the knob
+ * cut out of it (an even-odd fill), so what shows is only the shadow outside the knob and
+ * a Face with no fill of its own is not tinted by it. Every layer runs at least as far
+ * past the knob as the offset does, which keeps the knob wholly inside it, so the cut-out
+ * never reaches beyond the disc it is cut from. The knob has already shrunk by `size` so
+ * the shadow's full extent stays inside the viewBox.
  */
 function buildDropShadow(size, knobRadius) {
   if (size <= 0) return '';
   const offset = size * 0.4;
-  const discs = [];
+  const cy = round(CENTER + offset);
+  const circle = (y, r) => `M${round(CENTER - r)} ${y}A${r} ${r} 0 1 0 ${round(CENTER + r)} ${y}A${r} ${r} 0 1 0 ${round(CENTER - r)} ${y}Z`;
+  const layers = [];
   for (let k = 0; k < SHADOW_LAYERS; k++) {
-    const radius = round(knobRadius + size * 0.6 * (1 - k / SHADOW_LAYERS));
-    discs.push(`<circle cx="${CENTER}" cy="${round(CENTER + offset)}" r="${radius}" fill-opacity="${SHADOW_LAYER_OPACITY}"/>`);
+    const radius = round(knobRadius + size * (0.4 + 0.2 * (1 - k / SHADOW_LAYERS)));
+    layers.push(`<path d="${circle(cy, radius)}${circle(CENTER, knobRadius)}" fill-rule="evenodd" fill-opacity="${SHADOW_LAYER_OPACITY}"/>`);
   }
-  return `<g data-face-group="depth" fill="#000">${discs.join('')}</g>`;
+  return `<g data-face-group="depth" fill="#000">${layers.join('')}</g>`;
 }
 
 /**
- * Builds the Rotary Face markup for one configuration.
- * @param {object} [config] - see this file's header for the full shape
- * @returns {string} inline SVG markup
+ * How the knob is laid out: how much room the scale and the shadow leave it, and where its
+ * rim falls. One place, so whatever is drawn over the Face agrees with the Face itself.
  */
-export function buildRotaryFace(config = {}) {
-  const angle = round(safeNumber(config.angle, 0));
-  const rimColor = safeColor(config.rimColor, ROTARY_FACE_DEFAULTS.rimColor);
-
+function planKnob(config) {
   const scale = planScale(config);
   const shadowSize = clamp(safeNumber(config.dropShadow, 0), 0, MAX_DROP_SHADOW);
   // The knob gives up space to the scale outside it and to its own shadow, in that order.
@@ -536,6 +595,28 @@ export function buildRotaryFace(config = {}) {
   const rimWidth = clamp(safeNumber(config.rimWidth, ROTARY_FACE_DEFAULTS.rimWidth), 0, knobRadius);
   const rimCenter = round(Math.max(1, knobRadius - rimWidth / 2));
   const rimInner = Math.max(0, knobRadius - rimWidth);
+  return { scale, shadowSize, knobRadius, rimWidth, rimCenter, rimInner };
+}
+
+/**
+ * How far from the Face centre a label sits, so that it lands just inside the knob's rim.
+ * The Face is 100 viewBox units across, so the value is also a percentage of its box.
+ * @param {object} [config] - the same configuration buildRotaryFace() takes
+ * @returns {number}
+ */
+export function rotaryLabelRadius(config = {}) {
+  return Math.max(0, round(planKnob(config).rimInner - LABEL_INSET));
+}
+
+/**
+ * Builds the Rotary Face markup for one configuration.
+ * @param {object} [config] - see this file's header for the full shape
+ * @returns {string} inline SVG markup
+ */
+export function buildRotaryFace(config = {}) {
+  const angle = round(safeNumber(config.angle, 0));
+  const rimColor = safeColor(config.rimColor, ROTARY_FACE_DEFAULTS.rimColor);
+  const { scale, shadowSize, knobRadius, rimWidth, rimCenter, rimInner } = planKnob(config);
 
   const parts = [
     buildDropShadow(shadowSize, knobRadius),
