@@ -28,9 +28,9 @@
  *   fill       the disc: solid, or a linear / radial / conic blend of two colours
  *   inset      the inner shadow: darkening rings just inside the rim
  *   rim        the ring around the edge
- *   knurling   grip marks in a band just inside the rim; turns with the Face
+ *   knurling   grip marks in a band just inside the rim; turns as the value changes
  *   scale      graduations around the knob; static, like the bezel it stands for
- *   indicator  the mark that shows the value; turns with the Face
+ *   indicator  the mark that shows the value; turns as the value changes
  *   cap        the static centre: a disc, optionally with a label or icon
  *
  * ---------------------------------------------------------------------------
@@ -380,7 +380,7 @@ function buildInnerShadow(depth, rimInner) {
 
 /**
  * Grip marks in a band of `depth` just inside the rim, in the rim's colour. The whole
- * group turns with the Face, so a knurled knob visibly turns even with no pointer.
+ * group turns as the value changes, so a knurled knob visibly turns even with no Indicator.
  */
 function buildKnurling(config, rimInner, rimColor, angle) {
   const style = safeChoice(config.knurlStyle, KNURL_STYLES, null);
