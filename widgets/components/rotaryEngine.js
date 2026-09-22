@@ -123,79 +123,34 @@
  * ---------------------------------------------------------------------------
  */
 
-const DEFAULT_MIN = 0;
-const DEFAULT_MAX = 100;
+import {
+  DEFAULT_MAX,
+  DEFAULT_MIN,
+  clamp,
+  resolveDegreesPerUnit,
+  resolveDispatchTiming,
+  resolveDisplayValue,
+  resolveEffectiveRange,
+  resolveGesture,
+  resolveWriteMode
+} from './rotary/rotaryConfig.js';
+
+export {
+  MIN_DEGREES_PER_UNIT,
+  resolveDegreesPerUnit,
+  resolveDispatchTiming,
+  resolveFeelDefault,
+  resolveFeelFloor,
+  resolveGesture,
+  resolveRangeMode,
+  resolveWriteMode
+} from './rotary/rotaryConfig.js';
+
 const DEFAULT_MIN_EFFECTIVE_RADIUS = 24;
-const DEFAULT_DEGREES_PER_UNIT = 1;
 const DEFAULT_SWEEP_DEGREES = 270;
 const DEFAULT_POLL_PERIOD_MS = 1000; // matches the normal 1Hz poll tier (CLAUDE.md)
 const DEFAULT_RING_ID = 'default';
 const TIER_FINE = 'fine';
-// Arc remains the default: it is the only gesture that reads correctly against the
-// Rotary's current visual style (a circular knob face, per rotaryFace.js) — Scrub's
-// "drag like a wheel" affordance and Tap's discrete tap zones are both things an
-// Author opts into explicitly for a control that should behave like a wheel/switch
-// rather than a knob. See ticket 03.
-const DEFAULT_GESTURE = 'arc';
-const VALID_GESTURES = ['arc', 'scrub', 'tap'];
-
-/** Falls back to the default for anything not one of the three known gestures,
- * rather than silently misbehaving on a typo'd/legacy value. Exported so the
- * Component can resolve the SAME default when deciding the cursor/track
- * affordance to show, rather than re-deriving (and risking drift from) this
- * module's own notion of "the" default gesture. */
-export function resolveGesture(raw) {
-  return VALID_GESTURES.includes(raw) ? raw : DEFAULT_GESTURE;
-}
-
-// Ticket 04: the range axis. Bounded (ticket 01's original, and still the default)
-// clamps at each end like a physical end-stop. Continuous wraps past either limit
-// instead of clamping — a heading bug moving from 359 back to 0. Detented ignores
-// min/max entirely and snaps between a list of named `positions` instead — a value
-// on that Ring means "which position", not a number on an arbitrary scale.
-const DEFAULT_RANGE_MODE = 'bounded';
-const VALID_RANGE_MODES = ['bounded', 'continuous', 'detented'];
-
-/** Same fallback-on-typo convention as resolveGesture. Exported for the same reason. */
-export function resolveRangeMode(raw) {
-  return VALID_RANGE_MODES.includes(raw) ? raw : DEFAULT_RANGE_MODE;
-}
-
-// Ticket 05: the write axis. Absolute (the ticket 01/02 default) writes the resolved
-// value itself. Pulse emits one increment/decrement per step and owns no value of its
-// own — the aircraft controls it targets (most payware, many stock) expose no way to
-// set a value directly, only to nudge it. "Owns no value" is enforced structurally:
-// gesture processing in Pulse mode never writes `state.rawValue` (see
-// processPulseGesture) — only telemetry ever does, so what the Ring displays/reasons
-// about as "the value" is always the sim's own last-known reading, never a locally
-// accumulated guess a dispatch failure or a missed step could desync from.
-const DEFAULT_WRITE_MODE = 'absolute';
-const VALID_WRITE_MODES = ['absolute', 'pulse'];
-
-/** Same fallback-on-typo convention as resolveGesture. Exported for the same reason. */
-export function resolveWriteMode(raw) {
-  return VALID_WRITE_MODES.includes(raw) ? raw : DEFAULT_WRITE_MODE;
-}
-
-// Ticket 05: WHEN a Ring's writes leave the Component, independent of Write Mode.
-// 'onChange' writes on every real movement (Absolute's default — matches ticket 01/02/
-// 03/04 behaviour exactly, so nothing that predates this ticket changes unless it
-// opts in). 'onRelease' holds every write until the gesture ends. 'perDetent' writes
-// only when a whole `degreesPerUnit`-sized step is crossed — Pulse's own emit
-// granularity IS one step, so 'perDetent' is Pulse's natural default; Absolute can opt
-// into the same granularity for a control that should feel discrete despite carrying
-// a real value.
-const VALID_DISPATCH_TIMINGS = ['onChange', 'onRelease', 'perDetent'];
-
-function defaultDispatchTiming(writeMode) {
-  return writeMode === 'pulse' ? 'perDetent' : 'onChange';
-}
-
-/** Same fallback-on-typo convention as resolveGesture, but the fallback itself
- * depends on `writeMode` (Pulse and Absolute default to different timings). */
-export function resolveDispatchTiming(raw, writeMode) {
-  return VALID_DISPATCH_TIMINGS.includes(raw) ? raw : defaultDispatchTiming(writeMode);
-}
 
 // Deliberate implementation choice, not a value from the spec: caps how many
 // discrete Pulse steps a single resolveRotary() call will hand back as real 'turn'
@@ -252,10 +207,6 @@ function frameIdOf(now, quantumMs) {
   return Math.floor(now / quantumMs);
 }
 
-function normalizePositions(raw) {
-  return Array.isArray(raw) ? raw.filter((p) => p && typeof p === 'object') : [];
-}
-
 /**
  * The rest-state index a cold-started Detented Ring falls back to when the index it
  * would otherwise seed (matched telemetry, or the authored initialValue) lands on a
@@ -274,32 +225,6 @@ function normalizePositions(raw) {
 function firstRestablePositionIndex(positions, min) {
   const idx = positions.findIndex((p) => !p.momentary);
   return idx >= 0 ? idx : min;
-}
-
-/**
- * The numeric [min, max] this Rotary actually operates over this frame. Bounded and
- * Continuous use the Author's own props.min/max; Detented ignores them entirely and
- * operates over the authored positions list's own index range instead (0..N-1) —
- * "value" in that mode means "which named position", not a number on a scale.
- */
-function resolveEffectiveRange(cfg) {
-  const mode = resolveRangeMode(cfg.rangeMode);
-  const positions = normalizePositions(cfg.positions);
-  if (mode === 'detented') {
-    return { mode, min: 0, max: Math.max(positions.length - 1, 0), positions };
-  }
-  return { mode, min: cfg.min ?? DEFAULT_MIN, max: cfg.max ?? DEFAULT_MAX, positions };
-}
-
-/** Bounded (and Detented, which shares this over its index range) clamps at each
- * limit; Continuous wraps past either one instead — 359 -> 0, not 359 -> stuck. */
-function resolveDisplayValue(rawValue, min, max, mode) {
-  if (mode === 'continuous') {
-    const span = max - min;
-    if (!(span > 0)) return min;
-    return (((rawValue - min) % span) + span) % span + min;
-  }
-  return clamp(rawValue, min, max);
 }
 
 /**
@@ -331,88 +256,6 @@ const RECONCILIATION_TIMEOUT_MULTIPLIER = 2;
 // and the knob was permanently dead until the widget was rebuilt. Floored here rather
 // than in the registry because the engine is the only layer every caller goes through
 // — Studio's preview host, the PWA and a raw `.fdwidget` import alike.
-/** The smallest Feel magnitude any Rotary can resolve to: the guard that keeps the
- * divisor above zero. It is the Feel floor of Absolute and of Pulse Tap, and the lowest
- * value resolveFeelFloor returns, so a caller can tell a Feel floor set by the step
- * stream (Pulse Arc, Pulse Scrub) from the smallest one by comparing against it. */
-export const MIN_DEGREES_PER_UNIT = 0.01;
-
-// The Feel floor. Pulse emits one write per step and the frame coalescer drains at most
-// MAX_PULSE_STEPS_PER_FRAME (4) per frame, ~240 steps/sec. A Feel fine enough that an
-// ordinary turn generates steps faster than that queues the surplus (never dropped, so
-// the value landed on is the value turned to) and keeps dispatching long after the finger
-// lifts. Flooring Feel where the step stream is unbounded keeps a human turn under the
-// ceiling so the queue never forms; the drain itself is untouched.
-//
-// Arc's 6 is measured: the fastest observed turn was 3.05-3.65 rev/s, which puts the
-// ceiling out of reach above roughly 4.5-5.5 degrees per step. Scrub's 10 is a reasoned
-// estimate by analogy, not a measurement — drag speed has never been measured. Lowering
-// a floor is safe (existing Widgets stay valid and gain headroom); raising one silently
-// changes the feel of every Widget authored at it.
-const PULSE_ARC_FEEL_FLOOR_DEGREES = 6;
-const PULSE_SCRUB_FEEL_FLOOR_PIXELS = 10;
-
-/**
- * The smallest Feel a Rotary honours for a given Gesture and write mode, in the
- * Gesture's own unit (degrees of arc for Arc, pixels of drag for Scrub).
- *
- * Pulse Arc and Pulse Scrub have a higher floor, because each step is one write to the
- * sim. Pulse Tap (one tap is one step) and Absolute in every Gesture (it writes the
- * Ring's value, deduped to one write per frame, so no queue can form) have the smallest
- * floor, MIN_DEGREES_PER_UNIT. Range mode does not participate. Both arguments are raw authored values: an unset or
- * unrecognised one resolves to the engine's own default, so a Rotary that never stored
- * a Gesture or write mode is judged exactly as the engine will run it.
- *
- * @param {string|undefined} gesture - 'arc' | 'scrub' | 'tap'; anything else resolves to Arc.
- * @param {string|undefined} writeMode - 'absolute' | 'pulse'; anything else resolves to Absolute.
- * @returns {number} The floor, always >= MIN_DEGREES_PER_UNIT.
- */
-export function resolveFeelFloor(gesture, writeMode) {
-  if (resolveWriteMode(writeMode) !== 'pulse') return MIN_DEGREES_PER_UNIT;
-  const resolved = resolveGesture(gesture);
-  if (resolved === 'arc') return PULSE_ARC_FEEL_FLOOR_DEGREES;
-  if (resolved === 'scrub') return PULSE_SCRUB_FEEL_FLOOR_PIXELS;
-  return MIN_DEGREES_PER_UNIT;
-}
-
-// The Feel a new Pulse Arc or Pulse Scrub Rotary starts with. Absolute's default of 1 is a
-// heading knob covering 0-360 in one turn; in Pulse the same number would be 360 steps per
-// revolution, far finer than a real knob and well below the Pulse Arc Feel floor. 12 is 30 steps per
-// revolution for Arc, in the 10-18 range a faithful Pulse Ring occupies, and at that Feel a
-// fast spin peaked at 144 steps/sec against the 240/sec drain ceiling. It must stay above
-// both Pulse floors so a default is never one the engine silently overrides.
-const PULSE_FEEL_DEFAULT = 12;
-
-/**
- * The Feel a Rotary is created with for a Gesture and write mode, in the Gesture's own
- * unit. Absolute and Pulse Tap keep the engine's long-standing default of 1; Pulse Arc and
- * Pulse Scrub, whose Feel floor is higher than the smallest Feel, get a Feel shaped for a
- * stream of steps. Both arguments are raw authored values and resolve as the engine would run them.
- *
- * @param {string|undefined} gesture - 'arc' | 'scrub' | 'tap'; anything else resolves to Arc.
- * @param {string|undefined} writeMode - 'absolute' | 'pulse'; anything else resolves to Absolute.
- * @returns {number} A Feel that is never below resolveFeelFloor for the same arguments.
- */
-export function resolveFeelDefault(gesture, writeMode) {
-  return resolveFeelFloor(gesture, writeMode) > MIN_DEGREES_PER_UNIT ? PULSE_FEEL_DEFAULT : DEFAULT_DEGREES_PER_UNIT;
-}
-
-/**
- * The effective, always-safe divisor for a configured `degreesPerUnit`.
- * Sign is preserved (a negative value simply reverses the turn direction); only the
- * magnitude is floored, at the Feel floor for this Gesture and write mode. A non-finite
- * value has no usable magnitude or sign at all, so it falls back to the default rather
- * than to the floor — and that default is then held to the floor like any other value,
- * since the default sits below Pulse Arc's and a typo must not reopen the overrun.
- */
-export function resolveDegreesPerUnit(raw, gesture, writeMode) {
-  const floor = resolveFeelFloor(gesture, writeMode);
-  const n = Number(raw ?? DEFAULT_DEGREES_PER_UNIT);
-  if (!Number.isFinite(n)) return Math.max(DEFAULT_DEGREES_PER_UNIT, floor);
-  const magnitude = Math.max(Math.abs(n), floor);
-  return n < 0 ? -magnitude : magnitude;
-}
-
 // Acceleration: exactly two tiers, 'fine' (the fine step) and 'coarse'. A continuous
 // velocity curve is rejected on purpose: a scale that differs every frame makes an exact
 // value unreachable. The tier is a hysteresis state machine with no momentum and no decay:
@@ -530,12 +373,6 @@ function accelerateTravel(state, accel, travelUnits) {
 function advanceRawValue(rawValue, deltaValue, coarse, min, max, mode) {
   const next = rawValue + deltaValue;
   return coarse && mode === 'bounded' ? clamp(next, min, max) : next;
-}
-
-function clamp(value, min, max) {
-  const lo = Math.min(min, max);
-  const hi = Math.max(min, max);
-  return Math.min(hi, Math.max(lo, value));
 }
 
 /** Shortest signed angular difference from `fromRad` to `toRad`, in degrees,
