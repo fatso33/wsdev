@@ -158,6 +158,14 @@ import {
   resolveFrameQuantumMs
 } from './rotary/rotaryDispatch.js';
 
+import {
+  applyDetentedPostProcessing,
+  boundSideOf,
+  deriveHaptics,
+  firstRestablePositionIndex,
+  matchPositionIndex
+} from './rotary/rotaryDetents.js';
+
 export { resolveCoarseFeel } from './rotary/rotaryAcceleration.js';
 
 export {
@@ -174,38 +182,6 @@ export {
 const DEFAULT_SWEEP_DEGREES = 270;
 const DEFAULT_POLL_PERIOD_MS = 1000; // matches the normal 1Hz poll tier (CLAUDE.md)
 const DEFAULT_RING_ID = 'default';
-
-/**
- * The rest-state index a cold-started Detented Ring falls back to when the index it
- * would otherwise seed (matched telemetry, or the authored initialValue) lands on a
- * Momentary position with no prior state to fall back to instead (see
- * createRotaryState's own comment on this). Picks the first authored position that
- * ISN'T Momentary, since that's the closest available reading of "a position this
- * control could actually rest at"; falls back to `min` (index 0) in the degenerate
- * case where every authored position is Momentary and there is truly nothing else to
- * pick.
- *
- * Invariant this relies on: every element of `positions` is a non-null object. The
- * predicate reads `p.momentary` with no guard, so a null or primitive entry throws.
- * That holds because the only caller passes a `normalizePositions()`-filtered array.
- * A second caller must filter the same way, or this needs a `p &&` guard first.
- */
-function firstRestablePositionIndex(positions, min) {
-  const idx = positions.findIndex((p) => !p.momentary);
-  return idx >= 0 ? idx : min;
-}
-
-/**
- * Deliberately carried over from the deleted Selector's isSamePosition(): an
- * Enum-unit SimVar arrives as a NUMBER while authored position values are very often
- * text ("OFF"/"L"/"BOTH") — comparing with `===` would silently never match, the
- * exact bug the old Selector needed this same coercion to avoid. Returns -1 (not
- * found) rather than null so it composes directly with an Array index.
- */
-function matchPositionIndex(positions, rawValue) {
-  if (rawValue === undefined || rawValue === null) return -1;
-  return positions.findIndex((p) => String(p.value) === String(rawValue));
-}
 
 // Deliberate implementation choices, not values pulled from the spec:
 // - The floor stops the Reconciliation window collapsing to a near-zero
@@ -253,8 +229,8 @@ export function createRotaryState(config, telemetry) {
       atBoundSide: null,
       // Idle telemetry read that matches no authored position: nothing is active, and
       // stays that way (never resolves to a stale earlier position) until either a
-      // later telemetry reading matches or the Ring is grabbed — see
-      // applyDetentedPostProcessing's own comment for the bug this avoids.
+      // later telemetry reading matches or the Ring is grabbed — the Detents
+      // post-processing step preserves this unmatched idle state.
       telemetryUnmatched: seeded && matchedIndex < 0,
       unmatchedValue: seeded && matchedIndex < 0 ? telemetry.value : null,
       stableIndex,
@@ -371,7 +347,7 @@ function applyReconciliation(state, cfg, telemetry, now, mode, positions) {
 
 /**
  * Detented's own Reconciliation logic: `state.pendingDispatchValue` here holds the
- * INDEX the Ring committed to (set by applyDetentedPostProcessing below), not a raw
+ * INDEX the Ring committed to (set by Detents post-processing), not a raw
  * number a numeric tolerance could compare against directly — an authored position
  * value is very often text. The echo/timeout/failure conditions are the same three,
  * in the same order, just matched by identity (String-coerced) against a position
@@ -416,113 +392,6 @@ function toIdleFromTelemetry(state, value) {
     reconcileStartedAt: null,
     telemetryUnmatched: false,
     unmatchedValue: null
-  };
-}
-
-/** Which bound (if either) `value` currently sits on. Tracked as a side
- * rather than a boolean so a knob resting at `min` (the common starting
- * position, since an unseeded value defaults to `min`) doesn't suppress the
- * cue the first time it's later turned all the way to `max`. */
-function boundSideOf(value, min, max) {
-  if (value === max) return 'max';
-  if (value === min) return 'min';
-  return null;
-}
-
-function deriveHaptics(state, cfg, min, max, emits) {
-  const haptics = [];
-  if (emits.some((e) => e.trigger === 'turnStart')) {
-    haptics.push('turnStart');
-  }
-  const value = clamp(state.rawValue, min, max);
-  const side = boundSideOf(value, min, max);
-  const isTurnEmit = emits.some((e) => e.trigger === 'turn' || e.trigger === 'turnStart');
-  if (side && side !== state.atBoundSide && isTurnEmit) {
-    haptics.push('boundReached');
-  }
-  return haptics;
-}
-
-/**
- * Detented-only post-processing, run once per resolveRotary call after the shared
- * gesture/telemetry machinery above has produced this frame's `state`/`emits`
- * (`emits` still carries the raw index-space `value` those functions produced,
- * since they know nothing about positions). It:
- *   - maps that index-space value in every emit this frame onto the matching
- *     position's own authored `value` — the write triggers (`turn`/`turnEnd`)
- *     dispatch "OFF"/"L"/"BOTH" to the sim, never a bare index.
- *   - fires 'detent' (a step was crossed) and, additionally, 'limit' (the step
- *     crossed is either end of the list) as their own non-writing trigger AND
- *     haptic cue, exactly the "crossing a step or hitting a bound" split the
- *     ticket calls for.
- *   - springs a Momentary position back to the last non-Momentary one on
- *     release: arrival already reported the Momentary position itself (a
- *     magneto's START genuinely engages the instant it's reached), but the
- *     value this frame actually COMMITS — what the write triggers carry, and
- *     what a later telemetry echo is compared against — is whatever was held
- *     immediately before, or the control would read as stuck in START forever.
- */
-function applyDetentedPostProcessing(state, positions, min, max, emits, previousDetentIndex, gestureEvent, ring) {
-  // Idle, with the last telemetry reading matching no authored position: report
-  // that reading verbatim, with nothing highlighted, for as long as nothing new
-  // happens — never resolving to some earlier position and reading as though
-  // the pointer never moved on. (This is the exact bug the old Selector had: a
-  // value matching no position left its pointer aimed at the last valid one.)
-  if (state.telemetryUnmatched && !gestureEvent) {
-    return { state, emits, value: state.unmatchedValue, haptics: [], activeIndex: null };
-  }
-
-  const isTurnEmit = emits.some((e) => e.trigger === 'turn' || e.trigger === 'turnStart' || e.trigger === 'turnEnd');
-  const index = clamp(Math.round(state.rawValue), min, max);
-  const position = positions[index] || null;
-
-  const haptics = [];
-  const extraEmits = [];
-  if (position && isTurnEmit && index !== previousDetentIndex) {
-    extraEmits.push({ trigger: 'detent', payload: { value: position.value, delta: 0, direction: null, ring } });
-    haptics.push('detent');
-    // A ring with 2 (or fewer) positions has every index at both bounds
-    // simultaneously — min===0 and max===positions.length-1 collapse onto the
-    // same two indices — so without this guard 'limit' would fire on literally
-    // every toggle, identically to 'detent', forever. Only rings with a real
-    // middle (3+ positions) have a bound distinct from "the other end", so only
-    // those ever emit 'limit'.
-    if (positions.length > 2 && (index === min || index === max)) {
-      extraEmits.push({ trigger: 'limit', payload: { value: position.value, delta: 0, direction: null, ring } });
-      haptics.push('limit');
-    }
-  }
-
-  const stableIndex = (position && !position.momentary) ? index : (state.stableIndex ?? index);
-  const released = gestureEvent && gestureEvent.type === 'end';
-  const springingBack = released && position && position.momentary;
-  const finalIndex = springingBack ? stableIndex : index;
-  const finalPosition = springingBack ? (positions[finalIndex] || null) : position;
-  const finalValue = finalPosition ? finalPosition.value : state.rawValue;
-
-  // Every emit this frame (turnStart/turn/turnEnd from the shared gesture
-  // machinery above) reports the SAME resolved value — they're all one snapshot
-  // of one resolveRotary() call. A spring-back overrides them all identically,
-  // which is what makes turnEnd carry the sprung-back value rather than the
-  // Momentary one it would otherwise have inherited from the gesture functions.
-  const remappedEmits = emits.map((e) => ({ ...e, payload: { ...e.payload, value: finalValue } }));
-
-  const nextState = {
-    ...state,
-    rawValue: finalIndex,
-    detentIndex: finalIndex,
-    telemetryUnmatched: false,
-    unmatchedValue: null,
-    stableIndex,
-    pendingDispatchValue: state.phase === 'reconciling' ? finalIndex : state.pendingDispatchValue
-  };
-
-  return {
-    state: nextState,
-    emits: [...remappedEmits, ...extraEmits],
-    value: finalValue,
-    haptics,
-    activeIndex: position ? finalIndex : null
   };
 }
 
