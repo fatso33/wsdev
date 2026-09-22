@@ -131,8 +131,6 @@ import {
 } from './rotary/rotaryAcceleration.js';
 
 import {
-  DEFAULT_MAX,
-  DEFAULT_MIN,
   clamp,
   resolveDegreesPerUnit,
   resolveDispatchTiming,
@@ -166,6 +164,8 @@ import {
   matchPositionIndex
 } from './rotary/rotaryDetents.js';
 
+import { applyReconciliation } from './rotary/rotaryReconciliation.js';
+
 export { resolveCoarseFeel } from './rotary/rotaryAcceleration.js';
 
 export {
@@ -180,16 +180,7 @@ export {
 } from './rotary/rotaryConfig.js';
 
 const DEFAULT_SWEEP_DEGREES = 270;
-const DEFAULT_POLL_PERIOD_MS = 1000; // matches the normal 1Hz poll tier (CLAUDE.md)
 const DEFAULT_RING_ID = 'default';
-
-// Deliberate implementation choices, not values pulled from the spec:
-// - The floor stops the Reconciliation window collapsing to a near-zero
-//   duration even on a very fast poll tier.
-// - "roughly twice" the poll period, per the ticket, so at least one full
-//   telemetry tick has a chance to arrive and echo back before we give up.
-const RECONCILIATION_TIMEOUT_FLOOR_MS = 250;
-const RECONCILIATION_TIMEOUT_MULTIPLIER = 2;
 
 /**
  * Builds the state bag for a Rotary that has never been engaged before.
@@ -296,103 +287,6 @@ function processGesture(state, cfg, gestureEvent, now) {
     return processTapGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit);
   }
   return processArcGesture(state, cfg, gestureEvent, min, max, mode, ring, degPerUnit, accel);
-}
-
-/**
- * Checks the three Reconciliation-window release conditions, in the order
- * the ticket specifies, and releases on the first one that's true:
- *   1. a dispatch failure — revert to telemetry immediately, don't wait.
- *   2. telemetry echoing the dispatched value within tolerance.
- *   3. a timeout derived from the actual poll period (never a hardcoded
- *      constant on its own — always `max(floor, pollPeriod * 2)`).
- */
-function applyReconciliation(state, cfg, telemetry, now, mode, positions) {
-  if (state.phase !== 'reconciling') {
-    return state;
-  }
-
-  if (mode === 'detented') {
-    return applyDetentedReconciliation(state, cfg, telemetry, now, positions);
-  }
-
-  if (telemetry && telemetry.dispatchFailed) {
-    const revertValue = typeof telemetry.value === 'number' ? telemetry.value : state.rawValue;
-    return toIdleFromTelemetry(state, revertValue);
-  }
-
-  const tolerance = cfg.reconciliationTolerance ??
-    Math.abs((cfg.max ?? DEFAULT_MAX) - (cfg.min ?? DEFAULT_MIN)) * 0.001;
-
-  if (
-    telemetry &&
-    typeof telemetry.value === 'number' &&
-    state.pendingDispatchValue != null &&
-    Math.abs(telemetry.value - state.pendingDispatchValue) <= tolerance
-  ) {
-    return toIdleFromTelemetry(state, telemetry.value);
-  }
-
-  const pollPeriod = cfg.pollPeriodMs ?? DEFAULT_POLL_PERIOD_MS;
-  const timeoutMs = Math.max(RECONCILIATION_TIMEOUT_FLOOR_MS, pollPeriod * RECONCILIATION_TIMEOUT_MULTIPLIER);
-  if (state.reconcileStartedAt != null && now - state.reconcileStartedAt >= timeoutMs) {
-    // Timed out with no confirming echo: accept whatever telemetry we do
-    // have (if any — it just wasn't within tolerance) as the new truth,
-    // rather than holding onto the never-confirmed dispatched value forever.
-    const revertValue = telemetry && typeof telemetry.value === 'number' ? telemetry.value : state.rawValue;
-    return toIdleFromTelemetry(state, revertValue);
-  }
-
-  return state;
-}
-
-/**
- * Detented's own Reconciliation logic: `state.pendingDispatchValue` here holds the
- * INDEX the Ring committed to (set by Detents post-processing), not a raw
- * number a numeric tolerance could compare against directly — an authored position
- * value is very often text. The echo/timeout/failure conditions are the same three,
- * in the same order, just matched by identity (String-coerced) against a position
- * instead of by numeric closeness.
- */
-function applyDetentedReconciliation(state, cfg, telemetry, now, positions) {
-  const matchAgainstPending = (value) => {
-    const idx = matchPositionIndex(positions, value);
-    return idx >= 0 && idx === state.pendingDispatchValue;
-  };
-
-  if (telemetry && telemetry.dispatchFailed) {
-    const idx = matchPositionIndex(positions, telemetry.value);
-    if (idx >= 0) return toIdleFromTelemetry(state, idx);
-    return { ...toIdleFromTelemetry(state, state.rawValue), telemetryUnmatched: true, unmatchedValue: telemetry.value };
-  }
-
-  if (telemetry && telemetry.value !== undefined && telemetry.value !== null && matchAgainstPending(telemetry.value)) {
-    return toIdleFromTelemetry(state, state.pendingDispatchValue);
-  }
-
-  const pollPeriod = cfg.pollPeriodMs ?? DEFAULT_POLL_PERIOD_MS;
-  const timeoutMs = Math.max(RECONCILIATION_TIMEOUT_FLOOR_MS, pollPeriod * RECONCILIATION_TIMEOUT_MULTIPLIER);
-  if (state.reconcileStartedAt != null && now - state.reconcileStartedAt >= timeoutMs) {
-    if (telemetry && telemetry.value !== undefined && telemetry.value !== null) {
-      const idx = matchPositionIndex(positions, telemetry.value);
-      if (idx >= 0) return toIdleFromTelemetry(state, idx);
-      return { ...toIdleFromTelemetry(state, state.rawValue), telemetryUnmatched: true, unmatchedValue: telemetry.value };
-    }
-    return toIdleFromTelemetry(state, state.rawValue);
-  }
-
-  return state;
-}
-
-function toIdleFromTelemetry(state, value) {
-  return {
-    ...state,
-    phase: 'idle',
-    rawValue: value,
-    pendingDispatchValue: null,
-    reconcileStartedAt: null,
-    telemetryUnmatched: false,
-    unmatchedValue: null
-  };
 }
 
 /**
