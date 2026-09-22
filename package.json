@@ -2,6 +2,7 @@
   "name": "widget-studio",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Flight Deck Widget Studio — visual widget-design IDE, no build step.",
   "scripts": {
     "test": "vitest run",
