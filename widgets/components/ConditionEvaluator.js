@@ -58,7 +58,7 @@ export function evaluateConditionExpr(expr, allState, widget) {
  * whose `when` condition evaluates true, or {} if none match (or `rules` is
  * empty/absent). First-match-wins, same convention as a CSS-like rule list —
  * author more specific conditions earlier.
- * @param {Array<{when: object, style: object}>} [rules]
+ * @param {Array<{when: object, style: object}>|undefined} rules
  * @param {object} allState
  * @param {{getLocalState: (name: string) => any}} widget
  * @returns {object}

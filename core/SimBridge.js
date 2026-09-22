@@ -36,6 +36,8 @@ export class SimBridge {
 
   /**
    * Links storage manager for asset persistence synchronization
+   * The type resolves from the app-owned module after synchronization; the canonical
+   * shared layout intentionally accepts its TS2307 entry in typecheck-baseline.json.
    * @param {import('./StorageManager.js').StorageManager} storageManager
    */
   setStorageManager(storageManager) {

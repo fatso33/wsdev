@@ -213,13 +213,10 @@ export class RotaryComponent extends BaseComponent {
    * Component reacts to a result.
    * @param {object|null} gestureEvent
    * @param {object|null} telemetry
-   * @param {number} [nowOverride] — ticket 05: schedulePulseDrain()'s rAF callback
-   *   already has a real animation-frame timestamp in hand and passes it straight
-   *   through, so the engine's per-frame Pulse coalescer keys off the SAME frame
-   *   identity the browser used. Every other call site (pointerdown/move/up,
-   *   telemetry updates, the dispatch-failure replay) falls back to this.now() —
-   *   'move' is resolved synchronously, one call per real pointermove event, not
-   *   batched to a frame (see attachTurnGesture's own comment on why).
+   * @param {number} [nowOverride] - An animation-frame timestamp supplied by
+   *   schedulePulseDrain() so the engine's per-frame Pulse coalescer uses the same
+   *   frame identity as the browser. Other call sites fall back to this.now(); move
+   *   events remain synchronous and are not batched to a frame.
    */
   resolve(gestureEvent, telemetry, nowOverride) {
     // A fresh grab supersedes any failure still waiting to be applied: the user has

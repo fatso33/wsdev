@@ -33,6 +33,8 @@ function mergeStyleSubObject(...layers) {
 export class BaseComponent {
   /**
    * @param {object} def - Component envelope definition
+   * The widget type resolves from the app-owned module after synchronization; the
+   * canonical shared layout intentionally accepts its TS2307 entry in typecheck-baseline.json.
    * @param {import('../CompositeWidget.js').CompositeWidget} widget - Parent CompositeWidget instance
    */
   constructor(def, widget) {
