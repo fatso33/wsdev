@@ -124,6 +124,14 @@
  */
 
 import {
+  TIER_FINE,
+  accelerateTravel,
+  advanceRawValue,
+  createAccelerationState,
+  resolveAcceleration
+} from './rotary/rotaryAcceleration.js';
+
+import {
   DEFAULT_MAX,
   DEFAULT_MIN,
   clamp,
@@ -134,6 +142,8 @@ import {
   resolveGesture,
   resolveWriteMode
 } from './rotary/rotaryConfig.js';
+
+export { resolveCoarseFeel } from './rotary/rotaryAcceleration.js';
 
 export {
   MIN_DEGREES_PER_UNIT,
@@ -150,7 +160,6 @@ const DEFAULT_MIN_EFFECTIVE_RADIUS = 24;
 const DEFAULT_SWEEP_DEGREES = 270;
 const DEFAULT_POLL_PERIOD_MS = 1000; // matches the normal 1Hz poll tier (CLAUDE.md)
 const DEFAULT_RING_ID = 'default';
-const TIER_FINE = 'fine';
 
 // Deliberate implementation choice, not a value from the spec: caps how many
 // discrete Pulse steps a single resolveRotary() call will hand back as real 'turn'
@@ -246,134 +255,6 @@ function matchPositionIndex(positions, rawValue) {
 //   telemetry tick has a chance to arrive and echo back before we give up.
 const RECONCILIATION_TIMEOUT_FLOOR_MS = 250;
 const RECONCILIATION_TIMEOUT_MULTIPLIER = 2;
-
-// `degreesPerUnit` is a DIVISOR (arc degrees -> value units), so it must never reach
-// zero. Nothing upstream stops it: the Inspector's number control has no min/max
-// plumbing and coerces a blank/garbage entry to 0 (`Number(raw) || 0`), and the
-// registry field carries no range either — so an Author typing 0 in the "Feel" field
-// used to drive rawValue to Infinity, then to NaN on the first direction reversal,
-// after which the NaN threaded through `previousState` forever (clamp() propagates it)
-// and the knob was permanently dead until the widget was rebuilt. Floored here rather
-// than in the registry because the engine is the only layer every caller goes through
-// — Studio's preview host, the PWA and a raw `.fdwidget` import alike.
-// Acceleration: exactly two tiers, 'fine' (the fine step) and 'coarse'. A continuous
-// velocity curve is rejected on purpose: a scale that differs every frame makes an exact
-// value unreachable. The tier is a hysteresis state machine with no momentum and no decay:
-// the first move after a rate-measurement window closes slow is already back on the fine
-// step.
-const TIER_COARSE = 'coarse';
-const DEFAULT_ACCELERATION_ENTER_RATE = 20;
-const ACCELERATION_EXIT_RATIO = 0.5;
-const DEFAULT_ACCELERATION_COARSE_STEP = 10;
-
-// Rate of turn is judged once per this much elapsed time, from the travel accumulated over
-// all the moves in it, not per pointer event. Two events a millisecond apart carry no
-// rate information of their own, and judging each alone would let ordinary timing jitter
-// carry a steady turn from one tier to the other. Each window stands alone (memoryless),
-// so the tier follows the turn to within one window.
-const ACCELERATION_SAMPLE_MS = 40;
-
-// A coarse step under 1 would be finer than the fine step, which is no coarse step at all:
-// it means 1 (the coarse tier moves like the fine one). Only an unset or non-numeric one
-// falls back to the default.
-function resolveCoarseStep(raw) {
-  const n = Number(raw ?? DEFAULT_ACCELERATION_COARSE_STEP);
-  if (!Number.isFinite(n)) return DEFAULT_ACCELERATION_COARSE_STEP;
-  return Math.max(n, 1);
-}
-
-/**
- * The Feel a Rotary runs at in the coarse tier: the fine Feel divided by the coarse step,
- * then held to the Feel floor for this Gesture and write mode like any other Feel. The
- * floor constrains the Feel the Rotary actually runs at, so a coarse step cannot make the
- * step rate exceed what the floor guards against: in Pulse Arc and Pulse Scrub it caps the
- * coarse step at fine Feel / floor, and everywhere it keeps the divisor above zero.
- * A fine Feel already below the floor runs at the floor, so the coarse Feel is the floor too.
- *
- * @param {number|undefined} rawFeel - The authored Feel, resolved exactly as resolveDegreesPerUnit does.
- * @param {string|undefined} gesture - 'arc' | 'scrub' | 'tap'.
- * @param {string|undefined} writeMode - 'absolute' | 'pulse'.
- * @param {number|undefined} coarseStep - How many fine steps one step of travel becomes; below 1 means 1, unset or non-numeric means the default of 10.
- * @returns {number} A Feel whose magnitude is at least resolveFeelFloor and at most the fine Feel's; the sign of the fine Feel.
- */
-export function resolveCoarseFeel(rawFeel, gesture, writeMode, coarseStep) {
-  const fine = resolveDegreesPerUnit(rawFeel, gesture, writeMode);
-  return resolveDegreesPerUnit(fine / resolveCoarseStep(coarseStep), gesture, writeMode);
-}
-
-/**
- * Everything one call's gesture functions need to accelerate, or null when Acceleration
- * does not apply. It does not apply when it is off, to Tap (a tap has no rate of turn),
- * or to a Detented range (each step is a named position, not a quantity to scale).
- *
- * With fast step events (Pulse only) the coarse tier is not scaled: the aircraft's own
- * fast event is the coarse step, so scaling the step count as well would compound it.
- * `effectiveCoarseStep` is the coarse step after the Feel floor: how many fine steps one
- * step of travel really becomes.
- */
-function resolveAcceleration(cfg, gesture, writeMode, rangeMode, fineFeel, now) {
-  if (cfg.acceleration !== true || gesture === 'tap' || rangeMode === 'detented') return null;
-  const enterRaw = Number(cfg.accelerationEnterRate ?? DEFAULT_ACCELERATION_ENTER_RATE);
-  const enterRate = Number.isFinite(enterRaw) && enterRaw > 0 ? enterRaw : DEFAULT_ACCELERATION_ENTER_RATE;
-  // The exit rate must stay strictly under the entry rate or the gap that prevents
-  // chatter is gone, so an authored value that is not under it falls back to half of it.
-  const exitRaw = Number(cfg.accelerationExitRate ?? enterRate * ACCELERATION_EXIT_RATIO);
-  const exitRate = Number.isFinite(exitRaw) && exitRaw > 0 && exitRaw < enterRate ? exitRaw : enterRate * ACCELERATION_EXIT_RATIO;
-  const fastEvents = writeMode === 'pulse' && cfg.accelerationFastEvents === true;
-  const coarseFeel = resolveCoarseFeel(cfg.degreesPerUnit, gesture, writeMode, cfg.accelerationCoarseStep);
-  return { now, enterRate, exitRate, fastEvents, effectiveCoarseStep: fastEvents ? 1 : Math.abs(fineFeel / coarseFeel) };
-}
-
-function createAccelerationState(now = null) {
-  return { accelTier: TIER_FINE, accelSampleStart: now, accelSampleTravel: 0 };
-}
-
-/**
- * Advances the tier for one move and scales that move's travel by it.
- *
- * `travelUnits` is finger travel in units of the FINE Feel, whatever the tier. Measuring
- * the rate at the fine Feel is what keeps the tier from feeding back on itself: were it
- * measured at the coarse Feel, entering the coarse tier would inflate its own reading.
- * The tier is decided before this move's travel is scaled, so a move that ends a slow
- * window is already unscaled.
- *
- * A call with no gesture passes zero travel: it still closes a window that has elapsed,
- * so the tier a Feedback surface reads follows a finger that has stopped moving.
- *
- * @returns {{state: object, deltaValue: number, coarse: boolean}}
- */
-function accelerateTravel(state, accel, travelUnits) {
-  if (!accel) return { state, deltaValue: travelUnits, coarse: false };
-  let tier = state.accelTier ?? TIER_FINE;
-  let sampleTravel = (state.accelSampleTravel ?? 0) + Math.abs(travelUnits);
-  let sampleStart = state.accelSampleStart ?? accel.now;
-  const elapsed = accel.now - sampleStart;
-  if (elapsed >= ACCELERATION_SAMPLE_MS) {
-    const rate = (sampleTravel * 1000) / elapsed;
-    if (tier === TIER_COARSE) tier = rate < accel.exitRate ? TIER_FINE : TIER_COARSE;
-    else tier = rate >= accel.enterRate ? TIER_COARSE : TIER_FINE;
-    sampleTravel = 0;
-    sampleStart = accel.now;
-  }
-  const coarse = tier === TIER_COARSE;
-  return {
-    state: { ...state, accelTier: tier, accelSampleStart: sampleStart, accelSampleTravel: sampleTravel },
-    deltaValue: coarse ? travelUnits * accel.effectiveCoarseStep : travelUnits,
-    coarse
-  };
-}
-
-/**
- * Adds a move's value change to the unclamped raw value. A Bounded Ring normally absorbs
- * overshoot past a bound like a physical end-stop, so it must be wound back before the
- * value moves again. A coarse step scales how much can be absorbed at once, which would
- * leave an exact value near the bound unreachable after slowing down; so a coarse move
- * clamps at the bound and carries no overshoot.
- */
-function advanceRawValue(rawValue, deltaValue, coarse, min, max, mode) {
-  const next = rawValue + deltaValue;
-  return coarse && mode === 'bounded' ? clamp(next, min, max) : next;
-}
 
 /** Shortest signed angular difference from `fromRad` to `toRad`, in degrees,
  * in the range (-180, 180]. Exact — no small-angle approximation. */
