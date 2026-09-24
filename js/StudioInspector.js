@@ -10,7 +10,7 @@ import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_N
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../core/deckEventPacks.js';
 import { openModal, confirmModal, showToast } from './StudioModal.js';
-import { summarizeCondition, computeScrollAnchorDelta } from './InspectorLogic.js';
+import { computeScrollAnchorDelta } from './InspectorLogic.js';
 // Widget Studio 2.0, Phase 1: TRIGGERS/ACTIONS are now read from
 // PropertyRegistry.js instead of being hand-copied arrays here — the exact
 // "UI list is stale relative to runtime" bug class found four times in the
@@ -26,6 +26,7 @@ import { renderRegistryFieldGroups, renderRegistryFields, renderCompoundGroup, a
 import { buildModeToggle, tierHidesField, applyUiMode, applySubtitleVisibility, applyTierMoreBadges, applySectionJsonViews, buildInspectorTabShell, buildLayoutBadge, buildAppearanceBadge, buildDataBadge, buildBehaviorBadge, buildAccordionGroup } from './inspector/InspectorShell.js';
 import { renderComponentAppearance, getThemeEditContext, remapAppearancePath, retargetAppearanceFields, renderAppearanceSection, renderBaseThemeAwareAppearanceFields } from './inspector/sections/AppearanceSection.js';
 import { buildMultiSelectStyleProxy, applyMultiSelectFieldAvailability, renderMultiSelectInspector } from './inspector/MultiSelectInspector.js';
+import { openConditionEditorPopover, renderVisibilityAndGuard, renderConditionListEditor } from './inspector/sections/ConditionsSection.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -47,25 +48,6 @@ const CONTENT_FIELD_BY_TYPE = {
 };
 
 
-
-// V14 ("Use This Component's Own Value"): a fourth option shared by every
-// condition-source dropdown (visibleWhen row, style.rules condition, an
-// interaction's "Only Run If"), alongside declared state[] vars and the
-// existing Custom/nested-path escape hatch. Picking it declares (or reuses)
-// a syncFrom state var mirroring the CURRENTLY SELECTED component's own
-// binding.readSimVar — the "hop nothing in the UI points at" the proposal's
-// V14/G8 finding describes. One shared fragment so the three editors can't
-// drift in wording/ordering; each editor still wires its own commit timing.
-const OWN_VALUE_OPTION = '__own_value__';
-function conditionStateOptionsHtml(stateVars, currentValue, ownValueSelected, ownValueSimVar) {
-  const isCustom = !ownValueSelected && !!currentValue && !stateVars.some((s) => s.name === currentValue);
-  return `
-    <option value="">— state var —</option>
-    ${ownValueSimVar ? `<option value="${OWN_VALUE_OPTION}" ${ownValueSelected ? 'selected' : ''} title="Declares (or reuses) a state variable that mirrors this component's own binding, so its live value can drive this condition.">Use This Component's Own Value</option>` : ''}
-    ${stateVars.map((s) => `<option value="${escapeHtmlAttr(s.name)}" ${!ownValueSelected && currentValue === s.name ? 'selected' : ''}>${escapeHtmlAttr(s.name)}</option>`).join('')}
-    <option value="${CUSTOM_OPTION_VALUE}" ${isCustom ? 'selected' : ''}>Custom / nested path…</option>
-  `;
-}
 
 export class StudioInspector {
   /**
@@ -870,45 +852,8 @@ export class StudioInspector {
     showToast('Applied — Undo (Ctrl+Z) to revert if something looks wrong.');
   }
 
-  /**
-   * Opens a condition editor (rule condition or visibility condition) in a popover modal.
-   * Shared logic extracted from duplicate handlers in renderStyleTab and renderVisibilityAndGuard.
-   *
-   * @param {string} title - Modal title (e.g., 'Edit Rule Condition')
-   * @param {(rerender: () => void) => {html: string, wire: (mountEl: HTMLElement) => void}} buildEditor
-   *        Builds a fresh {html, wire} editor from current state. Called once on mount and again
-   *        after every add/remove so the popover's own DOM reflects the change in place — same
-   *        local-recursive-re-render pattern the interaction modal's "Only Run If" editor already
-   *        uses, rather than relying on a close/reopen to pick up the new state.
-   * @returns {Promise<void>} Resolves after modal closes
-   */
   async openConditionEditorPopover(title, buildEditor) {
-    let mountEl;
-    const render = () => {
-      const editor = buildEditor(render);
-      mountEl.innerHTML = editor.html;
-      editor.wire(mountEl);
-    };
-
-    const result = await openModal({
-      title,
-      bodyHtml: '',
-      onMount: (card) => {
-        mountEl = card.querySelector('.modal-body');
-        render();
-      },
-      submitLabel: 'Done',
-      cancelLabel: 'Cancel',
-      onSubmit: () => {
-        // Just close the modal; changes are committed immediately via onCommit in the editor
-        return { value: true };
-      }
-    });
-
-    // After the modal closes, re-render to update the summary line
-    if (result) {
-      this.render();
-    }
+    return openConditionEditorPopover(this, title, buildEditor);
   }
 
   // ==========================================
@@ -1878,69 +1823,7 @@ export class StudioInspector {
   }
 
   renderVisibilityAndGuard(comp, def, body) {
-    const assets = def.assets || [];
-    const guard = comp.layout?.guard || {};
-    const conditionSummary = summarizeCondition(comp.visibleWhen);
-
-    body.innerHTML = `
-      <div class="prop-section-subtitle">Conditional Visibility (visibleWhen) <span class="prop-hint" title="FDWS v1.13: each condition's state can be a declared state[] var, or — via the 'Custom / nested path…' option — a nested/indexed path like presets[0].label, addressing one specific array-slot field instead of a whole variable.">ⓘ</span></div>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-        <div style="flex:1;padding:6px 8px;background:var(--studio-panel-bg);border:1px solid var(--studio-panel-border);border-radius:3px;font-size:12px;color:var(--studio-text-secondary);">${escapeHtmlAttr(conditionSummary)}</div>
-        <button type="button" id="vw-edit-condition" class="bar-btn" title="Edit condition in popover">Edit</button>
-      </div>
-
-      <div class="prop-section-subtitle" style="margin-top:14px;">Guard Overlay (layout.guard §2.2)</div>
-      <div class="prop-field">
-        <label><input type="checkbox" id="guard-enabled" ${guard.enabled ? 'checked' : ''} /> Enable safety cover (tap to open, then tap control)</label>
-      </div>
-      ${guard.enabled ? `
-        <div class="prop-row-2">
-          <div class="prop-field">
-            <label>Closed Asset</label>
-            <select id="guard-closed-asset" class="prop-select">
-              <option value="">— none —</option>
-              ${assets.map((a) => `<option value="${a.id}" ${guard.closedAsset === a.id ? 'selected' : ''}>${a.id}</option>`).join('')}
-            </select>
-          </div>
-          <div class="prop-field">
-            <label>Open Asset</label>
-            <select id="guard-open-asset" class="prop-select">
-              <option value="">— none —</option>
-              ${assets.map((a) => `<option value="${a.id}" ${guard.openAsset === a.id ? 'selected' : ''}>${a.id}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-        <div class="prop-field">
-          <label>Auto-Close After (ms, 0 = never)</label>
-          <input type="number" id="guard-autoclose" class="prop-input" value="${guard.autoCloseAfterMs ?? 0}" min="0" />
-        </div>
-      ` : ''}
-    `;
-
-    // Wire up the edit button to open the popover
-    body.querySelector('#vw-edit-condition')?.addEventListener('click', async () => {
-      await this.openConditionEditorPopover('Edit Conditional Visibility', (rerender) =>
-        this.renderConditionListEditor(comp, def, comp.visibleWhen || null, 'vw', (nextValue, recordHistory = true) => {
-          this.state.updateComponent(comp.id, { visibleWhen: nextValue }, recordHistory);
-          rerender();
-        })
-      );
-    });
-
-    // --- guard wiring ---
-    body.querySelector('#guard-enabled')?.addEventListener('change', (e) => {
-      this.state.updateComponent(comp.id, { layout: { ...(comp.layout || {}), guard: { ...guard, enabled: e.target.checked } } });
-    });
-    body.querySelector('#guard-closed-asset')?.addEventListener('change', (e) => {
-      this.state.updateComponent(comp.id, { layout: { ...(comp.layout || {}), guard: { ...guard, closedAsset: e.target.value || undefined } } });
-    });
-    body.querySelector('#guard-open-asset')?.addEventListener('change', (e) => {
-      this.state.updateComponent(comp.id, { layout: { ...(comp.layout || {}), guard: { ...guard, openAsset: e.target.value || undefined } } });
-    });
-    body.querySelector('#guard-autoclose')?.addEventListener('change', (e) => {
-      const ms = parseInt(e.target.value, 10) || 0;
-      this.state.updateComponent(comp.id, { layout: { ...(comp.layout || {}), guard: { ...guard, autoCloseAfterMs: ms || undefined } } });
-    });
+    return renderVisibilityAndGuard(this, comp, def, body);
   }
 
   // Wave 2 Part B2: the old row-list editor for style.rules (with its own
@@ -1950,308 +1833,8 @@ export class StudioInspector {
   // render every rule's style through the same generic field engine
   // Normal/State already use. See renderAppearanceSection()'s doc comment.
 
-  /**
-   * Wave 3, G6 slice 1: shared one-level compound condition editor —
-   * combinator (ALL/ANY) + N leaf condition rows (state/op/value, with the
-   * declared-var/custom-path/"use this component's own value" options every
-   * condition-source dropdown in this file already shares via
-   * conditionStateOptionsHtml()) — plus a JSON-textarea fallback for a
-   * genuinely nested/complex expression, so a hand-authored two-level
-   * condition is never silently destroyed by an editor that can't render it
-   * (same "don't destroy what you can't render" principle as V18's rule-style
-   * fix). Originally hand-built only for visibleWhen (renderVisibilityAndGuard);
-   * extracted here so style.rules[].when (this slice) and, later,
-   * interactions[].condition can reach the same one-level compound capability
-   * instead of staying single-leaf-only.
-   * @param {object} comp
-   * @param {object} def widgetDef
-   * @param {object|null} expr the raw stored condition value
-   * @param {string} idPrefix DOM id prefix, so two instances on one panel
-   *        never collide (e.g. 'vw' vs 'rulecond')
-   * @param {(next: object|undefined, recordHistory?: boolean) => void} onCommit
-   *        called with the next ready-to-store value (or undefined to clear)
-   * @returns {{ html: string, wire: (mountEl: HTMLElement) => void }}
-   */
   renderConditionListEditor(comp, def, expr, idPrefix, onCommit, options = {}) {
-    const stateVars = def.state || [];
-
-    // A compound expression is normalized to a flat condition list under one
-    // combinator (allOf/anyOf) for the visual editor. G6 slice 3: each item
-    // in that list can now be EITHER a leaf OR a one-level-deep group
-    // (itself {allOf|anyOf: [...leaves]}) — exactly "two levels," matching
-    // the proposal's own wording, not arbitrary recursive nesting. Anything
-    // deeper (a group containing a group) has no bounded visual form and
-    // still falls back to the JSON escape hatch below.
-    const combinator = expr?.anyOf ? 'anyOf' : 'allOf';
-    // Post-implementation review §3: `expr.state` used to be read as a
-    // truthiness test, so a fresh rule's `{state:'', equals:''}` (empty
-    // string is falsy) fell straight through to the JSON fallback below —
-    // on exactly the widget-with-no-declared-state-vars case a first-time
-    // author is most likely building. `typeof` matches isLeafCondition's
-    // own (already-correct) check a few lines down.
-    const conditions = expr ? (expr[combinator] || (typeof expr.state === 'string' ? [expr] : [])) : [];
-    const isGroupCondition = (c) => !!c && typeof c === 'object' && (Array.isArray(c.allOf) || Array.isArray(c.anyOf));
-    // Bug found live during G6 slice 1 verification, pre-existing (not
-    // introduced here — this was visibleWhen's own original check, copied
-    // verbatim before that fix): the old check only looked at the OUTERMOST
-    // shape, so a genuinely nested expression passed as "simple" because the
-    // top level has `allOf`/`anyOf`. Each array member must itself be
-    // recognized as a leaf or a (leaves-only) group, or this falls back to
-    // the JSON escape hatch instead of silently destroying what it can't
-    // render on the next row edit.
-    const isLeafCondition = (c) => !!c && typeof c === 'object' && typeof c.state === 'string' && !isGroupCondition(c);
-    const isSimpleItem = (c) => isLeafCondition(c) || (isGroupCondition(c) && (c.allOf || c.anyOf).every(isLeafCondition));
-    const isNestedOrComplex = !!expr && (!(expr.allOf || expr.anyOf || typeof expr.state === 'string') || !conditions.every(isSimpleItem));
-
-    const OPS = ['equals', 'notEquals', 'gt', 'gte', 'lt', 'lte', 'between'];
-    // Post-implementation review §9: the dropdown used to show these raw
-    // JSON keys verbatim (gt, gte, notEquals...) — plain-English labels only,
-    // the stored `value` (and cond[op] lookups elsewhere) stay the raw key.
-    const OP_LABELS = { equals: 'is', notEquals: 'is not', gt: 'is greater than', gte: 'is at least', lt: 'is less than', lte: 'is at most', between: 'is between' };
-
-    // FDWS v1.13: a condition's `state` can address a nested/indexed path
-    // (e.g. "presets[0].label"), not just a declared state[] var — same
-    // grammar as binding.stateRef (v1.11). Any name not in the declared
-    // list is treated as a custom/path value, same "Custom…" pattern used
-    // elsewhere in this panel (bindings, event pickers).
-    const stateIsCustomPath = (name) => !!name && !stateVars.some((s) => s.name === name);
-
-    // G6 slice 3: the leaf field markup (state/op/value), extracted so both
-    // a top-level leaf row and a group-nested leaf row render identically —
-    // one template, not two copies to keep in sync.
-    const leafFieldsHtml = (cond) => {
-      const isCustom = stateIsCustomPath(cond.state);
-      return `
-        <div class="${idPrefix}-state-wrap" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;">
-          <select class="row-field ${idPrefix}-state prop-select" data-field="state">
-            ${conditionStateOptionsHtml(stateVars, cond.state, false, comp.binding?.readSimVar)}
-          </select>
-          <input type="text" class="row-field ${idPrefix}-state-custom prop-input ${isCustom ? '' : 'hidden'}" value="${isCustom ? escapeHtmlAttr(cond.state) : ''}" placeholder="e.g. presets[0].label" title="FDWS v1.13: 'name[index].field' path into an array/object state var — same grammar as a component's Bind to Local State Path." />
-        </div>
-        <select class="row-field ${idPrefix}-op prop-select" data-field="op">
-          ${OPS.map((op) => `<option value="${op}" ${OPS.find((o) => cond[o] !== undefined) === op ? 'selected' : ''}>${OP_LABELS[op] || op}</option>`).join('')}
-        </select>
-        <input type="text" class="row-field ${idPrefix}-val" data-field="val" value="${(() => { const op = OPS.find((o) => cond[o] !== undefined); return op ? (op === 'between' ? (cond.between || []).join(',') : cond[op]) : ''; })()}" placeholder="${(OPS.find((o) => cond[o] !== undefined) === 'between') ? 'lo,hi' : 'value'}" />
-      `;
-    };
-
-    // G6 slice 3: a top-level item is either a plain leaf row (unchanged
-    // markup) or a bordered group box containing its own combinator + N
-    // leaf rows — nested leaf rows are structurally one level deeper in the
-    // DOM (inside .cond-group-rows), not a different CSS class, so the
-    // top-level wiring's `>` direct-child query naturally excludes them.
-    const conditionRowHtml = (cond, idx) => {
-      if (isGroupCondition(cond)) {
-        const groupCombinator = cond.anyOf ? 'anyOf' : 'allOf';
-        const groupLeaves = cond[groupCombinator] || [];
-        return `
-      <div class="row-list-item cond-group" data-idx="${idx}" style="flex-direction:column;align-items:stretch;">
-        <div class="cond-group-header">
-          <select class="row-field ${idPrefix}-group-combinator prop-select">
-            <option value="allOf" ${groupCombinator === 'allOf' ? 'selected' : ''}>Group: ALL of these are true</option>
-            <option value="anyOf" ${groupCombinator === 'anyOf' ? 'selected' : ''}>Group: ANY of these are true</option>
-          </select>
-          <button type="button" class="btn-mini-close ${idPrefix}-remove" title="Remove Group">✕</button>
-        </div>
-        <div class="cond-group-rows">
-          ${groupLeaves.map((leaf, leafIdx) => `
-            <div class="row-list-item" data-leaf-idx="${leafIdx}">
-              ${leafFieldsHtml(leaf)}
-              <button type="button" class="btn-mini-close ${idPrefix}-remove-leaf" title="Remove">✕</button>
-            </div>
-          `).join('') || '<div class="caps-empty">Empty group — add a condition.</div>'}
-        </div>
-        <button type="button" class="bar-btn row-add ${idPrefix}-add-group-leaf">+ Add Condition to Group</button>
-      </div>
-    `;
-      }
-      return `
-      <div class="row-list-item" data-idx="${idx}">
-        ${leafFieldsHtml(cond)}
-        <button type="button" class="btn-mini-close ${idPrefix}-remove" title="Remove">✕</button>
-      </div>
-    `;
-    };
-
-    const html = `
-      ${isNestedOrComplex ? `
-        <div class="caps-empty">This condition is too complex for the visual editor (hand-authored/nested). Edit it as JSON below, or clear it to start over with the visual editor.</div>
-        <textarea id="${idPrefix}-raw-json" class="prop-input" rows="4">${escapeHtmlAttr(JSON.stringify(expr, null, 0))}</textarea>
-        <div id="${idPrefix}-raw-error" class="prop-json-error hidden"></div>
-        <button type="button" id="${idPrefix}-clear" class="bar-btn">Clear & Use Visual Editor</button>
-      ` : `
-        <div class="prop-field">
-          <label>Match when…</label>
-          <select id="${idPrefix}-combinator" class="prop-select" ${conditions.length === 0 ? 'disabled' : ''}>
-            <option value="allOf" ${combinator === 'allOf' ? 'selected' : ''}>ALL of these are true</option>
-            <option value="anyOf" ${combinator === 'anyOf' ? 'selected' : ''}>ANY of these are true</option>
-          </select>
-        </div>
-        <div id="${idPrefix}-conditions">${conditions.map(conditionRowHtml).join('') || '<div class="caps-empty">No conditions set.</div>'}</div>
-        <div class="prop-row-2" style="margin-top:6px;">
-          <button type="button" id="${idPrefix}-add-condition" class="bar-btn row-add">+ Add Condition</button>
-          <button type="button" id="${idPrefix}-add-group" class="bar-btn row-add" title="A nested ALL/ANY group — for e.g. 'X AND (Y OR Z)'">+ Add Group</button>
-        </div>
-      `}
-    `;
-
-    const wire = (mountEl) => {
-      const commit = (nextConditions, nextCombinator, recordHistory = true) => {
-        const value = nextConditions.length === 0 ? undefined : { [nextCombinator]: nextConditions };
-        onCommit(value, recordHistory);
-      };
-
-      mountEl.querySelector(`#${idPrefix}-combinator`)?.addEventListener('change', (e) => commit(conditions, e.target.value));
-
-      // G6 slice 3: shared leaf-field wiring (state/op/value, including
-      // "Use This Component's Own Value") — `writeValue(nextLeaf,
-      // recordHistory)` is the only thing that differs between a top-level
-      // leaf and a group-nested one, so this one function backs both.
-      const wireLeafFields = (rowEl, writeValue) => {
-        const stateSelect = rowEl.querySelector(`.${idPrefix}-state`);
-        const stateCustomInput = rowEl.querySelector(`.${idPrefix}-state-custom`);
-
-        // V14: `stateOverride` lets the "Use This Component's Own Value" branch
-        // below reuse this same op/value-reading logic rather than duplicating it.
-        const applyRowChange = (recordHistory = true, stateOverride = undefined) => {
-          const state = stateOverride !== undefined ? stateOverride
-            : stateSelect.value === CUSTOM_OPTION_VALUE ? stateCustomInput.value.trim() : stateSelect.value;
-          const op = rowEl.querySelector(`.${idPrefix}-op`).value;
-          const rawVal = rowEl.querySelector(`.${idPrefix}-val`).value;
-          const cond = { state };
-          if (op === 'between') {
-            const [lo, hi] = rawVal.split(',').map((s) => Number(s.trim()));
-            cond.between = [lo || 0, hi || 0];
-          } else if (['gt', 'gte', 'lt', 'lte'].includes(op)) {
-            cond[op] = Number(rawVal) || 0;
-          } else {
-            cond[op] = rawVal;
-          }
-          writeValue(cond, recordHistory);
-        };
-        stateSelect?.addEventListener('change', () => {
-          if (stateSelect.value === OWN_VALUE_OPTION) {
-            const simVar = comp.binding?.readSimVar;
-            if (!simVar) return;
-            const name = this.state.resolveSyncFromVarName(simVar);
-            stateCustomInput?.classList.add('hidden');
-            // G6 slice 2: a deferred (Save/Cancel-transactional) caller
-            // derives and applies the syncFrom var itself, once, at real
-            // Submit time — resolveSyncFromVarName() above is already pure,
-            // so the row still shows the right name either way.
-            if (!options.deferred) {
-              this.state.saveHistory("Use This Component's Own Value");
-              this.state.ensureSyncFromVar(simVar);
-            }
-            applyRowChange(false, name);
-          } else if (stateSelect.value === CUSTOM_OPTION_VALUE) {
-            // Just reveal the text field — don't commit yet. Committing here
-            // with the still-empty custom input would trigger a synchronous
-            // re-render (no debounce) that rebuilds this row from that empty
-            // value, snapping the select back to "— state var —" and hiding
-            // the field before the user can type anything into it — same
-            // "reveal, don't write yet" pattern used for every other
-            // Custom… dropdown in this panel.
-            stateCustomInput?.classList.remove('hidden');
-          } else {
-            stateCustomInput?.classList.add('hidden');
-            if (stateCustomInput) stateCustomInput.value = '';
-            applyRowChange();
-          }
-        });
-        stateCustomInput?.addEventListener('change', applyRowChange);
-        rowEl.querySelector(`.${idPrefix}-op`)?.addEventListener('change', applyRowChange);
-        rowEl.querySelector(`.${idPrefix}-val`)?.addEventListener('change', applyRowChange);
-      };
-
-      mountEl.querySelectorAll(`#${idPrefix}-conditions > .row-list-item`).forEach((rowEl) => {
-        const idx = Number(rowEl.dataset.idx);
-
-        if (rowEl.classList.contains('cond-group')) {
-          rowEl.querySelector(`.${idPrefix}-group-combinator`)?.addEventListener('change', (e) => {
-            const item = conditions[idx];
-            const groupLeaves = item[item.anyOf ? 'anyOf' : 'allOf'] || [];
-            const next = [...conditions];
-            next[idx] = { [e.target.value]: groupLeaves };
-            commit(next, combinator);
-          });
-          rowEl.querySelector(`.${idPrefix}-remove`)?.addEventListener('click', () => {
-            commit(conditions.filter((_, i) => i !== idx), combinator);
-          });
-          rowEl.querySelectorAll('.cond-group-rows > .row-list-item').forEach((leafEl) => {
-            const leafIdx = Number(leafEl.dataset.leafIdx);
-            wireLeafFields(leafEl, (nextLeaf, recordHistory) => {
-              const item = conditions[idx];
-              const gc = item.anyOf ? 'anyOf' : 'allOf';
-              const nextLeaves = [...(item[gc] || [])];
-              nextLeaves[leafIdx] = nextLeaf;
-              const next = [...conditions];
-              next[idx] = { [gc]: nextLeaves };
-              commit(next, combinator, recordHistory);
-            });
-            leafEl.querySelector(`.${idPrefix}-remove-leaf`)?.addEventListener('click', () => {
-              const item = conditions[idx];
-              const gc = item.anyOf ? 'anyOf' : 'allOf';
-              const nextLeaves = (item[gc] || []).filter((_, i) => i !== leafIdx);
-              const next = [...conditions];
-              // No empty groups — removing a group's last leaf removes the
-              // whole group rather than leaving a stray {allOf: []}.
-              if (nextLeaves.length === 0) {
-                next.splice(idx, 1);
-              } else {
-                next[idx] = { [gc]: nextLeaves };
-              }
-              commit(next, combinator);
-            });
-          });
-          rowEl.querySelector(`.${idPrefix}-add-group-leaf`)?.addEventListener('click', () => {
-            const item = conditions[idx];
-            const gc = item.anyOf ? 'anyOf' : 'allOf';
-            const nextLeaves = [...(item[gc] || []), { state: stateVars[0]?.name || '', equals: '' }];
-            const next = [...conditions];
-            next[idx] = { [gc]: nextLeaves };
-            commit(next, combinator);
-          });
-        } else {
-          wireLeafFields(rowEl, (nextLeaf, recordHistory) => {
-            const next = [...conditions];
-            next[idx] = nextLeaf;
-            commit(next, combinator, recordHistory);
-          });
-          rowEl.querySelector(`.${idPrefix}-remove`)?.addEventListener('click', () => {
-            commit(conditions.filter((_, i) => i !== idx), combinator);
-          });
-        }
-      });
-
-      mountEl.querySelector(`#${idPrefix}-add-condition`)?.addEventListener('click', () => {
-        commit([...conditions, { state: stateVars[0]?.name || '', equals: '' }], combinator);
-      });
-
-      mountEl.querySelector(`#${idPrefix}-add-group`)?.addEventListener('click', () => {
-        commit([...conditions, { allOf: [{ state: stateVars[0]?.name || '', equals: '' }] }], combinator);
-      });
-
-      mountEl.querySelector(`#${idPrefix}-clear`)?.addEventListener('click', () => {
-        onCommit(undefined);
-      });
-
-      mountEl.querySelector(`#${idPrefix}-raw-json`)?.addEventListener('change', (e) => {
-        try {
-          const parsed = JSON.parse(e.target.value);
-          onCommit(parsed);
-          mountEl.querySelector(`#${idPrefix}-raw-error`)?.classList.add('hidden');
-        } catch (err) {
-          const errEl = mountEl.querySelector(`#${idPrefix}-raw-error`);
-          if (errEl) {
-            errEl.textContent = `Invalid JSON — edit not applied: ${err.message}`;
-            errEl.classList.remove('hidden');
-          }
-        }
-      });
-    };
-
-    return { html, wire };
+    return renderConditionListEditor(this, comp, def, expr, idPrefix, onCommit, options);
   }
 
   renderTypeSpecificProps(comp, body) {
