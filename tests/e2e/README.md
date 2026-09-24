@@ -15,13 +15,13 @@ it's a large download you only want once you actually need it). Then run
 `npm run test:e2e` here, or from the repository root, where `npm run test:e2e` syncs the
 shared copies first and runs both the Studio and PWA suites.
 
-Sixteen specs cover the Property Inspector (tabs, scroll preservation, numeric and
+The original sixteen specs cover the Property Inspector (tabs, scroll preservation, numeric and
 compound inputs, the override indicator, the multi-select shell), the color picker
 popover, and the rotary component (its Inspector fields, appearance, acceleration, Pulse
 bindings and write-mode defaults, plus appearance scaling, canvas thumbnail, device
 preview and rendered face). They import `@playwright/test` directly and do not isolate
-the page from PC Bridge. The StudioInspector characterization pins, starting with
-`inspector-shell.spec.js`, import `test`/`expect` from `fixtures/inspectorHarness.js`
+the page from PC Bridge. The two StudioInspector characterization specs,
+`inspector-shell.spec.js` and `inspector-renderers.spec.js`, import `test`/`expect` from `fixtures/inspectorHarness.js`
 instead. The harness routes every WebSocket closed, aborts every request outside the
 Studio web server, blocks service workers, and provides seeding, selection,
 fresh-construction and call-through recording helpers. Add a spec when a ticket's

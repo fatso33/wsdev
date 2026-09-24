@@ -22,6 +22,8 @@ import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 import { resolveFeelFloor, resolveGesture, MIN_DEGREES_PER_UNIT } from '../widgets/components/rotaryEngine.js';
 import { applyRotaryContextChange, applyRotaryFeelEntry, isRotaryFeelContextPath, isRotaryFeelPath, describePulseFeel } from './RotaryDefaults.js';
+import { CUSTOM_OPTION_VALUE, GRADIENT_VALUE_RE, escapeHtmlAttr, CATEGORY_LABELS } from './inspector/inspectorMarkup.js';
+import { createFieldRenderers } from './inspector/fieldRenderers.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -29,8 +31,6 @@ import { applyRotaryContextChange, applyRotaryFeelEntry, isRotaryFeelContextPath
 // driven rendering) — this modal still hand-builds its markup like every
 // other action-specific field here, so the two are wired by hand below,
 // consistent with the rest of this modal's un-generic-ized fields.
-
-const CUSTOM_OPTION_VALUE = '__custom__';
 
 // Wave 3, Part 6 item 5 (V7): the only 3 component types with a runtime
 // `props.<field> → def.label` fallback (confirmed in LabelComponent.js,
@@ -147,40 +147,6 @@ function getAppearanceFieldSpecs() {
     !f.path.startsWith('style.themeOverride.')
   );
 }
-
-// A "Background Color" field pairs a native <input type="color"> (which can
-// only ever emit a valid hex) with a free-text sibling — free-text on
-// purpose, so an author can type var(--text-white, #fff) or an rgba() value
-// the color picker can't produce. That same freedom lets someone paste a
-// full linear-gradient(...)/radial-gradient(...) CSS value in while
-// background.type is still "color" — it saves fine (still valid CSS as a
-// literal string) and even paints correctly the first time, but
-// ThemeColor.js can't find an actual color inside it to re-derive for the
-// other theme, so the light-mode variant silently comes out identical to
-// dark. Caught live on a real widget's button. Detected here so the field
-// can self-correct to the matching type instead of saving broken data.
-const GRADIENT_VALUE_RE = /^(?:repeating-)?(?:linear|radial|conic)-gradient\(/i;
-
-// Wave 1: the generic field-rendering engine interpolates registry tooltip
-// text (which, unlike this file's other hand-written labels, can genuinely
-// contain a literal '"' — e.g. props.variant's tooltip quotes "preset") and
-// widget-authored prop values directly into HTML attributes, so both need
-// real escaping rather than this file's usual "authors just avoid quotes"
-// convention.
-function escapeHtmlAttr(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
-}
-
-// Widget Studio 2.0, Phase 8: Simple mode's "Connect to Simulator" picker
-// groups deckEvents.js's flat list by this same category tag pc-bridge's own
-// config UI uses (see deckEvents.js's file header) — a new author picks
-// "Radios" then "COM 1 Standby Freq" in two short dropdowns instead of
-// scanning one ~60-item flat list for the right plain-English label. Reuses
-// the exact same binding.readSimVar/writeEvent fields Advanced mode's
-// dropdown writes to — purely a friendlier front-end onto the same data.
-const CATEGORY_LABELS = { radio: 'Radios & Transponder', ap: 'Autopilot', lights: 'Lights', yoke: 'Virtual Yoke' };
 
 export class StudioInspector {
   /**
@@ -3711,52 +3677,7 @@ export class StudioInspector {
     });
   }
 
-  // =========================================================================
-  // Wave 1 (Part 1): the generic, registry-driven field-rendering engine.
-  //
-  // Scoped narrower than first planned. Building this turned up that several
-  // of the registry's control names aren't cleanly delegate-able yet:
-  // rowListEditor/arcBandsEditor/detentEditor need a per-field row spec
-  // (headers, add-row shape) the registry doesn't declare — every existing
-  // call site (arc bands, slider detents, selector positions, rocker zones)
-  // builds that spec by hand. conditionBuilder/conditionalStyleBuilder read
-  // from COMMON_FIELDS (visibleWhen/style.rules), which already have
-  // dedicated hand-built panels elsewhere in this file (renderVisibilityAndGuard,
-  // and — until Wave 2 Part B2 folded style.rules' STYLE side into the
-  // generic engine via rule chips, see renderAppearanceSection() —
-  // renderConditionalFormatting) — genericizing those specifically would
-  // duplicate/shadow them, not replace them, since this pass only converts
-  // two types' OWN TYPE_FIELDS, not COMMON_FIELDS.
-  //
-  // So FIELD_RENDERERS covers the true plain, single-value primitives —
-  // text/number/checkbox/select/color/iconPicker — the ones this pass's
-  // conversion (core.label, core.button) actually needs and can fully
-  // verify. The rest stay hand-coded; scripts/check-registry-drift.mjs's
-  // matching CI check allowlists them as "not yet migrated" rather than
-  // silently passing or falsely asserting they're covered.
-  // =========================================================================
-
-  FIELD_RENDERERS = {
-    text: (comp, field, mount) => this.renderPlainField(comp, field, mount, 'text'),
-    iconPicker: (comp, field, mount) => this.renderPlainField(comp, field, mount, 'text'),
-    number: (comp, field, mount) => this.renderPlainField(comp, field, mount, 'number'),
-    checkbox: (comp, field, mount) => this.renderCheckboxField(comp, field, mount),
-    select: (comp, field, mount) => this.renderSelectField(comp, field, mount),
-    color: (comp, field, mount) => this.renderColorField(comp, field, mount),
-    // Step 3 Part A (2026-09-04): rowListEditor/detentEditor are the same underlying
-    // renderRowListEditor() (see that method's own header comment) — both control
-    // names stay distinct in the registry for self-documentation, resolving to one
-    // implementation here, same as the registry already did before this engine existed.
-    rowListEditor: (comp, field, mount) => this.renderRowListField(comp, field, mount),
-    detentEditor: (comp, field, mount) => this.renderRowListField(comp, field, mount),
-    // Step 3 Part B (2026-09-04): arc.bands is just another row-list field once it
-    // declares a rowSpec — same renderer as rowListEditor/detentEditor, no new function.
-    arcBandsEditor: (comp, field, mount) => this.renderRowListField(comp, field, mount),
-    stateVarPicker: (comp, field, mount) => this.renderStateVarField(comp, field, mount),
-    assetPicker: (comp, field, mount) => this.renderAssetField(comp, field, mount),
-    rangeEditor: (comp, field, mount) => this.renderRangeField(comp, field, mount),
-    pivotEditor: (comp, field, mount) => this.renderPivotField(comp, field, mount)
-  };
+  FIELD_RENDERERS = createFieldRenderers(this);
 
   /** path.split('.') get, tolerant of missing intermediate objects. */
   getFieldValue(comp, path) {
