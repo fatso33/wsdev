@@ -10,14 +10,13 @@ import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_N
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../core/deckEventPacks.js';
 import { openModal, confirmModal, showToast } from './StudioModal.js';
-import { summarizeCondition, getMultiSelectAvailability, computeScrollAnchorDelta } from './InspectorLogic.js';
+import { summarizeCondition, computeScrollAnchorDelta } from './InspectorLogic.js';
 // Widget Studio 2.0, Phase 1: TRIGGERS/ACTIONS are now read from
 // PropertyRegistry.js instead of being hand-copied arrays here — the exact
 // "UI list is stale relative to runtime" bug class found four times in the
 // original Studio audit (this file's own trigger/action lists were two of
 // those four instances).
 import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS as REGISTRY_TYPE_FIELDS, getFieldsForType } from '../widgets/PropertyRegistry.js';
-import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 import { CUSTOM_OPTION_VALUE, GRADIENT_VALUE_RE, escapeHtmlAttr, CATEGORY_LABELS } from './inspector/inspectorMarkup.js';
 import { createFieldRenderers } from './inspector/fieldRenderers.js';
@@ -26,6 +25,7 @@ import { enhanceNumberInputs, getNumberStep, decimalPlaces, roundToDecimals, ren
 import { renderRegistryFieldGroups, renderRegistryFields, renderCompoundGroup, assembleCompoundRow, buildFieldWrap, formatShowWhenReason, evaluateShowWhen, resolveEffectiveValue } from './inspector/ui/FieldGroups.js';
 import { buildModeToggle, tierHidesField, applyUiMode, applySubtitleVisibility, applyTierMoreBadges, applySectionJsonViews, buildInspectorTabShell, buildLayoutBadge, buildAppearanceBadge, buildDataBadge, buildBehaviorBadge, buildAccordionGroup } from './inspector/InspectorShell.js';
 import { renderComponentAppearance, getThemeEditContext, remapAppearancePath, retargetAppearanceFields, renderAppearanceSection, renderBaseThemeAwareAppearanceFields } from './inspector/sections/AppearanceSection.js';
+import { buildMultiSelectStyleProxy, applyMultiSelectFieldAvailability, renderMultiSelectInspector } from './inspector/MultiSelectInspector.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -271,218 +271,27 @@ export class StudioInspector {
   }
 
   /**
-   * Ticket 11: builds the read-model for the multi-select Style tab's field
-   * engine — a synthetic component whose `style` tree holds, at every leaf,
-   * the value every selected component already agrees on (or is simply
-   * absent where they differ). This lets the EXACT SAME field-rendering
-   * machinery single-select uses (renderAppearanceSection() and everything
-   * under it: override indicators, ticket 09's numeric input, showWhen,
-   * the state/rule retargeting) read this proxy with zero special-casing —
-   * a disagreeing leaf resolves to `undefined`, which resolveEffectiveValue()
-   * already renders as "the field's own default," the same as any other
-   * never-authored field. Writes never go through this object's own
-   * `.style` — see commitField()'s `comp.__multiSelect` branch, which
-   * re-reads and mutates the REAL selected components via
-   * StudioState.applyFieldToSelection() instead.
-   * @param {Array<object>} realComps
-   * @returns {object} synthetic component
+   * Builds the common-value proxy used by multi-selection style fields.
+   * @param {Array<object>} realComps - The selected components to merge.
+   * @returns {object} The synthetic component passed to the shared field renderer.
    */
   buildMultiSelectStyleProxy(realComps) {
-    const mergeCommon = (vals) => {
-      const allObjects = vals.every((v) => v && typeof v === 'object' && !Array.isArray(v));
-      if (allObjects) {
-        const keys = new Set();
-        vals.forEach((v) => Object.keys(v).forEach((k) => keys.add(k)));
-        const result = {};
-        keys.forEach((k) => {
-          const merged = mergeCommon(vals.map((v) => v[k]));
-          if (merged !== undefined) result[k] = merged;
-        });
-        return result;
-      }
-      const [first, ...rest] = vals;
-      return rest.every((v) => JSON.stringify(v) === JSON.stringify(first)) ? first : undefined;
-    };
-
-    return {
-      id: '__multiselect__',
-      type: realComps[0]?.type,
-      label: `${realComps.length} components`,
-      __multiSelect: true,
-      style: mergeCommon(realComps.map((c) => c.style || {})) || {},
-      props: {},
-      binding: {},
-      layer: {}
-    };
+    return buildMultiSelectStyleProxy(this, realComps);
   }
 
   /**
-   * Ticket 11: after the shared field engine renders the multi-select Style
-   * tab, disables (rather than removes) every field whose original common
-   * path (buildFieldWrap()'s own `style-field-<suffix>` testid, already
-   * path-independent of which target — base/state/rule — it was retargeted
-   * onto) isn't in the intersection every selected component's type
-   * supports. Matching on the testid rather than re-walking the field specs
-   * means this needs no awareness of compound rows, groups, or retargeting —
-   * it just disables whatever DOM the engine already produced.
-   * @param {HTMLElement} mount
-   * @param {{enabledFieldPaths: string[]}} availability
+   * Disables unsupported multi-selection style controls while keeping their wrappers visible.
+   * @param {HTMLElement} mount - The rendered multi-selection Style panel.
+   * @param {{enabledFieldPaths: string[]}} availability - Paths supported by every selected component type.
+   * @returns {void}
    */
   applyMultiSelectFieldAvailability(mount, availability) {
-    mount.querySelectorAll('[data-testid^="style-field-"]').forEach((wrap) => {
-      const suffix = wrap.getAttribute('data-testid').replace('style-field-', '');
-      if (!availability.enabledFieldPaths.includes(`style.${suffix}`)) {
-        wrap.classList.add('prop-field-multiselect-disabled');
-        wrap.querySelectorAll('input, select, textarea, button').forEach((el) => { el.disabled = true; });
-      }
-    });
+    return applyMultiSelectFieldAvailability(this, mount, availability);
   }
 
-  /**
-   * Ticket 11: replaces the old bespoke multi-select bulk-edit view with the
-   * SAME General/Style/Data/Events tab shell single-select uses
-   * (buildInspectorTabShell()) — General/Data/Events disabled (there's no
-   * single component's props/bindings/interactions to show for a mixed
-   * selection), Style forced active and rendered via the exact same
-   * renderAppearanceSection() engine single-select's Base/State tabs use,
-   * pointed at a synthetic proxy component (buildMultiSelectStyleProxy())
-   * whose writes fan out to every selected component
-   * (StudioState.applyFieldToSelection(), via commitField()'s
-   * comp.__multiSelect branch).
-   *
-   * The State sub-tab (and, deliberately, ONLY the State sub-tab — see the
-   * note below) appears when every selected component's type/variant shares
-   * the identical alt-state name (InspectorLogic.getMultiSelectAvailability()).
-   *
-   * Scope note: this does not add a Rule sub-tab for multi-selection. Single
-   * -select's Rule editing (add/reorder/remove) operates on ONE component's
-   * own `style.rules[]` array by index — a multi-selection's members each
-   * have their own independent rules array, of potentially different length
-   * and content, with no specified way to reconcile "move rule 2 up" or
-   * "which rule is chip 3" across them. The ticket's acceptance criteria
-   * gate "State/Rule sub-tabs" visibility together but don't specify that
-   * reconciliation, so implementing Rule editing here would mean inventing
-   * array-alignment semantics rather than following a specified design —
-   * flagged back rather than guessed at.
-   */
+  /** Renders the common Style fields and actions for the current multi-selection. */
   renderMultiSelectInspector() {
-    const ids = [...this.state.multiSelectedIds];
-    const comps = ids.map((id) => this.state.getComponent(id)).filter(Boolean);
-
-    // A fresh multi-selection (by its set of ids) starts back on Normal —
-    // same "reset the sub-tab on identity change" convention
-    // renderComponentInspector() already uses for _styleTabCompId/_styleTab.
-    const selectionKey = ids.slice().sort().join(',');
-    if (this._multiStyleTabKey !== selectionKey) {
-      this._multiStyleTabKey = selectionKey;
-      this._multiStyleTab = 'normal';
-    }
-
-    const header = document.createElement('div');
-    header.className = 'inspector-header';
-    header.innerHTML = `
-      <div class="inspector-title-row">
-        <span class="inspector-badge">${comps.length} SELECTED</span>
-        <h3 class="inspector-title">Multiple Components</h3>
-      </div>
-      <div class="inspector-sub">${comps.map((c) => c.id).join(', ')}</div>
-    `;
-    this.container.appendChild(header);
-
-    const { tabBar, panelsContainer, panels } = this.buildInspectorTabShell({
-      disabledTabs: ['general', 'data', 'events'],
-      forceActiveTab: 'style'
-    });
-    this.container.appendChild(tabBar);
-    this.container.appendChild(panelsContainer);
-
-    const availability = getMultiSelectAvailability(comps);
-    const proxyComp = this.buildMultiSelectStyleProxy(comps);
-    const activeTab = (availability.stateTabName && this._multiStyleTab === 'state') ? 'state' : 'normal';
-    const themeEdit = this.getThemeEditContext();
-
-    const styleBody = panels['style'].appendChild(document.createElement('div'));
-    const canPasteBase = !!this.state.copiedStyle && !this.state.copiedStateKey && !this.state.copiedRuleScoped;
-    const canPaste = activeTab === 'state' ? !!this.state.copiedStyle : canPasteBase;
-    styleBody.innerHTML = `
-      ${themeEdit.isOverrideEdit ? `<div class="theme-override-banner">Editing ${this.state.previewTheme.toUpperCase()} theme override — Text/Stroke/Glow/Border/Border Glow/Background Color apply only to this theme; other properties stay shared with the base ${themeEdit.baseTheme} style.</div>` : ''}
-      <div class="empty-tree-notice">Editing ${comps.length} selected components. Fields below apply to every one of them; a greyed-out field isn't supported by every selected component's type.</div>
-
-      <button type="button" id="ms-style-paste" class="panel-full-btn" style="margin-top:8px;" ${canPaste ? '' : 'disabled'}>
-        ${activeTab === 'state'
-          ? `Paste ${availability.stateTabLabel || 'State'} Style onto All ${comps.length}`
-          : canPasteBase
-            ? `Paste Copied Style onto All ${comps.length} (replaces each one's full style)`
-            : this.state.copiedStateKey
-              ? 'Paste Style — state-scoped copy needs a matching State sub-tab active above'
-              : this.state.copiedRuleScoped
-                ? 'Paste Style — rule-scoped copy has no matching Rule sub-tab here; copy the full style instead'
-                : 'Paste Style — copy a style from a single component\'s panel first'}
-      </button>
-
-      <div class="prop-section-subtitle" style="margin-top:10px;">Style Presets <span class="prop-hint" title="Applies typography, border, and background together to every selected component, then leaves every field below exactly as editable as before.">ⓘ</span></div>
-      <div class="style-preset-strip">
-        ${STYLE_PRESETS.map((p) => `
-          <button type="button" class="style-preset-swatch" data-preset="${p.id}" title="${p.name}" style="--preset-bg:${p.swatch.bg};--preset-fg:${p.swatch.fg};--preset-border:${p.swatch.border};">
-            <span class="style-preset-swatch-inner">Aa</span>
-            <span class="style-preset-name">${p.name}</span>
-          </button>
-        `).join('')}
-      </div>
-
-      ${availability.stateTabName ? `
-      <div class="prop-row-2" style="margin:10px 0 12px;flex-wrap:wrap;gap:6px;">
-        <button type="button" class="mode-toggle-btn ${activeTab === 'normal' ? 'active' : ''}" id="ms-styletab-normal" style="flex:0 1 auto;">Normal</button>
-        <button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="ms-styletab-state" data-testid="style-state-tab-${availability.stateTabName}" style="flex:0 1 auto;">${availability.stateTabLabel || 'State'}</button>
-      </div>
-      ${activeTab === 'state' ? `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style while ${comps.length > 1 ? 'these components are' : 'this component is'} ${(availability.stateTabLabel || 'in this state').toLowerCase()} — applied identically to all ${comps.length} selected. Fields with an accent left border are overridden for this state.</div>` : ''}
-      ` : ''}
-
-      <div id="ms-appearance-fields"></div>
-    `;
-
-    styleBody.querySelectorAll('.style-preset-swatch').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const preset = STYLE_PRESETS.find((p) => p.id === btn.dataset.preset);
-        if (!preset) return;
-        this.state.applyStyleToSelection(preset.style);
-        showToast(`Applied "${preset.name}" style to ${comps.length} components — still fully editable below.`);
-      });
-    });
-
-    styleBody.querySelector('#ms-style-paste')?.addEventListener('click', () => {
-      const stateKey = activeTab === 'state' ? availability.stateTabName : undefined;
-      this.state.pasteStyleToSelection(stateKey);
-      showToast(`Pasted${stateKey ? ` ${availability.stateTabLabel}` : ''} style onto ${comps.length} components.`);
-    });
-
-    styleBody.querySelector('#ms-styletab-normal')?.addEventListener('click', () => {
-      this._multiStyleTab = 'normal';
-      this.render();
-    });
-    styleBody.querySelector('#ms-styletab-state')?.addEventListener('click', () => {
-      this._multiStyleTab = 'state';
-      this.render();
-    });
-
-    const target = activeTab === 'state' ? { kind: 'state', name: availability.stateTabName } : { kind: 'base' };
-    const style = proxyComp.style;
-    const typo = style.typography || {};
-    const border = style.border || {};
-    const bg = style.background || {};
-    const baseThemeCtx = {
-      themeEdit,
-      effTypoColor: typo.color,
-      effBorderColor: border.color,
-      effBg: bg,
-      effStrokeColor: typo.stroke?.color,
-      effGlowColor: typo.glow?.color,
-      effBorderGlowColor: border.glow?.color,
-      assets: this.state.widgetDef.assets || []
-    };
-    this.renderAppearanceSection(proxyComp, styleBody.querySelector('#ms-appearance-fields'), target, baseThemeCtx);
-
-    this.applyMultiSelectFieldAvailability(styleBody, availability);
+    return renderMultiSelectInspector(this);
   }
 
   /** Always-visible Guided/Build/Full tier switch, independent of what's selected. */
