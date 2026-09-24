@@ -357,3 +357,482 @@ test('range and pivot editors keep their defaults; empty state-var and asset sel
   expect(result.assetOptions).toContain('pinAsset');
   expect(result.assetId).toBeUndefined();
 });
+
+// Registry field group pins drive `renderRegistryFields` and its helpers through the real
+// Inspector instance, with synthetic registry rows so each rule is isolated.
+
+test('registry fields skip null and bespoke controls and hide unauthored showWhen fields', async ({
+  page,
+}) => {
+  await openStudio(page);
+  const [id] = await seedComponents(page, [
+    { id: 'group-skip', type: 'core.button', style: {}, props: { label: 'Skip', mode: 'y' } },
+  ]);
+  const result = await page.evaluate((componentId) => {
+    const host = window.__studioApp.inspector;
+    const comp = window.__studioApp.state.getComponent(componentId);
+    const mount = document.createElement('div');
+    document.body.append(mount);
+    host.renderRegistryFields(comp, mount, [
+      { path: 'props.nullControl', control: null, default: undefined },
+      { path: 'props.bespokeControl', control: 'bespoke', default: undefined },
+      { path: 'props.label', control: 'text', tier: 'simple', guided: true, default: undefined },
+      {
+        path: 'props.hiddenByGate',
+        control: 'text',
+        tier: 'simple',
+        guided: true,
+        default: undefined,
+        showWhen: { path: 'props.mode', equals: 'x' },
+      },
+      {
+        path: 'props.gateDefault',
+        control: 'text',
+        tier: 'simple',
+        guided: true,
+        default: 'own',
+        showWhen: { path: 'props.mode', equals: 'x' },
+      },
+    ]);
+    return {
+      children: mount.children.length,
+      labels: [...mount.querySelectorAll('label')].map((l) => l.textContent),
+    };
+  }, id);
+
+  expect(result.children).toBe(1);
+  expect(result.labels).toEqual(['Label']);
+});
+
+test('registry field wraps set tier attributes; any authored non-default value drops them', async ({
+  page,
+}) => {
+  await openStudio(page);
+  const [id] = await seedComponents(page, [
+    {
+      id: 'group-tier',
+      type: 'core.button',
+      style: {},
+      props: { authoredAdvanced: 'x', authoredSimple: 'y', atDefault: 'same' },
+    },
+  ]);
+  const result = await page.evaluate((componentId) => {
+    const host = window.__studioApp.inspector;
+    const comp = window.__studioApp.state.getComponent(componentId);
+    const field = (name, extra) => ({
+      path: `props.${name}`,
+      control: 'text',
+      default: undefined,
+      ...extra,
+    });
+    const mount = document.createElement('div');
+    document.body.append(mount);
+    host.renderRegistryFields(comp, mount, [
+      field('plainAdvanced', { tier: 'advanced' }),
+      field('plainSimple', { tier: 'simple' }),
+      field('plainGuided', { tier: 'simple', guided: true }),
+      field('authoredAdvanced', { tier: 'advanced' }),
+      field('authoredSimple', { tier: 'simple' }),
+      field('atDefault', { tier: 'advanced', default: 'same' }),
+    ]);
+    return [...mount.children].map((wrap) => wrap.getAttribute('data-tier'));
+  }, id);
+
+  // advanced, simple (not guided), guided, authored advanced, authored simple, set to own default
+  expect(result).toEqual(['advanced', 'build', null, null, null, 'advanced']);
+});
+
+test('showWhen-suppressed authored fields render dimmed with the exact reason and a Clear that commits undefined', async ({
+  page,
+}) => {
+  await openStudio(page);
+  const [id] = await seedComponents(page, [
+    {
+      id: 'group-suppressed',
+      type: 'core.button',
+      style: {},
+      props: { mode: 'y', other: 'z', keep: 'stale', keepDefault: 'own', anyOf: 'q' },
+    },
+  ]);
+  const result = await page.evaluate((componentId) => {
+    const host = window.__studioApp.inspector;
+    const state = window.__studioApp.state;
+    const comp = state.getComponent(componentId);
+    const field = (name, showWhen, extra) => ({
+      path: `props.${name}`,
+      control: 'text',
+      tier: 'advanced',
+      default: undefined,
+      showWhen,
+      ...extra,
+    });
+    const mount = document.createElement('div');
+    document.body.append(mount);
+    host.renderRegistryFields(comp, mount, [
+      field('keep', { path: 'props.mode', equals: 'x' }),
+      field('keepDefault', { path: 'props.mode', equals: 'x' }, { default: 'own' }),
+      field('anyOf', { path: 'props.mode', equalsAny: ['a', 'b'] }),
+      field('other', { path: 'props.mode', notEquals: 'y' }),
+    ]);
+    const wraps = [...mount.children];
+    const info = {
+      count: wraps.length,
+      notes: wraps.map((wrap) => wrap.querySelector('.prop-showwhen-note span')?.textContent ?? null),
+      dataTier: wraps.map((wrap) => wrap.getAttribute('data-tier')),
+      dimmed: wraps.map((wrap) => wrap.children[1]?.style.opacity ?? null),
+    };
+    wraps[0].querySelector('.prop-showwhen-clear').click();
+    info.afterClear = state.getComponent(componentId).props.keep;
+    return info;
+  }, id);
+
+  // keepDefault holds its own default, so it is not authored and stays hidden.
+  expect(result.count).toBe(3);
+  expect(result.notes).toEqual([
+    'Mode ≠ x — still set to "stale"',
+    'Mode is not one of: a, b — still set to "q"',
+    'Mode = y — still set to "z"',
+  ]);
+  expect(result.dataTier).toEqual([null, null, null]);
+  expect(result.dimmed).toEqual(['0.55', '0.55', '0.55']);
+  expect(result.afterClear).toBeUndefined();
+});
+
+test('showWhen evaluation falls back from the raw value to inheritedValue, then the sibling default', async ({
+  page,
+}) => {
+  await openStudio(page);
+  const [id] = await seedComponents(page, [
+    { id: 'group-when', type: 'core.button', style: {}, props: { raw: 'set' } },
+  ]);
+  const result = await page.evaluate((componentId) => {
+    const host = window.__studioApp.inspector;
+    const comp = window.__studioApp.state.getComponent(componentId);
+    const siblings = [
+      { path: 'props.withDefault', default: 'd' },
+      { path: 'props.withInherited', default: 'd', inheritedValue: 'inh' },
+      { path: 'props.noDefault' },
+    ];
+    const when = (showWhen, list) => host.evaluateShowWhen(comp, showWhen, list);
+    return {
+      rawWins: when({ path: 'props.raw', equals: 'set' }, siblings),
+      defaultFallback: when({ path: 'props.withDefault', equals: 'd' }, siblings),
+      inheritedBeatsDefault: [
+        when({ path: 'props.withInherited', equals: 'inh' }, siblings),
+        when({ path: 'props.withInherited', equals: 'd' }, siblings),
+      ],
+      noSiblingsMeansUndefined: [
+        when({ path: 'props.withDefault', equals: 'd' }),
+        when({ path: 'props.withDefault', notEquals: 'd' }),
+      ],
+      noDefaultKey: when({ path: 'props.noDefault', equals: undefined }, siblings),
+      equalsAny: [
+        when({ path: 'props.raw', equalsAny: ['a', 'set'] }),
+        when({ path: 'props.raw', equalsAny: ['a'] }),
+      ],
+      noOperator: when({ path: 'props.raw' }, siblings),
+      reasons: [
+        host.formatShowWhenReason({ path: 'props.iconWidth', equals: 'x' }),
+        host.formatShowWhenReason({ path: 'props.hasLed', notEquals: 'y' }),
+        host.formatShowWhenReason({ path: 'props.mode', equalsAny: ['a', 'b'] }),
+        host.formatShowWhenReason({ path: 'props.assetId' }),
+      ],
+      effective: [
+        host.resolveEffectiveValue(comp, { path: 'props.raw', default: 'd', inheritedValue: 'inh' }),
+        host.resolveEffectiveValue(comp, { path: 'props.unset', default: 'd', inheritedValue: 'inh' }),
+        host.resolveEffectiveValue(comp, { path: 'props.unset', default: 'd' }),
+        host.resolveEffectiveValue(comp, { path: 'props.unset' }),
+      ],
+    };
+  }, id);
+
+  expect(result.rawWins).toBe(true);
+  expect(result.defaultFallback).toBe(true);
+  expect(result.inheritedBeatsDefault).toEqual([true, false]);
+  expect(result.noSiblingsMeansUndefined).toEqual([false, true]);
+  expect(result.noDefaultKey).toBe(true);
+  expect(result.equalsAny).toEqual([true, false]);
+  expect(result.noOperator).toBe(true);
+  expect(result.reasons).toEqual([
+    'Icon Width ≠ x',
+    'Has LED = y',
+    'Mode is not one of: a, b',
+    'a condition on Asset ID',
+  ]);
+  expect(result.effective).toEqual([
+    { value: 'set', dimmed: false },
+    { value: 'inh', dimmed: true },
+    { value: 'd', dimmed: false },
+    { dimmed: false },
+  ]);
+});
+
+test('style test ids come from originalPath; overrides show an indicator unless a group covers the path', async ({
+  page,
+}) => {
+  await openStudio(page);
+  const [id] = await seedComponents(page, [
+    {
+      id: 'group-override',
+      type: 'core.button',
+      style: {
+        typography: { color: '#111111' },
+        states: { pressed: { typography: { color: '#ff0000' } } },
+      },
+      props: { label: 'Override' },
+    },
+  ]);
+  const result = await page.evaluate((componentId) => {
+    const host = window.__studioApp.inspector;
+    const state = window.__studioApp.state;
+    const comp = state.getComponent(componentId);
+    const mountFor = (fields, target, covered) => {
+      const mount = document.createElement('div');
+      document.body.append(mount);
+      host.renderRegistryFields(comp, mount, fields, target, covered);
+      return mount;
+    };
+    const retargeted = {
+      path: 'style.states.pressed.typography.color',
+      originalPath: 'style.typography.color',
+      control: 'color',
+      tier: 'simple',
+      guided: true,
+      default: undefined,
+    };
+    const baseField = {
+      path: 'style.typography.color',
+      control: 'color',
+      tier: 'simple',
+      guided: true,
+      default: undefined,
+    };
+    const describe = (mount) => {
+      const wrap = mount.firstElementChild;
+      return {
+        testid: wrap.getAttribute('data-testid'),
+        overridden: wrap.classList.contains('is-overridden'),
+        clearIcons: wrap.querySelectorAll('[data-testid="clear-override"]').length,
+      };
+    };
+    const stateTarget = { kind: 'state', name: 'pressed' };
+    const info = {
+      stateTarget: describe(mountFor([retargeted], stateTarget)),
+      covered: describe(mountFor([retargeted], stateTarget, new Set([retargeted.path]))),
+      base: describe(mountFor([baseField], { kind: 'base' })),
+      noTarget: describe(mountFor([baseField])),
+      unset: describe(
+        mountFor(
+          [
+            {
+              ...retargeted,
+              path: 'style.states.pressed.typography.weight',
+              originalPath: 'style.typography.weight',
+            },
+          ],
+          stateTarget,
+        ),
+      ),
+      nonStyle: mountFor([
+        { path: 'props.label', control: 'text', tier: 'simple', guided: true, default: undefined },
+      ]).firstElementChild.getAttribute('data-testid'),
+    };
+    const icon = mountFor([retargeted], stateTarget).querySelector('[data-testid="clear-override"]');
+    const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+    icon.dispatchEvent(clickEvent);
+    info.clearPrevented = clickEvent.defaultPrevented;
+    info.afterClear = state.getComponent(componentId).style.states?.pressed?.typography?.color;
+    return info;
+  }, id);
+
+  expect(result.stateTarget).toEqual({
+    testid: 'style-field-typography.color',
+    overridden: true,
+    clearIcons: 1,
+  });
+  expect(result.covered).toEqual({
+    testid: 'style-field-typography.color',
+    overridden: false,
+    clearIcons: 0,
+  });
+  expect(result.base).toEqual({
+    testid: 'style-field-typography.color',
+    overridden: false,
+    clearIcons: 0,
+  });
+  expect(result.noTarget.overridden).toBe(false);
+  expect(result.unset).toEqual({
+    testid: 'style-field-typography.weight',
+    overridden: false,
+    clearIcons: 0,
+  });
+  expect(result.nonStyle).toBeNull();
+  expect(result.clearPrevented).toBe(true);
+  expect(result.afterClear).toBeUndefined();
+});
+
+test('compound rows render alike in either member order and fall back to single fields under two survivors', async ({
+  page,
+}) => {
+  await openStudio(page);
+  const [id] = await seedComponents(page, [
+    {
+      id: 'group-compound',
+      type: 'core.button',
+      style: {},
+      props: { label: 'Compound', mode: 'y' },
+    },
+  ]);
+  const result = await page.evaluate((componentId) => {
+    const host = window.__studioApp.inspector;
+    const comp = window.__studioApp.state.getComponent(componentId);
+    const mountFor = (fields, target) => {
+      const mount = document.createElement('div');
+      document.body.append(mount);
+      host.renderRegistryFields(comp, mount, fields, target);
+      return mount;
+    };
+    const num = (path, extra) => ({
+      path,
+      control: 'number',
+      tier: 'simple',
+      guided: true,
+      default: undefined,
+      tooltip: `${path} tip`,
+      ...extra,
+    });
+    const summary = (mount) =>
+      [...mount.children].map((child) => ({
+        testid: child.getAttribute('data-testid'),
+        items: [...child.querySelectorAll('.prop-field-compound-item')].map((item) => ({
+          label: item.querySelector('label').textContent,
+          title: item.querySelector('label').title,
+          labelClass: item.querySelector('label').className,
+        })),
+      }));
+    const offsetX = num('style.offset.x');
+    const offsetY = num('style.offset.y');
+    const hidden = mountFor([
+      num('props.min'),
+      num('props.max', { showWhen: { path: 'props.mode', equals: 'x' } }),
+    ]);
+    const plain = document.createElement('div');
+    plain.className = 'prop-field';
+    plain.innerHTML = '<label>Original</label><input>';
+    const titled = document.createElement('div');
+    titled.className = 'prop-field';
+    titled.innerHTML = '<label title="keep">Original</label><input>';
+    const row = host.assembleCompoundRow('compound-row-custom', [
+      { wrap: plain, label: 'A:', tooltip: 'tip' },
+      { wrap: titled, label: 'B:', tooltip: 'ignored' },
+    ]);
+    return {
+      forward: summary(mountFor([offsetX, offsetY])),
+      reversed: summary(mountFor([offsetY, offsetX])),
+      interleaved: summary(mountFor([offsetY, num('props.other'), offsetX])),
+      retargeted: summary(
+        mountFor(
+          [
+            { ...offsetX, path: 'style.states.pressed.offset.x', originalPath: 'style.offset.x' },
+            { ...offsetY, path: 'style.states.pressed.offset.y', originalPath: 'style.offset.y' },
+          ],
+          { kind: 'state', name: 'pressed' },
+        ),
+      ),
+      partial: summary(mountFor([offsetX])),
+      twice: summary(mountFor([offsetX, offsetY, offsetX])),
+      hidden: {
+        children: hidden.children.length,
+        compound: hidden.querySelectorAll('.prop-field-compound').length,
+      },
+      assembled: {
+        testid: row.getAttribute('data-testid'),
+        className: row.className,
+        detached: row.parentElement === null,
+        labels: [...row.querySelectorAll('label')].map((l) => [l.textContent, l.title, l.className]),
+        itemClasses: [...row.children].map((c) => c.className),
+      },
+    };
+  }, id);
+
+  const expectedRow = {
+    testid: 'compound-row-offset',
+    items: [
+      { label: 'X:', title: 'style.offset.x tip', labelClass: 'prop-compound-label' },
+      { label: 'Y:', title: 'style.offset.y tip', labelClass: 'prop-compound-label' },
+    ],
+  };
+  // Members are fetched by group.paths order, so member order in `fields` does not matter.
+  expect(result.forward).toEqual([expectedRow]);
+  expect(result.reversed).toEqual([expectedRow]);
+  expect(result.interleaved).toEqual([expectedRow, { testid: null, items: [] }]);
+  expect(result.retargeted).toEqual([expectedRow]);
+  // A group whose members are not all present is not a compound row; the lone field renders singly.
+  expect(result.partial).toEqual([{ testid: 'style-field-offset.x', items: [] }]);
+  expect(result.twice).toEqual([expectedRow]);
+  expect(result.hidden).toEqual({ children: 1, compound: 0 });
+  expect(result.assembled).toEqual({
+    testid: 'compound-row-custom',
+    className: 'prop-field-compound',
+    detached: true,
+    labels: [
+      ['A:', 'tip', 'prop-compound-label'],
+      ['B:', 'keep', 'prop-compound-label'],
+    ],
+    itemClasses: ['prop-field prop-field-compound-item', 'prop-field prop-field-compound-item'],
+  });
+});
+
+test('field groups render one subtitle per group in first-seen order, and gates only see their own group', async ({
+  page,
+}) => {
+  await openStudio(page);
+  const [id] = await seedComponents(page, [
+    { id: 'group-order', type: 'core.button', style: {}, props: { label: 'Groups' } },
+  ]);
+  const result = await page.evaluate((componentId) => {
+    const host = window.__studioApp.inspector;
+    const comp = window.__studioApp.state.getComponent(componentId);
+    const field = (path, group, extra) => ({
+      path,
+      group,
+      control: 'text',
+      tier: 'simple',
+      guided: true,
+      default: undefined,
+      ...extra,
+    });
+    const body = document.createElement('div');
+    document.body.append(body);
+    host.renderRegistryFieldGroups(comp, body, [
+      field('props.a', 'One', { default: 'x' }),
+      field('props.b', 'Two', { showWhen: { path: 'props.a', equals: 'x' } }),
+      field('props.c', 'One'),
+      field('props.d', 'One', { showWhen: { path: 'props.a', equals: 'x' } }),
+    ]);
+    const kids = [...body.children];
+    return {
+      tags: kids.map((k) => `${k.tagName}.${k.className}`),
+      subtitles: kids
+        .filter((k) => k.className === 'prop-section-subtitle')
+        .map((k) => [k.textContent, k.style.marginTop]),
+      mounts: kids
+        .filter((k) => k.className !== 'prop-section-subtitle')
+        .map((k) => [...k.querySelectorAll('label')].map((l) => l.textContent)),
+    };
+  }, id);
+
+  expect(result.tags).toEqual([
+    'DIV.prop-section-subtitle',
+    'DIV.',
+    'DIV.prop-section-subtitle',
+    'DIV.',
+  ]);
+  expect(result.subtitles).toEqual([
+    ['One', ''],
+    ['Two', '10px'],
+  ]);
+  // props.a's default 'x' satisfies gates within group One. Group Two lists only its own
+  // fields, so its gate on props.a cannot find that default and props.b stays hidden.
+  expect(result.mounts).toEqual([['A', 'C', 'D'], []]);
+});

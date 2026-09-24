@@ -23,6 +23,7 @@ import { CUSTOM_OPTION_VALUE, GRADIENT_VALUE_RE, escapeHtmlAttr, CATEGORY_LABELS
 import { createFieldRenderers } from './inspector/fieldRenderers.js';
 import { getFieldValue, commitRotaryFeelContext, commitRotaryFeelEntry, commitField, updateCompProp, updateCompJsonProp } from './inspector/InspectorEdits.js';
 import { enhanceNumberInputs, getNumberStep, decimalPlaces, roundToDecimals, renderRangeEditor, renderRowListEditor, toHexColor, wireColorPair, humanizeFieldLabel, fieldDomId, resolveFeelFloorHint, resolvePulseFeelDescription, renderPlainField, renderCheckboxField, renderSelectField, renderColorField, renderRowListField, renderStateVarField, renderAssetField, renderRangeField, renderPivotField } from './inspector/ui/FieldFactory.js';
+import { renderRegistryFieldGroups, renderRegistryFields, renderCompoundGroup, assembleCompoundRow, buildFieldWrap, formatShowWhenReason, evaluateShowWhen, resolveEffectiveValue } from './inspector/ui/FieldGroups.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -44,38 +45,6 @@ const CONTENT_FIELD_BY_TYPE = {
 };
 
 
-
-// 10: Compound input grouping — an explicit, reviewed list of which field
-// groups render as one compact multi-column row with short inline prefix
-// labels (group.prefixLabels), instead of each field stacking as its own
-// full-width row. Deliberately NOT an automatic "any two adjacent numeric
-// fields" heuristic — the ticket requires a curated, reviewed list, and an
-// automatic heuristic would just as happily glue together two fields that
-// are numeric/adjacent but semantically unrelated (e.g. props.majorEvery
-// next to props.minorTickLength).
-//
-// 'offset' is the ticket's own confirmed seam (style.offset.x/y, the fine
-// pixel-nudge pair under Style > Layout).
-//
-// 'minmax' (props.min/props.max, real on core.input/core.slider/
-// core.stepper's Content group) stands in for the ticket's own "RGBA color
-// channels" / "margin-padding sides" examples — neither actually exists as
-// a field anywhere in PropertyRegistry.js today (no widget exposes separate
-// R/G/B/A channel inputs; color fields are a single hex/rgba control, and
-// FDWS has no margin/padding concept at all). min/max is the closest REAL
-// analogue already in this registry: a paired-bounds numeric group that
-// recurs across multiple component types, the same shape as a margin/
-// padding pair. This substitution is flagged explicitly in the
-// implementation report rather than decided silently.
-//
-// The ticket's "size Width/Height" example is Grid Position & Size's
-// Width/Height row (General tab) — hand-coded outside this registry-driven
-// engine entirely, so it's handled separately at its own render site rather
-// than through this lookup.
-const CURATED_COMPOUND_GROUPS = [
-  { id: 'offset', prefixLabels: ['X:', 'Y:'], paths: ['style.offset.x', 'style.offset.y'] },
-  { id: 'minmax', prefixLabels: ['Min:', 'Max:'], paths: ['props.min', 'props.max'] }
-];
 
 // V14 ("Use This Component's Own Value"): a fourth option shared by every
 // condition-source dropdown (visibleWhen row, style.rules condition, an
@@ -3504,39 +3473,9 @@ export class StudioInspector {
     return wrap;
   }
 
-  /**
-   * The registry's existing {path, equals|equalsAny|notEquals} showWhen grammar.
-   *
-   * Step 3 Part B (2026-09-04): gained an optional `siblingFields` parameter — found
-   * live while converting core.gauge. getFieldValue() reads the RAW stored value; if
-   * the referenced field is genuinely unset, that's `undefined`, not its registered
-   * `default`. An `equals` gate against a field whose true default is non-obvious
-   * (e.g. Pivot's `{path:'props.transform', equals:'rotate'}`, when transform's own
-   * default is 'rotate') silently never matched until the user touched that field once
-   * — every prior showWhen in this codebase happened to use `notEquals`/a default that
-   * coincidentally didn't match its gate, so this never surfaced before now. When
-   * `siblingFields` is passed (renderRegistryFields already has the full field list in
-   * scope), an undefined raw value falls back to the referenced field's own `default`.
-   * Row-list rowSpec per-column showWhen (renderRowListField) intentionally omits this
-   * — none of its current uses need it, and doing so would need threading the full
-   * type's field list through every FIELD_RENDERERS signature for no live benefit yet.
-   */
+  /** The registry's {path, equals|equalsAny|notEquals} showWhen grammar, with default fallback. */
   evaluateShowWhen(comp, showWhen, siblingFields) {
-    let val = this.getFieldValue(comp, showWhen.path);
-    if (val === undefined && siblingFields) {
-      const referenced = siblingFields.find((f) => f.path === showWhen.path);
-      // Wave 2 Part B1: a retargeted (state/rule/theme) field carries
-      // inheritedValue — the live Base value — which takes precedence over
-      // the static registry default, same reasoning as the default fallback
-      // this comment block already documents. Absent on every Base-target/
-      // TYPE_FIELDS field, so this is a no-op there.
-      if (referenced && referenced.inheritedValue !== undefined) val = referenced.inheritedValue;
-      else if (referenced && 'default' in referenced) val = referenced.default;
-    }
-    if ('equals' in showWhen) return val === showWhen.equals;
-    if ('notEquals' in showWhen) return val !== showWhen.notEquals;
-    if ('equalsAny' in showWhen) return showWhen.equalsAny.includes(val);
-    return true;
+    return evaluateShowWhen(this, comp, showWhen, siblingFields);
   }
 
   /** path's last segment, camelCase -> "Title Case", with a couple of acronym fixups. */
@@ -3918,292 +3857,39 @@ export class StudioInspector {
     mount.querySelector('#c-bg-image-position')?.addEventListener('change', (e) => updateBgImage({ position: e.target.value || undefined }));
   }
 
-  /**
-   * Renders a type's registry fields under one heading per `group`, in the order the
-   * groups first appear. For a type whose fields are numerous enough to need sections
-   * (core.rotary's Range and six appearance groups); a heading whose fields are all
-   * hidden at the current tier is hidden with them by applySubtitleVisibility().
-   *
-   * Each group renders on its own, so a field's showWhen may only name a sibling in the
-   * same group: that is where its default is looked up when the referenced value is unset.
-   * @param {object} comp
-   * @param {HTMLElement} body
-   * @param {Array<object>} fields - registry rows, each carrying `group`
-   */
+  /** Renders registry fields under one heading per group, in first-seen order. */
   renderRegistryFieldGroups(comp, body, fields) {
-    const groups = [];
-    fields.forEach((field) => {
-      let group = groups.find((g) => g.name === field.group);
-      if (!group) groups.push(group = { name: field.group, fields: [] });
-      group.fields.push(field);
-    });
-    groups.forEach((group, index) => {
-      const subtitle = document.createElement('div');
-      subtitle.className = 'prop-section-subtitle';
-      if (index > 0) subtitle.style.marginTop = '10px';
-      subtitle.textContent = group.name;
-      body.appendChild(subtitle);
-      const mount = document.createElement('div');
-      body.appendChild(mount);
-      this.renderRegistryFields(comp, mount, group.fields);
-    });
+    return renderRegistryFieldGroups(this, comp, body, fields);
   }
 
-  /**
-   * Walks `fields` and dispatches each to FIELD_RENDERERS[control]. Throws
-   * (dev-time, loud) on an unregistered control string, so a registry typo
-   * can't silently render nothing.
-   *
-   * Callers pass either a raw TYPE_FIELDS[type] array, or — since Wave 2
-   * Part B1 — a retargeted slice of COMMON_FIELDS' style.* rows from
-   * renderAppearanceSection()/retargetAppearanceFields(). Deliberately never
-   * called with the full getFieldsForType()-merged COMMON_FIELDS set:
-   * Bindings/Visibility/Conditional-Formatting rows still have their own
-   * dedicated hand-built panels elsewhere in this file, and rendering them
-   * again here would duplicate those, not replace them.
-   */
+  /** Dispatches each registry field to FIELD_RENDERERS; an unregistered control throws. */
   renderRegistryFields(comp, mount, fields, target, groupCoveredPaths) {
-    mount.innerHTML = '';
-    // 10: Compound input grouping — CURATED_COMPOUND_GROUPS' paths are always
-    // BASE storage paths (e.g. 'style.offset.x'), but retargetAppearanceFields()
-    // rewrites field.path for a State/Rule target (e.g. to
-    // 'style.states.pressed.offset.x') while preserving the original on
-    // field.originalPath (same convention the testid logic below already
-    // relies on). Match/consume on `fieldKey()`, never on `field.path`
-    // directly, or a compound row silently never renders once you're on a
-    // State/Rule tab (review finding, 2026-09-11).
-    const fieldKey = (f) => f.originalPath || f.path;
-    // A group is "rendered" (or ruled out) the FIRST time any one of its
-    // member fields is reached in `fields`' own iteration order — not tied
-    // to that member being group.paths[0] specifically. Matching only on
-    // paths[0] made the row's appearance depend on which member happened to
-    // be declared/iterated first (review finding, 2026-09-11); tracking by
-    // group.id here instead makes it order-independent regardless of how
-    // `fields` itself is ordered.
-    const renderedGroupIds = new Set();
-    const consumedKeys = new Set();
-    fields.forEach((field) => {
-      const key = fieldKey(field);
-      if (consumedKeys.has(key)) return;
-      const group = CURATED_COMPOUND_GROUPS.find((g) => !renderedGroupIds.has(g.id) && g.paths.includes(key) && g.paths.every((p) => fields.some((f) => fieldKey(f) === p)));
-      if (group) {
-        renderedGroupIds.add(group.id);
-        group.paths.forEach((p) => consumedKeys.add(p));
-        this.renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths, fieldKey);
-        return;
-      }
-      const wrap = this.buildFieldWrap(comp, field, fields, target, groupCoveredPaths);
-      if (wrap) mount.appendChild(wrap);
-    });
+    return renderRegistryFields(this, comp, mount, fields, target, groupCoveredPaths);
   }
 
-  /** 10: Builds every member of a curated group via buildFieldWrap() — so
-   * override/suppressed/tier/testid behavior is byte-for-byte identical to a
-   * standalone field, including ticket 09's numeric mousewheel/chevron
-   * machinery (applied globally post-render, unaffected by DOM position) —
-   * then hands the survivors to assembleCompoundRow() for layout. Falls back
-   * to appending whichever member(s) DID build individually if fewer than 2
-   * survive (e.g. a group member is an unauthored showWhen-hidden field on
-   * this component type) — a single field isn't a compound row.
-   * `fieldKey` is the same base-path resolver renderRegistryFields() uses,
-   * threaded through so a State/Rule-retargeted field is found by its
-   * ORIGINAL path (group.paths are always base paths) rather than its
-   * rewritten one. */
+  /** Builds a curated compound group as one row, or singly when fewer than two members survive. */
   renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths, fieldKey) {
-    const memberFields = group.paths.map((p) => fields.find((f) => fieldKey(f) === p));
-    const built = memberFields
-      .map((field, i) => ({ wrap: this.buildFieldWrap(comp, field, fields, target, groupCoveredPaths), label: group.prefixLabels[i], tooltip: field?.tooltip }))
-      .filter((entry) => entry.wrap);
-    if (built.length < 2) {
-      built.forEach((entry) => mount.appendChild(entry.wrap));
-      return;
-    }
-    mount.appendChild(this.assembleCompoundRow(`compound-row-${group.id}`, built));
+    return renderCompoundGroup(this, comp, mount, group, fields, target, groupCoveredPaths, fieldKey);
   }
 
-  /**
-   * 10: The ONE place that owns the `.prop-field-compound` DOM shape — every
-   * compound row, registry-driven (renderCompoundGroup(), above) or
-   * hand-coded outside the registry engine (Grid Position & Size's
-   * Width/Height row), is assembled here so a future visual change to the
-   * shape itself doesn't have to be kept in sync by hand across both call
-   * sites (review finding, 2026-09-11).
-   *
-   * Each item's `wrap` is an already-built `.prop-field`-style element (from
-   * buildFieldWrap(), or an equivalent hand-built div for a non-registry
-   * field) with its own `<label>` — that label's text/title is swapped for
-   * the short inline prefix here, replacing the field's own full descriptive
-   * label, and `.prop-field-compound-item` is added so studio.css's
-   * row-layout rule (label beside the input, not above it) applies.
-   *
-   * NOTE: none of today's compound-row members carry a `showWhen` (see
-   * CURATED_COMPOUND_GROUPS and the Grid Position & Size fields, neither of
-   * which use it) — a field's `.prop-showwhen-note` block assumes the
-   * column layout `.prop-field` normally has, and studio.css defensively
-   * hides it inside a compound item rather than silently mis-rendering it
-   * (review finding, 2026-09-11). A future curated group whose member DOES
-   * need a visible showWhen note should not use this row layout as-is.
-   *
-   * @param {string} testId - full data-testid value, e.g. 'compound-row-size'
-   * @param {Array<{wrap: HTMLElement, label: string, tooltip?: string}>} items
-   * @returns {HTMLElement} the assembled `.prop-field-compound` row, not yet inserted anywhere
-   */
+  /** Assembles the `.prop-field-compound` row shared by registry and hand-built compound rows. */
   assembleCompoundRow(testId, items) {
-    const outer = document.createElement('div');
-    outer.className = 'prop-field-compound';
-    outer.setAttribute('data-testid', testId);
-    items.forEach(({ wrap, label, tooltip }) => {
-      wrap.classList.add('prop-field-compound-item');
-      const labelEl = wrap.querySelector('label');
-      if (labelEl) {
-        labelEl.textContent = label;
-        labelEl.classList.add('prop-compound-label');
-        if (!labelEl.title && tooltip) labelEl.title = tooltip;
-      }
-      outer.appendChild(wrap);
-    });
-    return outer;
+    return assembleCompoundRow(this, testId, items);
   }
 
-  /**
-   * Builds one field's `.prop-field` wrap — override indicator, suppressed/
-   * showWhen note, tier attribute, testid, clear icon, and the FIELD_RENDERERS
-   * dispatch itself — but returns it instead of appending it to `mount`
-   * directly, so a curated compound group (renderCompoundGroup(), above) can
-   * gather several of these into one row before insertion. Returns null for
-   * a field that renders nothing at all: control:null/'bespoke', or an
-   * unauthored showWhen-hidden field — exactly the cases that used to
-   * `return;` straight out of renderRegistryFields' own forEach body before
-   * this was extracted into its own method.
-   */
+  /** Builds one field wrap (override, suppression, tier, test id, control), or null when it renders nothing. */
   buildFieldWrap(comp, field, fields, target, groupCoveredPaths) {
-    if (field.control === null) return null; // deprecated/hidden, e.g. props.align
-    // Step 3 Part A (2026-09-04): 'bespoke' is a DIFFERENT skip reason from null —
-    // the field is real and has working UI, it's just intentionally hand-rendered
-    // outside this engine (e.g. core.list's itemTemplate, which needs JSON.parse
-    // validation this engine's controls don't have). Distinct from null so a future
-    // "which fields have no UI at all" check can tell the two apart.
-    if (field.control === 'bespoke') return null;
-    // Part 2, §2.1 (Ingrid's guarantee): "a field holding a non-default
-    // value surfaces regardless of tier and regardless of showWhen."
-    // Computed once, reused for both halves of that guarantee — post-
-    // implementation review §5 found only the showWhen half was actually
-    // wired: a field with no showWhen at all (the common case) still
-    // vanished below Full purely because of its own field.tier, authored
-    // or not (e.g. core.button's props.hasLed set true, then invisible
-    // again the moment you left Full).
-    const raw = this.getFieldValue(comp, field.path);
-    const isAuthored = raw !== undefined && raw !== field.default;
-    // 03: Override indicator — check if this field is overridden in a state/rule tab
-    // BUT suppress if this field is covered by a group-level override indicator
-    const isOverridable = target && (target.kind === 'state' || target.kind === 'rule');
-    const isCoveredByGroup = groupCoveredPaths && groupCoveredPaths.has(field.path);
-    const isOverridden = isOverridable && raw !== undefined && !isCoveredByGroup;
-
-    // A showWhen-false field is normally skipped entirely, but a
-    // GENUINELY AUTHORED value (raw, stored, and different from the
-    // field's own default — not just "happens to be set to its own
-    // default") must never silently vanish, at any tier. Render it
-    // anyway, dimmed, with why it's hidden and a one-click clear.
-    let suppressed = false;
-    if (field.showWhen && !this.evaluateShowWhen(comp, field.showWhen, fields)) {
-      if (!isAuthored) return null; // unchanged: nothing authored, skip as before
-      suppressed = true;
-    }
-    const renderer = this.FIELD_RENDERERS[field.control];
-    if (!renderer) {
-      throw new Error(`[StudioInspector] No FIELD_RENDERERS entry for control "${field.control}" (path "${field.path}") — register one before declaring a field with this control.`);
-    }
-    const wrap = document.createElement('div');
-    wrap.className = 'prop-field';
-    // 03: Add data-testid for style fields to support test assertions (use originalPath if available)
-    const testidPath = field.originalPath || field.path;
-    if (testidPath.startsWith('style.')) {
-      // Remove 'style.' prefix from the path for the testid
-      const testidSuffix = testidPath.substring(6); // 'style.'.length === 6
-      wrap.setAttribute('data-testid', `style-field-${testidSuffix}`);
-    }
-    // 03: Add is-overridden class
-    if (isOverridden) {
-      wrap.classList.add('is-overridden');
-    }
-    // Part 2: 'advanced' fields stay Full-only, unchanged. A 'simple' field
-    // not in the curated Guided allowlist (field.guided) is Build+Full —
-    // hidden only in Guided. A curated Guided field gets no data-tier
-    // attribute at all, same as every field before Part 2 existed: always
-    // visible, at every tier. A suppressed-but-authored field, OR any
-    // other authored field regardless of showWhen, ALSO gets no data-tier
-    // — §2.1's full guarantee, both axes.
-    if (!suppressed && !isAuthored) {
-      if (field.tier === 'advanced') wrap.setAttribute('data-tier', 'advanced');
-      else if (field.tier === 'simple' && !field.guided) wrap.setAttribute('data-tier', 'build');
-    }
-    if (suppressed) {
-      const note = document.createElement('div');
-      note.className = 'prop-showwhen-note';
-      note.innerHTML = `
-        <span>${escapeHtmlAttr(this.formatShowWhenReason(field.showWhen))} — still set to "${escapeHtmlAttr(String(raw))}"</span>
-        <button type="button" class="prop-showwhen-clear">Clear</button>
-      `;
-      note.querySelector('.prop-showwhen-clear')?.addEventListener('click', () => this.commitField(comp, field.path, undefined));
-      wrap.appendChild(note);
-      const fieldMount = document.createElement('div');
-      fieldMount.style.opacity = '0.55';
-      wrap.appendChild(fieldMount);
-      renderer(comp, field, fieldMount);
-    } else {
-      renderer(comp, field, wrap);
-    }
-    // 03: Add clear icon after renderer has populated the wrap (so it doesn't get overwritten)
-    if (isOverridden) {
-      const clearIcon = document.createElement('button');
-      clearIcon.type = 'button';
-      clearIcon.className = 'override-clear-icon';
-      clearIcon.setAttribute('data-testid', 'clear-override');
-      clearIcon.innerHTML = '✕';
-      clearIcon.title = 'Clear this override';
-      clearIcon.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.commitField(comp, field.path, undefined);
-      });
-      wrap.appendChild(clearIcon);
-    }
-    return wrap;
+    return buildFieldWrap(this, comp, field, fields, target, groupCoveredPaths);
   }
 
-  /**
-   * Part 2, §2.1: human-readable reason a showWhen-gated field is currently
-   * hidden — "<referenced field's label> <op> <value>", matching the exact
-   * wording style the proposal itself uses ("Format ≠ LATLON_DMS").
-   */
+  /** Words why a showWhen-gated field is currently hidden. */
   formatShowWhenReason(showWhen) {
-    const label = this.humanizeFieldLabel(showWhen.path);
-    if ('equals' in showWhen) return `${label} ≠ ${showWhen.equals}`;
-    if ('notEquals' in showWhen) return `${label} = ${showWhen.notEquals}`;
-    if ('equalsAny' in showWhen) return `${label} is not one of: ${showWhen.equalsAny.join(', ')}`;
-    return `a condition on ${label}`;
+    return formatShowWhenReason(this, showWhen);
   }
 
-  /**
-   * Wave 1 gap-closing pass (2026-09-04): falls back to field.default when unset,
-   * mirroring the `??`/`||` fallback every hand-coded panel this engine replaces
-   * already showed. Wave 2 Part B1 (2026-09-04): gained a rung ABOVE that —
-   * field.inheritedValue (a retargeted field's live Base value, set by
-   * retargetAppearanceFields()) wins over the static default when present, and
-   * marks the result dimmed so a State/Rule/Theme-target field visually shows
-   * "this is Base's value, not yours yet," matching the state tab's old eff()
-   * convention. Absent on every Base-target/TYPE_FIELDS field, so `dimmed` is
-   * always false and `value` resolves exactly as before there — this is a
-   * strict superset of the old fallback, not a behavior change for existing
-   * callers. commitField() is unaffected either way: still only ever writes
-   * what the user actually changes, never silently backfills a fallback.
-   */
+  /** Stored value, else inherited value (dimmed), else the registered default. */
   resolveEffectiveValue(comp, field) {
-    const raw = this.getFieldValue(comp, field.path);
-    if (raw !== undefined) return { value: raw, dimmed: false };
-    if (field.inheritedValue !== undefined) return { value: field.inheritedValue, dimmed: true };
-    return { value: field.default, dimmed: false };
+    return resolveEffectiveValue(this, comp, field);
   }
 
   /**
