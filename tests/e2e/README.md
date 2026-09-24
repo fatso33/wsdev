@@ -20,9 +20,9 @@ compound inputs, the override indicator, the multi-select shell), the color pick
 popover, and the rotary component (its Inspector fields, appearance, acceleration, Pulse
 bindings and write-mode defaults, plus appearance scaling, canvas thumbnail, device
 preview and rendered face). They import `@playwright/test` directly and do not isolate
-the page from PC Bridge. The two StudioInspector characterization specs,
-`inspector-shell.spec.js` and `inspector-renderers.spec.js`, import `test`/`expect` from `fixtures/inspectorHarness.js`
-instead. The harness routes every WebSocket closed, aborts every request outside the
+the page from PC Bridge. StudioInspector characterization specs import `test`/`expect`
+from `fixtures/inspectorHarness.js`.
+The harness routes every WebSocket closed, aborts every request outside the
 Studio web server, blocks service workers, and provides seeding, selection,
 fresh-construction and call-through recording helpers. Add a spec when a ticket's
 confirmed seam needs real-browser verification rather than pure-logic testing (that

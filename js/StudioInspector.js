@@ -11,20 +11,18 @@ import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../core/deckEventPacks.js';
 import { openModal, confirmModal, showToast } from './StudioModal.js';
 import { summarizeCondition, reorderRules, getMultiSelectAvailability, computeScrollAnchorDelta } from './InspectorLogic.js';
-import { openColorPickerPopover } from './ColorPickerPopover.js';
 // Widget Studio 2.0, Phase 1: TRIGGERS/ACTIONS are now read from
 // PropertyRegistry.js instead of being hand-copied arrays here — the exact
 // "UI list is stale relative to runtime" bug class found four times in the
 // original Studio audit (this file's own trigger/action lists were two of
 // those four instances).
-import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS as REGISTRY_TYPE_FIELDS, COMMON_FIELDS as REGISTRY_COMMON_FIELDS, VALUE_FORMATS as REGISTRY_VALUE_FORMATS, getFieldsForType, getStateStyleConfig } from '../widgets/PropertyRegistry.js';
+import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS as REGISTRY_TYPE_FIELDS, COMMON_FIELDS as REGISTRY_COMMON_FIELDS, getFieldsForType, getStateStyleConfig } from '../widgets/PropertyRegistry.js';
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
-import { resolveFeelFloor, resolveGesture, MIN_DEGREES_PER_UNIT } from '../widgets/components/rotaryEngine.js';
-import { describePulseFeel } from './RotaryDefaults.js';
 import { CUSTOM_OPTION_VALUE, GRADIENT_VALUE_RE, escapeHtmlAttr, CATEGORY_LABELS } from './inspector/inspectorMarkup.js';
 import { createFieldRenderers } from './inspector/fieldRenderers.js';
 import { getFieldValue, commitRotaryFeelContext, commitRotaryFeelEntry, commitField, updateCompProp, updateCompJsonProp } from './inspector/InspectorEdits.js';
+import { enhanceNumberInputs, getNumberStep, decimalPlaces, roundToDecimals, renderRangeEditor, renderRowListEditor, toHexColor, wireColorPair, humanizeFieldLabel, fieldDomId, resolveFeelFloorHint, resolvePulseFeelDescription, renderPlainField, renderCheckboxField, renderSelectField, renderColorField, renderRowListField, renderStateVarField, renderAssetField, renderRangeField, renderPivotField } from './inspector/ui/FieldFactory.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -45,21 +43,7 @@ const CONTENT_FIELD_BY_TYPE = {
   'core.indicator': 'props.label'
 };
 
-// 09: Numeric input redesign — per-field step-size lookup, keyed by either
-// a registry field path (set on the input via data-step-key, see
-// renderPlainField) or a hand-coded field's own DOM id (for the numeric
-// inputs outside the registry-driven engine, e.g. Layout & Layering's
-// c-layer-z). Lives ENTIRELY here, on the Studio/Inspector side — deliberately
-// NOT part of PropertyRegistry.js's field schema, so a field's step size is a
-// pure authoring-UI convenience, not a spec-level concern. A key absent from
-// this table falls back to NUMBER_STEP_DEFAULT (1), which matches every
-// pixel/integer-ish field's existing practical range already.
-const NUMBER_STEP_LOOKUP = {
-  // Fractional-practical-range fields — a step of 1 would be far too coarse.
-  'props.sensitivity': 0.1, // core.pad — practical range is roughly 0.1-3
-  'c-bind-deadband': 0.01, // binding editor's Dead Band — small fractional tolerances
-};
-const NUMBER_STEP_DEFAULT = 1;
+
 
 // 10: Compound input grouping — an explicit, reviewed list of which field
 // groups render as one compact multi-column row with short inline prefix
@@ -328,106 +312,9 @@ export class StudioInspector {
     this.enhanceNumberInputs(this.container);
   }
 
-  /**
-   * 09: Numeric input redesign — a single post-render pass over EVERY
-   * `input[type="number"]` currently in the panel (both registry-driven
-   * fields from renderPlainField() and the many hand-coded ones scattered
-   * through this file), rather than touching each of those ~25 call sites
-   * individually. Safe to call unconditionally on every render: renderInner()
-   * always does `container.innerHTML = ''` first (see its own header
-   * comment), so every number input here is fresh DOM on every call — no
-   * "already enhanced" bookkeeping needed across renders, only within a
-   * single pass (the guard below is for cases where a nested render helper
-   * calls this again on a sub-tree it already processed).
-   *
-   * Wraps each input in a `.prop-number-wrap` with a permanently-reserved
-   * `.prop-number-chevrons` gutter (opacity-only reveal on hover/focus — the
-   * gutter's own width/padding never changes, so the value never shifts) and
-   * wires mousewheel + chevron-click stepping through NUMBER_STEP_LOOKUP.
-   * Native spinner arrows are removed globally via CSS (studio.css), not
-   * here — this only adds the replacement interaction.
-   */
+  /** Adds the same chevron and focused wheel controls to every number input in a rendered subtree. */
   enhanceNumberInputs(root) {
-    const inputs = root.querySelectorAll('input[type="number"]:not([data-num-enhanced])');
-    inputs.forEach((input) => {
-      input.dataset.numEnhanced = '1';
-
-      const wrap = document.createElement('div');
-      wrap.className = 'prop-number-wrap';
-      input.parentNode.insertBefore(wrap, input);
-      wrap.appendChild(input);
-      input.classList.add('has-number-chevrons');
-
-      const chevrons = document.createElement('div');
-      chevrons.className = 'prop-number-chevrons';
-      chevrons.innerHTML = `
-        <button type="button" class="prop-number-chevron prop-number-chevron-up" tabindex="-1" aria-label="Increase">▲</button>
-        <button type="button" class="prop-number-chevron prop-number-chevron-down" tabindex="-1" aria-label="Decrease">▼</button>
-      `;
-      wrap.appendChild(chevrons);
-
-      const step = this.getNumberStep(input);
-      // Also reflect the lookup's step onto the native `step` attribute so
-      // keyboard ArrowUp/ArrowDown stepping (native browser behavior, not
-      // wired through applyDelta) matches the same per-field granularity as
-      // wheel/chevron stepping instead of defaulting to the browser's step=1.
-      input.step = String(step);
-
-      // Commits via the SAME 'change' event every existing field listener
-      // (renderPlainField, and every hand-coded number field's own 'change'
-      // wiring) already listens for — typing's commit path is untouched by
-      // this whole feature, and stepping reuses it rather than duplicating
-      // each field's own commit logic.
-      const applyDelta = (multiplier) => {
-        if (input.disabled) return;
-        const cur = Number(input.value) || 0;
-        const delta = step * multiplier;
-        const decimals = this.decimalPlaces(step) + (Math.abs(multiplier) < 1 ? 1 : 0);
-        let next = this.roundToDecimals(cur + delta, decimals);
-        if (input.min !== '' && !Number.isNaN(Number(input.min))) next = Math.max(Number(input.min), next);
-        if (input.max !== '' && !Number.isNaN(Number(input.max))) next = Math.min(Number(input.max), next);
-        input.value = String(next);
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      };
-
-      chevrons.querySelector('.prop-number-chevron-up').addEventListener('click', (e) => {
-        e.preventDefault();
-        applyDelta(1);
-      });
-      chevrons.querySelector('.prop-number-chevron-down').addEventListener('click', (e) => {
-        e.preventDefault();
-        applyDelta(-1);
-      });
-
-      // Standard step on plain wheel; Shift = x10; Alt = x0.1 — combining
-      // both multiplies them together (x1), which is a reasonable if
-      // untested edge case (ticket only specifies the two modifiers alone).
-      // Attached to the WRAP (not just the input) so it also fires while the
-      // pointer is over the hover-revealed chevron gutter, which visually
-      // sits on top of the input's own reserved padding but is a DOM sibling,
-      // not a descendant, of the input.
-      // Gated on the input actually being focused (not mere hover) — review
-      // fix for a real regression where hovering ANY numeric field while
-      // scrolling the Inspector panel hijacked the scroll via an
-      // unconditional preventDefault(). Hover still reveals the chevrons
-      // (pure CSS, untouched); only wheel-to-step now requires focus.
-      wrap.addEventListener('wheel', (e) => {
-        if (document.activeElement !== input) return;
-        e.preventDefault();
-        // Browsers swap a wheel event's axis when Shift is held (native
-        // "scroll horizontally" convention) — deltaY reads 0 and the amount
-        // moves to deltaX instead. Fall back to deltaX so Shift+wheel still
-        // reads as the same vertical-scroll gesture, just with the x10
-        // multiplier, rather than a no-op.
-        const rawDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
-        if (rawDelta === 0) return;
-        let multiplier = 1;
-        if (e.shiftKey) multiplier *= 10;
-        if (e.altKey) multiplier *= 0.1;
-        const dir = rawDelta < 0 ? 1 : -1;
-        applyDelta(dir * multiplier);
-      }, { passive: false });
-    });
+    return enhanceNumberInputs(this, root);
   }
 
   /** Lookup a field's configured step: by its registry field path (data-step-key,
@@ -435,24 +322,18 @@ export class StudioInspector {
    * hand-coded numeric fields outside the registry engine), falling back to
    * NUMBER_STEP_DEFAULT when neither key is in NUMBER_STEP_LOOKUP. */
   getNumberStep(input) {
-    const pathKey = input.dataset.stepKey;
-    if (pathKey && Object.prototype.hasOwnProperty.call(NUMBER_STEP_LOOKUP, pathKey)) return NUMBER_STEP_LOOKUP[pathKey];
-    if (input.id && Object.prototype.hasOwnProperty.call(NUMBER_STEP_LOOKUP, input.id)) return NUMBER_STEP_LOOKUP[input.id];
-    return NUMBER_STEP_DEFAULT;
+    return getNumberStep(this, input);
   }
 
   /** Decimal places in a step literal like 0.1 (1) or 0.01 (2) or 1 (0). */
   decimalPlaces(step) {
-    const str = String(step);
-    const dot = str.indexOf('.');
-    return dot === -1 ? 0 : str.length - dot - 1;
+    return decimalPlaces(this, step);
   }
 
   /** Rounds away the float-arithmetic noise (e.g. 1 + 0.1 !== 1.1) from a
    * wheel/chevron step, to the given number of decimal places. */
   roundToDecimals(value, decimals) {
-    const factor = Math.pow(10, Math.max(0, decimals));
-    return Math.round(value * factor) / factor;
+    return roundToDecimals(this, value, decimals);
   }
 
   /**
@@ -3456,33 +3337,9 @@ export class StudioInspector {
     return updateCompJsonProp(this, comp, propKey, rawValue, errorEl);
   }
 
-  /** A compact two-number range editor (min/max pair) replacing a raw JSON [a,b] text field. */
-  // Step 3 Part B (2026-09-04): gained an optional trailing commitOverride, mirroring
-  // renderRowListEditor's existing spec.commitOverride pattern — lets a nested path
-  // (props.compose.valueRange) commit through commitField instead of always writing a
-  // top-level prop via updateCompProp. This is what let renderComposeRange (a
-  // byte-for-byte duplicate that existed only because this had no override mechanism)
-  // be deleted — see renderRangeField below.
+  /** Renders a shared two-endpoint range editor; commitOverride preserves nested-path writes. */
   renderRangeEditor(mount, comp, propKey, currentRange, title, hint, commitOverride) {
-    if (!mount) return;
-    const [lo, hi] = Array.isArray(currentRange) ? currentRange : [0, 1];
-    mount.innerHTML = `
-      <div class="prop-field">
-        <label>${title}${hint ? `<span class="prop-hint" title="${hint}"> ⓘ</span>` : ''}</label>
-        <div class="prop-row-2">
-          <input type="number" step="any" class="prop-input range-lo" value="${lo}" />
-          <input type="number" step="any" class="prop-input range-hi" value="${hi}" />
-        </div>
-      </div>
-    `;
-    const commit = commitOverride || ((v) => this.updateCompProp(comp, propKey, v));
-    const apply = () => {
-      const nextLo = Number(mount.querySelector('.range-lo').value) || 0;
-      const nextHi = Number(mount.querySelector('.range-hi').value) || 0;
-      commit([nextLo, nextHi]);
-    };
-    mount.querySelector('.range-lo')?.addEventListener('change', apply);
-    mount.querySelector('.range-hi')?.addEventListener('change', apply);
+    return renderRangeEditor(this, mount, comp, propKey, currentRange, title, hint, commitOverride);
   }
 
   /**
@@ -3492,91 +3349,7 @@ export class StudioInspector {
    * shape identical to what the runtime component expects.
    */
   renderRowListEditor(mount, comp, propKey, rows, spec) {
-    if (!mount) return;
-    const list = Array.isArray(rows) ? rows : [];
-
-    const fieldInput = (field, row) => {
-      const val = row[field.key] !== undefined ? row[field.key] : field.default;
-      if (field.type === 'checkbox') {
-        return `<input type="checkbox" class="row-field" data-field="${field.key}" ${val ? 'checked' : ''} title="${field.label}" />`;
-      }
-      if (field.type === 'deckEvent') {
-        const opts = getDeckEventsByKind('write').map((e) => `<option value="${e.name}" ${val === e.name ? 'selected' : ''}>${e.label}</option>`).join('');
-        return `
-          <select class="row-field prop-select" data-field="${field.key}" title="${field.label}">
-            <option value="">— none —</option>
-            ${opts}
-            <option value="${CUSTOM_OPTION_VALUE}" ${val && !DECK_EVENT_NAMES.includes(val) ? 'selected' : ''}>Custom…</option>
-          </select>
-          <input type="text" class="row-field row-field-custom ${val && !DECK_EVENT_NAMES.includes(val) ? '' : 'hidden'}" data-field="${field.key}" value="${val && !DECK_EVENT_NAMES.includes(val) ? val : ''}" placeholder="Custom event name" />
-        `;
-      }
-      return `<input type="${field.type}" step="any" class="row-field" data-field="${field.key}" value="${val !== undefined ? val : ''}" placeholder="${field.label}" />`;
-    };
-
-    mount.innerHTML = `
-      <div class="prop-field" id="${this.fieldDomId(propKey)}">
-        <label>${spec.title}${spec.hint ? `<span class="prop-hint" title="${spec.hint}"> ⓘ</span>` : ''}</label>
-        <div class="row-list-editor">
-          ${list.map((row, idx) => `
-            <div class="row-list-item" data-idx="${idx}">
-              ${spec.fields.map((f) => fieldInput(f, row)).join('')}
-              <button type="button" class="btn-mini-close row-remove" title="Remove">✕</button>
-            </div>
-          `).join('') || '<div class="caps-empty">None yet.</div>'}
-        </div>
-        <button type="button" class="bar-btn row-add">+ Add ${spec.title.replace(/s$/, '')}</button>
-      </div>
-    `;
-
-    // Most callers' array lives directly at props[propKey], so the default
-    // commit just replaces that whole prop. A caller whose array is nested
-    // deeper (e.g. props.arc.bands) passes commitOverride instead, so
-    // committing the edited list doesn't clobber the rest of that parent
-    // object.
-    const commit = spec.commitOverride || ((nextList) => this.updateCompProp(comp, propKey, nextList));
-
-    mount.querySelectorAll('.row-list-item').forEach((rowEl) => {
-      const idx = Number(rowEl.dataset.idx);
-
-      rowEl.querySelectorAll('select.row-field').forEach((sel) => {
-        sel.addEventListener('change', () => {
-          const key = sel.dataset.field;
-          const isCustom = sel.value === CUSTOM_OPTION_VALUE;
-          const customInput = rowEl.querySelector(`.row-field-custom[data-field="${key}"]`);
-          customInput?.classList.toggle('hidden', !isCustom);
-          const next = [...list];
-          next[idx] = { ...next[idx], [key]: isCustom ? (customInput?.value || '') : sel.value };
-          commit(next);
-        });
-      });
-      rowEl.querySelectorAll('.row-field-custom').forEach((inp) => {
-        inp.addEventListener('change', () => {
-          const key = inp.dataset.field;
-          const next = [...list];
-          next[idx] = { ...next[idx], [key]: inp.value };
-          commit(next);
-        });
-      });
-      rowEl.querySelectorAll('input.row-field:not(.row-field-custom)').forEach((inp) => {
-        inp.addEventListener('change', () => {
-          const key = inp.dataset.field;
-          const raw = inp.type === 'checkbox' ? inp.checked : (inp.type === 'number' ? Number(inp.value) : inp.value);
-          const next = [...list];
-          next[idx] = { ...next[idx], [key]: raw };
-          commit(next);
-        });
-      });
-      rowEl.querySelector('.row-remove')?.addEventListener('click', () => {
-        commit(list.filter((_, i) => i !== idx));
-      });
-    });
-
-    mount.querySelector('.row-add')?.addEventListener('click', () => {
-      const newRow = {};
-      spec.fields.forEach((f) => { newRow[f.key] = f.default; });
-      commit([...list, newRow]);
-    });
+    return renderRowListEditor(this, mount, comp, propKey, rows, spec);
   }
 
   /**
@@ -3598,67 +3371,12 @@ export class StudioInspector {
 
   /** Extracts a plain #rrggbb from a style value, since <input type="color"> rejects anything else (CSS var() refs, gradients, named colors). */
   toHexColor(value) {
-    if (typeof value !== 'string') return null;
-    const match = value.match(/#[0-9a-fA-F]{6}/);
-    return match ? match[0] : null;
+    return toHexColor(this, value);
   }
 
-  /**
-   * Wave 0b (V22): every color field is a swatch+text pair. Ticket 08
-   * replaced the swatch half's native `<input type="color">` with a plain
-   * `<button class="color-swatch">` that opens the anchored ColorPickerPopover
-   * (see ColorPickerPopover.js) instead of the browser's own picker — the
-   * text half is untouched and still directly editable on its own, satisfying
-   * that ticket's "typing a hex value doesn't require opening the popover"
-   * requirement. Both halves still funnel through one `commit()` so a value
-   * delivered via either channel (typed, pasted, or applied from the
-   * popover) dedupes against the last-committed value and only pushes one
-   * undo-history entry / re-render per distinct value. The text field's own
-   * 'input' listener only live-commits once its value is a complete, valid
-   * color (or, for background fields, a gradient() string) — never on a
-   * partial "#f8" mid-type.
-   * @param {Element} root - queried for #pickId/#txtId (usually `body` or `this.container`)
-   * @param {string} pickId
-   * @param {string} txtId
-   * @param {(value: string) => void} applyFn
-   * @param {{allowGradient?: boolean, skipEmpty?: boolean}} [opts] - skipEmpty:
-   *   true for the bulk multi-select editor, where a blank field means "leave
-   *   this property unchanged on every selected component," not "clear it."
-   */
+  /** Connects the swatch and text controls while retaining complete-value and duplicate-commit behavior. */
   wireColorPair(root, pickId, txtId, applyFn, { allowGradient = false, skipEmpty = false } = {}) {
-    const pick = root.querySelector(`#${pickId}`);
-    const txt = root.querySelector(`#${txtId}`);
-    let lastCommitted;
-    const commit = (rawVal) => {
-      const val = rawVal.trim();
-      if (skipEmpty && !val) return;
-      if (val === lastCommitted) return;
-      lastCommitted = val;
-      if (txt) txt.value = val;
-      const hex = this.toHexColor(val);
-      if (pick) {
-        pick.style.background = hex || val || 'transparent';
-        pick.dataset.color = hex || val || '';
-      }
-      applyFn(val);
-    };
-    if (pick && pick.tagName === 'BUTTON') {
-      pick.addEventListener('click', async () => {
-        const seed = (txt && txt.value) || pick.dataset.color || '';
-        const result = await openColorPickerPopover({ anchor: pick, initialColor: seed });
-        if (result !== null && result !== undefined) commit(result);
-      });
-    } else {
-      // Legacy path, kept only in case a native <input type="color"> ever
-      // reappears at some call site — every current one now uses a button.
-      pick?.addEventListener('input', (e) => commit(e.target.value));
-      pick?.addEventListener('change', (e) => commit(e.target.value));
-    }
-    txt?.addEventListener('change', (e) => commit(e.target.value));
-    txt?.addEventListener('input', (e) => {
-      const v = e.target.value.trim();
-      if (/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v) || (allowGradient && GRADIENT_VALUE_RE.test(v))) commit(v);
-    });
+    return wireColorPair(this, root, pickId, txtId, applyFn, { allowGradient, skipEmpty });
   }
 
   FIELD_RENDERERS = createFieldRenderers(this);
@@ -3823,14 +3541,11 @@ export class StudioInspector {
 
   /** path's last segment, camelCase -> "Title Case", with a couple of acronym fixups. */
   humanizeFieldLabel(path) {
-    const key = path.split('.').pop();
-    const spaced = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
-    const titled = spaced.charAt(0).toUpperCase() + spaced.slice(1);
-    return titled.replace(/\bLed\b/, 'LED').replace(/\bId\b/, 'ID').replace(/\bUrl\b/, 'URL');
+    return humanizeFieldLabel(this, path);
   }
 
   fieldDomId(path) {
-    return `rf-${path.replace(/\./g, '-')}`;
+    return fieldDomId(this, path);
   }
 
   /**
@@ -4509,12 +4224,7 @@ export class StudioInspector {
    *   smallest Feel any Rotary accepts, which the field does not advertise.
    */
   resolveFeelFloorHint(comp, field) {
-    if (comp.type !== 'core.rotary' || field.path !== 'props.degreesPerUnit') return null;
-    const gesture = this.getFieldValue(comp, 'props.gesture');
-    const floor = resolveFeelFloor(gesture, this.getFieldValue(comp, 'props.writeMode'));
-    if (floor <= MIN_DEGREES_PER_UNIT) return null;
-    const unit = resolveGesture(gesture) === 'scrub' ? 'pixels of drag' : 'degrees of arc';
-    return { min: floor, tooltipNote: `Current Feel floor: ${floor} ${unit} per step.` };
+    return resolveFeelFloorHint(this, comp, field);
   }
 
   /**
@@ -4524,189 +4234,48 @@ export class StudioInspector {
    * or Gesture change updates it with no listener.
    */
   resolvePulseFeelDescription(comp, field, feel) {
-    if (comp.type !== 'core.rotary' || field.path !== 'props.degreesPerUnit') return null;
-    return describePulseFeel(this.getFieldValue(comp, 'props.gesture'), this.getFieldValue(comp, 'props.writeMode'), feel);
+    return resolvePulseFeelDescription(this, comp, field, feel);
   }
 
   renderPlainField(comp, field, mount, inputType) {
-    const label = this.humanizeFieldLabel(field.path);
-    const id = this.fieldDomId(field.path);
-    const { value } = this.resolveEffectiveValue(comp, field);
-    const floorHint = inputType === 'number' ? this.resolveFeelFloorHint(comp, field) : null;
-    const tooltip = floorHint ? `${field.tooltip || ''} ${floorHint.tooltipNote}`.trim() : (field.tooltip || '');
-    // A registry `min` is advertised the same way, so the browser's own constraint and
-    // the chevron/wheel stepping both respect it; the engine owns what a lower value does.
-    const registryMin = inputType === 'number' && Number.isFinite(field.min) ? field.min : null;
-    const minAttr = floorHint ? ` min="${floorHint.min}"` : (registryMin !== null ? ` min="${registryMin}"` : '');
-    const pulseFeel = this.resolvePulseFeelDescription(comp, field, value);
-    // 09: data-step-key drives NUMBER_STEP_LOOKUP (wheel/chevron stepping) —
-    // keyed by the registry field path itself, so this is the ONLY new
-    // attribute a registry-driven number field needs; the lookup table lives
-    // entirely in this file, PropertyRegistry.js's field schema is untouched.
-    const stepAttr = inputType === 'number' ? ` data-step-key="${escapeHtmlAttr(field.path)}"` : '';
-    mount.innerHTML = `
-      <label title="${escapeHtmlAttr(tooltip)}">${escapeHtmlAttr(pulseFeel ? pulseFeel.label : label)}</label>
-      <input type="${inputType}" id="${id}" class="prop-input" value="${escapeHtmlAttr(value ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}"${stepAttr}${minAttr} />
-      ${pulseFeel ? `<div class="prop-hint-block" id="${id}-meaning" style="font-size:11px;opacity:0.75;margin-top:2px;">${escapeHtmlAttr(pulseFeel.note)}</div>` : ''}
-    `;
-    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
-      const raw = e.target.value;
-      const v = inputType === 'number' ? (raw === '' ? undefined : (Number(raw) || 0)) : raw;
-      this.commitField(comp, field.path, v);
-    });
+    return renderPlainField(this, comp, field, mount, inputType);
   }
 
   renderCheckboxField(comp, field, mount) {
-    const label = this.humanizeFieldLabel(field.path);
-    const id = this.fieldDomId(field.path);
-    const { value } = this.resolveEffectiveValue(comp, field);
-    mount.innerHTML = `
-      <label title="${escapeHtmlAttr(field.tooltip || '')}" style="display:flex;align-items:center;gap:6px;">
-        <input type="checkbox" id="${id}" ${value ? 'checked' : ''} /> ${escapeHtmlAttr(label)}
-      </label>
-    `;
-    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => this.commitField(comp, field.path, e.target.checked));
+    return renderCheckboxField(this, comp, field, mount);
   }
 
   renderSelectField(comp, field, mount) {
-    const label = this.humanizeFieldLabel(field.path);
-    const id = this.fieldDomId(field.path);
-    const { value } = this.resolveEffectiveValue(comp, field);
-    const rawOptions = field.optionsRef === 'VALUE_FORMATS' ? REGISTRY_VALUE_FORMATS : (field.options || []);
-    const optionHtml = rawOptions.map((opt) => {
-      const optVal = (opt && typeof opt === 'object') ? opt.value : opt;
-      const optLabel = (opt && typeof opt === 'object') ? opt.label : String(opt);
-      const icon = field.optionIcons?.[optVal];
-      const selected = value === optVal ? 'selected' : '';
-      return `<option value="${escapeHtmlAttr(optVal)}" ${selected}>${icon ? `${icon} ` : ''}${escapeHtmlAttr(optLabel)}</option>`;
-    }).join('');
-    mount.innerHTML = `
-      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <select id="${id}" class="prop-select">${optionHtml}</select>
-    `;
-    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => {
-      // Options are always rendered from string/number literals above (never
-      // user text), so a numeric-typed option (e.g. style.typography.weight's
-      // [400,500,600,700]) needs coercing back from the <select>'s own
-      // always-string e.target.value.
-      const original = rawOptions.find((opt) => String((opt && typeof opt === 'object') ? opt.value : opt) === e.target.value);
-      const coerced = (original && typeof original === 'object') ? original.value : original;
-      this.commitField(comp, field.path, coerced);
-    });
+    return renderSelectField(this, comp, field, mount);
   }
 
   renderColorField(comp, field, mount) {
-    const label = this.humanizeFieldLabel(field.path);
-    const id = this.fieldDomId(field.path);
-    const { value } = this.resolveEffectiveValue(comp, field);
-    mount.innerHTML = `
-      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <div class="color-picker-wrap">
-        <button type="button" class="color-swatch" id="${id}-pick" data-color="${escapeHtmlAttr(this.toHexColor(value) || '#000000')}" style="background:${this.toHexColor(value) || '#000000'}" aria-label="Pick color"></button>
-        <input type="text" id="${id}" class="prop-input" value="${escapeHtmlAttr(value || '')}" placeholder="" />
-      </div>
-    `;
-    this.wireColorPair(mount, `${id}-pick`, id, (v) => this.commitField(comp, field.path, v));
+    return renderColorField(this, comp, field, mount);
   }
 
-  /**
-   * Step 3 Part A (2026-09-04): registry-driven wrapper around the existing,
-   * unmodified renderRowListEditor(). Part B folded core.gauge's then-hand-coded
-   * arc.bands in behind this wrapper too, so this is now renderRowListEditor's ONLY
-   * caller and `propKey` there is always a registry `field.path`. Reads `field.rowSpec.fields`
-   * — the per-field "row spec" the registry previously had no way to declare, so every
-   * hand-coded call site built its own — filters columns by their own optional
-   * `showWhen` (e.g. core.selector's Angle column, lever-mode-only), and always commits
-   * via commitField(comp, field.path, nextList), which already handles both top-level
-   * paths (positions/zones/detents, this pass) and nested ones (arc.bands, Part B)
-   * identically — no commitOverride hack needed for new callers.
-   */
+  /** Renders visible row-list columns and commits edits through the field transaction path. */
   renderRowListField(comp, field, mount) {
-    const rows = this.getFieldValue(comp, field.path) || [];
-    const visibleFields = (field.rowSpec?.fields || []).filter((f) => !f.showWhen || this.evaluateShowWhen(comp, f.showWhen));
-    this.renderRowListEditor(mount, comp, field.path, rows, {
-      title: this.humanizeFieldLabel(field.path),
-      hint: field.tooltip,
-      fields: visibleFields,
-      commitOverride: (nextList) => this.commitField(comp, field.path, nextList)
-    });
+    return renderRowListField(this, comp, field, mount);
   }
 
-  /** Step 3 Part A: plain <select> from this widget's state[] vars, mirroring the 3 existing hand-coded instances of this exact pattern. */
+  /** Renders the widget current state-variable choices for this field. */
   renderStateVarField(comp, field, mount) {
-    const label = this.humanizeFieldLabel(field.path);
-    const id = this.fieldDomId(field.path);
-    const value = this.getFieldValue(comp, field.path) ?? field.default;
-    const stateVars = this.state.widgetDef.state || [];
-    mount.innerHTML = `
-      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <select id="${id}" class="prop-select">
-        <option value="" ${!value ? 'selected' : ''}>— none —</option>
-        ${stateVars.map((s) => `<option value="${escapeHtmlAttr(s.name)}" ${value === s.name ? 'selected' : ''}>${escapeHtmlAttr(s.name)} (${escapeHtmlAttr(s.type)})</option>`).join('')}
-      </select>
-    `;
-    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => this.commitField(comp, field.path, e.target.value || undefined));
+    return renderStateVarField(this, comp, field, mount);
   }
 
-  /** Step 3 Part A: plain <select> from this widget's assets[], mirroring the existing core.image hand-coded select. */
+  /** Renders the widget current asset choices for this field. */
   renderAssetField(comp, field, mount) {
-    const label = this.humanizeFieldLabel(field.path);
-    const id = this.fieldDomId(field.path);
-    const { value } = this.resolveEffectiveValue(comp, field);
-    const assets = this.state.widgetDef.assets || [];
-    mount.innerHTML = `
-      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <select id="${id}" class="prop-select">
-        <option value="" ${!value ? 'selected' : ''}>None</option>
-        ${assets.map((a) => `<option value="${escapeHtmlAttr(a.id)}" ${value === a.id ? 'selected' : ''}>${escapeHtmlAttr(a.id)} (${escapeHtmlAttr(a.mimeType)})</option>`).join('')}
-      </select>
-    `;
-    mount.querySelector(`#${id}`)?.addEventListener('change', (e) => this.commitField(comp, field.path, e.target.value || undefined));
+    return renderAssetField(this, comp, field, mount);
   }
 
-  /**
-   * Step 3 Part B (2026-09-04): registry-driven wrapper around the existing,
-   * unmodified-in-shape renderRangeEditor() (extended above with an optional
-   * commitOverride). Serves both top-level ranges (props.valueRange) and nested ones
-   * (props.compose.valueRange) identically via commitField — the same "commitField
-   * already handles nested paths generically" pattern renderRowListField already uses,
-   * which is what let renderComposeRange's byte-for-byte duplicate be deleted.
-   */
+  /** Renders a registry range field through the Inspector transaction path. */
   renderRangeField(comp, field, mount) {
-    const currentRange = this.getFieldValue(comp, field.path) || [0, 1];
-    this.renderRangeEditor(
-      mount, comp, field.path, currentRange,
-      this.humanizeFieldLabel(field.path), field.tooltip,
-      (next) => this.commitField(comp, field.path, next)
-    );
+    return renderRangeField(this, comp, field, mount);
   }
 
-  /**
-   * Step 3 Part B: props.pivot is an {x, y} object (GaugeComponent.js:91's
-   * `${pivot.x} ${pivot.y}` transform-origin), not a plain string — the one field shape
-   * in the registry that needs its own dedicated two-input renderer rather than fitting
-   * an existing primitive.
-   */
+  /** Renders the pivot X/Y coordinates; omitted coordinates retain the centered 50% default. */
   renderPivotField(comp, field, mount) {
-    const label = this.humanizeFieldLabel(field.path);
-    const id = this.fieldDomId(field.path);
-    const pivot = this.getFieldValue(comp, field.path) || {};
-    const x = pivot.x ?? '50%';
-    const y = pivot.y ?? '50%';
-    mount.innerHTML = `
-      <label title="${escapeHtmlAttr(field.tooltip || '')}">${escapeHtmlAttr(label)}</label>
-      <div class="prop-row-2">
-        <input type="text" id="${id}-x" class="prop-input" value="${escapeHtmlAttr(x)}" placeholder="X e.g. 50%" />
-        <input type="text" id="${id}-y" class="prop-input" value="${escapeHtmlAttr(y)}" placeholder="Y e.g. 50%" />
-      </div>
-    `;
-    const apply = () => {
-      const nx = mount.querySelector(`#${id}-x`)?.value.trim() || '50%';
-      const ny = mount.querySelector(`#${id}-y`)?.value.trim() || '50%';
-      this.commitField(comp, field.path, { x: nx, y: ny });
-    };
-    mount.querySelector(`#${id}-x`)?.addEventListener('change', apply);
-    mount.querySelector(`#${id}-y`)?.addEventListener('change', apply);
+    return renderPivotField(this, comp, field, mount);
   }
 
   updateCompProp(comp, propKey, value) {
