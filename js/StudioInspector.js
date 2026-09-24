@@ -24,6 +24,7 @@ import { createFieldRenderers } from './inspector/fieldRenderers.js';
 import { getFieldValue, commitRotaryFeelContext, commitRotaryFeelEntry, commitField, updateCompProp, updateCompJsonProp } from './inspector/InspectorEdits.js';
 import { enhanceNumberInputs, getNumberStep, decimalPlaces, roundToDecimals, renderRangeEditor, renderRowListEditor, toHexColor, wireColorPair, humanizeFieldLabel, fieldDomId, resolveFeelFloorHint, resolvePulseFeelDescription, renderPlainField, renderCheckboxField, renderSelectField, renderColorField, renderRowListField, renderStateVarField, renderAssetField, renderRangeField, renderPivotField } from './inspector/ui/FieldFactory.js';
 import { renderRegistryFieldGroups, renderRegistryFields, renderCompoundGroup, assembleCompoundRow, buildFieldWrap, formatShowWhenReason, evaluateShowWhen, resolveEffectiveValue } from './inspector/ui/FieldGroups.js';
+import { buildModeToggle, tierHidesField, applyUiMode, applySubtitleVisibility, applyTierMoreBadges, applySectionJsonViews, buildInspectorTabShell, buildLayoutBadge, buildAppearanceBadge, buildDataBadge, buildBehaviorBadge, buildAccordionGroup } from './inspector/InspectorShell.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -522,156 +523,32 @@ export class StudioInspector {
 
   /** Always-visible Guided/Build/Full tier switch, independent of what's selected. */
   buildModeToggle() {
-    const bar = document.createElement('div');
-    bar.className = 'inspector-mode-toggle';
-    bar.innerHTML = `
-      <button type="button" class="mode-toggle-btn ${this.uiTier === 'guided' ? 'active' : ''}" data-mode="guided">Guided</button>
-      <button type="button" class="mode-toggle-btn ${this.uiTier === 'build' ? 'active' : ''}" data-mode="build">Build</button>
-      <button type="button" class="mode-toggle-btn ${this.uiTier === 'full' ? 'active' : ''}" data-mode="full">Full</button>
-      <span class="prop-hint" title="Guided shows only what a first widget needs. Build (the default) adds the rest of what most widgets need. Full shows everything, flat — compose transforms, poll tuning, custom bindings, and similar. Fields are never removed, only hidden; nothing you've already set is lost by switching, and every section's '⋯ N more' link reveals its own hidden fields without leaving the tier.">ⓘ</span>
-    `;
-    bar.querySelectorAll('.mode-toggle-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        this.uiTier = btn.dataset.mode;
-        localStorage.setItem('fdws_studio_uiMode', this.uiTier);
-        this.render();
-      });
-    });
-    return bar;
+    return buildModeToggle(this);
   }
 
-  /**
-   * True if a field/section marked with this data-tier value should be
-   * HIDDEN at the current uiTier. Three data-tier values exist:
-   *  - "advanced": Full only (registry field.tier === 'advanced').
-   *  - "build": Build + Full, hidden only in Guided (registry
-   *    field.tier === 'simple' && !field.guided — Part 2).
-   *  - "simple-only": Guided + Build, hidden only in Full — a small set of
-   *    friendlier FRONT ENDS onto a field Full already exposes directly
-   *    (Widget Studio 2.0, Phase 8), so showing both at once would just be
-   *    two competing controls for the same value.
-   * Anything unmarked (no data-tier attribute at all — most fields) is
-   * always visible, same as before Part 2.
-   */
+  /** True when a field or section with this data-tier value is hidden at the current tier. */
   tierHidesField(dataTier) {
-    if (dataTier === 'advanced') return this.uiTier !== 'full';
-    if (dataTier === 'build') return this.uiTier === 'guided';
-    if (dataTier === 'simple-only') return this.uiTier === 'full';
-    return false;
+    return tierHidesField(this, dataTier);
   }
 
-  /**
-   * Applies tierHidesField() to every data-tier'd element, except inside an
-   * accordion section the user has explicitly expanded via its own "⋯ N
-   * more" link (buildAccordionGroup() marks that section's .inspector-group
-   * with .tier-override) — revealing a section's hidden fields must not
-   * require leaving the tier for the whole panel. Call after any (re-)render.
-   */
+  /** Applies the tier rules to every data-tier element, then the subtitle pass. Call after any (re-)render. */
   applyUiMode() {
-    this.container.querySelectorAll('[data-tier]').forEach((el) => {
-      const overridden = el.closest('.inspector-group.tier-override');
-      el.classList.toggle('hidden', !overridden && this.tierHidesField(el.dataset.tier));
-    });
-    this.applySubtitleVisibility();
+    return applyUiMode(this);
   }
 
-  /**
-   * Review follow-up item 1: a `.prop-section-subtitle` heading whose fields
-   * are ALL tier-hidden still rendered on its own — a title floating over
-   * nothing (e.g. Appearance's Layout/Background groups at Guided tier).
-   * Skips any subtitle that already carries its own `data-tier` (a separate,
-   * static-heading mechanism, e.g. "Content Alignment") and checks real
-   * rendered visibility via offsetParent rather than the `.hidden` class, so
-   * a field visible only because it holds an authored non-default value
-   * (Part 2.1's guarantee, which deliberately carries no data-tier) still
-   * counts as "this heading has something to show".
-   */
+  /** Hides a subtitle heading whose fields are all hidden. */
   applySubtitleVisibility() {
-    this.container.querySelectorAll('.prop-section-subtitle').forEach((subtitle) => {
-      if (subtitle.dataset.tier) return;
-      let hasVisibleField = false;
-      let node = subtitle.nextElementSibling;
-      while (node && !node.classList.contains('prop-section-subtitle')) {
-        const fields = node.matches('.prop-field') ? [node] : Array.from(node.querySelectorAll('.prop-field'));
-        if (fields.some((f) => f.offsetParent !== null)) { hasVisibleField = true; break; }
-        node = node.nextElementSibling;
-      }
-      subtitle.classList.toggle('hidden', !hasVisibleField);
-    });
+    return applySubtitleVisibility(this);
   }
 
-  /**
-   * Part 2: injects the "⋯ N more" link into every accordion section that
-   * actually has fields hidden by the current tier — the escape hatch that
-   * makes hiding fields by tier acceptable at all (no dead ends). Must run
-   * AFTER the whole panel has finished rendering, same requirement as
-   * applyUiMode() (call it right alongside that, not from inside
-   * buildAccordionGroup() — see the comment there for why).
-   */
+  /** Injects the "⋯ N more" link into every section that has tier-hidden fields. Call after the whole render. */
   applyTierMoreBadges() {
-    this.container.querySelectorAll('.inspector-group').forEach((group) => {
-      const title = group.querySelector('.group-title')?.textContent;
-      if (!title || this.tierOverrideGroups.has(title)) return;
-      const body = group.querySelector('.inspector-group-body');
-      const hiddenCount = Array.from(body.querySelectorAll('[data-tier]'))
-        .filter((el) => this.tierHidesField(el.dataset.tier)).length;
-      if (hiddenCount === 0) return;
-      const moreBtn = document.createElement('button');
-      moreBtn.type = 'button';
-      moreBtn.className = 'group-tier-more';
-      moreBtn.textContent = `⋯ ${hiddenCount} more`;
-      moreBtn.title = `Show ${hiddenCount} more field${hiddenCount === 1 ? '' : 's'} in this section without leaving the current tier.`;
-      moreBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // header's own click toggles expand/collapse
-        this.tierOverrideGroups.add(title);
-        this.expandedGroups.add(title); // revealing fields in a collapsed section is a dead end otherwise
-        this.render();
-      });
-      group.querySelector('.group-title-cluster')?.appendChild(moreBtn);
-    });
+    return applyTierMoreBadges(this);
   }
 
-  /**
-   * G10 (Wave 2): Full tier's promised "per-section JSON" — a read-only view of
-   * each accordion section's own underlying data, for verification (Ingrid: "I
-   * know the shape, I want to see the raw JSON, not a translated form"). Not an
-   * editing surface — the full read/apply panel is separate, later, Wave-4 work.
-   * Full tier only, per the proposal's own tier table. Must run AFTER the whole
-   * panel has finished rendering, same requirement (and same reason) as
-   * applyTierMoreBadges() above — appending from inside buildAccordionGroup()
-   * itself would land this block BEFORE the APPEARANCE/DATA & CONTENT sections'
-   * real content, which populates their body afterward (see buildAccordionGroup()'s
-   * own comment) — landing the JSON block above the fields on 2 of 10 sections and
-   * below on the other 8.
-   */
+  /** Full tier's read-only per-section JSON views. Call after the whole render. */
   applySectionJsonViews() {
-    if (this.uiTier !== 'full') return;
-    this.container.querySelectorAll('.inspector-group').forEach((group) => {
-      const title = group.querySelector('.group-title')?.textContent;
-      const data = title ? this._sectionJsonData[title] : undefined;
-      if (data === undefined) return;
-      const body = group.querySelector('.inspector-group-body');
-      if (!body) return;
-      const isOpen = this.jsonViewOpenTitles.has(title);
-
-      const toggleBtn = document.createElement('button');
-      toggleBtn.type = 'button';
-      toggleBtn.className = 'bar-btn section-json-toggle';
-      toggleBtn.textContent = isOpen ? 'Hide JSON' : 'View JSON';
-      body.appendChild(toggleBtn);
-
-      const pre = document.createElement('pre');
-      pre.className = `section-json-block ${isOpen ? '' : 'hidden'}`;
-      pre.textContent = JSON.stringify(data, null, 2);
-      body.appendChild(pre);
-
-      toggleBtn.addEventListener('click', () => {
-        const nowOpen = !this.jsonViewOpenTitles.has(title);
-        if (nowOpen) this.jsonViewOpenTitles.add(title); else this.jsonViewOpenTitles.delete(title);
-        toggleBtn.textContent = nowOpen ? 'Hide JSON' : 'View JSON';
-        pre.classList.toggle('hidden', !nowOpen);
-      });
-    });
+    return applySectionJsonViews(this);
   }
 
   // ==========================================
@@ -1266,59 +1143,12 @@ export class StudioInspector {
   // ==========================================
 
   /**
-   * Ticket 11: gained `disabledTabs`/`forceActiveTab` — the multi-select
-   * shell needs General/Data/Events visibly disabled (not just never
-   * clicked) and Style forced active regardless of whatever tab a prior
-   * single-selection left `this.activeInspectorTab` on. Both default to the
-   * single-select call site's original behavior (`buildInspectorTabShell()`
-   * with no args), so that call site is unchanged.
+   * Builds the General/Style/Data/Events tab bar and panels. `disabledTabs` and `forceActiveTab` serve
+   * the multi-select shell; the defaults keep the single-selection behavior.
    * @param {{disabledTabs?: string[], forceActiveTab?: string}} [opts]
    */
   buildInspectorTabShell({ disabledTabs = [], forceActiveTab = null } = {}) {
-    const tabBar = document.createElement('div');
-    tabBar.className = 'inspector-tab-bar';
-
-    const tabs = ['general', 'style', 'data', 'events'];
-    const tabLabels = { general: 'General', style: 'Style', data: 'Data', events: 'Events' };
-    const panels = {};
-    const activeTab = forceActiveTab || this.activeInspectorTab;
-
-    tabs.forEach((tabName) => {
-      const isDisabled = disabledTabs.includes(tabName);
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = `inspector-tab-btn ${tabName === activeTab ? 'active' : ''}`;
-      btn.textContent = tabLabels[tabName];
-      btn.setAttribute('data-testid', `inspector-tab-${tabName}`);
-      if (isDisabled) {
-        btn.disabled = true;
-      } else if (!forceActiveTab) {
-        // Review fix (ticket 11): when a tab is forced active (multi-select's
-        // Style tab), clicking it must stay a no-op rather than writing
-        // `tabName` into the persistent `this.activeInspectorTab` — that write
-        // survived deselection back to single-select, silently reopening the
-        // Inspector on Style instead of whatever tab the prior single
-        // selection actually had active.
-        btn.addEventListener('click', () => {
-          this.activeInspectorTab = tabName;
-          this.render();
-        });
-      }
-      tabBar.appendChild(btn);
-    });
-
-    const panelsContainer = document.createElement('div');
-    panelsContainer.className = 'inspector-panels';
-
-    tabs.forEach((tabName) => {
-      const panel = document.createElement('div');
-      panel.className = `inspector-panel ${tabName === activeTab ? 'active' : ''}`;
-      panel.setAttribute('data-testid', `inspector-panel-${tabName}`);
-      panelsContainer.appendChild(panel);
-      panels[tabName] = panel;
-    });
-
-    return { tabBar, panelsContainer, panels };
+    return buildInspectorTabShell(this, { disabledTabs, forceActiveTab });
   }
 
   renderComponentInspector(comp) {
@@ -4670,124 +4500,28 @@ export class StudioInspector {
     this.state.updateComponent(comp.id, { binding: { ...(comp.binding || {}), ...updates } });
   }
 
-  // --- Widget Studio 2.0, Phase 6: collapsed-group summary badges ---
-  // Deliberately plain, short, scannable strings — not full sentences — since
-  // they sit inline in a section header next to the chevron.
-
+  /** Summarizes grid placement, layer group and pass-through for a collapsed section header. */
   buildLayoutBadge(comp) {
-    const layout = comp.layout || {};
-    const parts = [`${layout.w ?? '?'}×${layout.h ?? '?'} @ (${layout.col ?? '?'},${layout.row ?? '?'})`];
-    if (comp.layer?.group) parts.push(comp.layer.group);
-    if (comp.layer?.pointerEvents === 'none') parts.push('pass-through');
-    return parts.join(' · ');
+    return buildLayoutBadge(this, comp);
   }
 
+  /** Summarizes conditional rules or whether the base style is customized. */
   buildAppearanceBadge(comp) {
-    const style = comp.style || {};
-    const ruleCount = style.rules?.length || 0;
-    if (ruleCount > 0) return `${ruleCount} conditional rule${ruleCount === 1 ? '' : 's'}`;
-    const customized = !!(style.typography || style.border || style.background || style.align || style.offset || style.orientation);
-    return customized ? 'Customized' : 'Default';
+    return buildAppearanceBadge(this, comp);
   }
 
+  /** Summarizes the data binding. */
   buildDataBadge(comp) {
-    const binding = comp.binding || {};
-    if (binding.readSimVar && binding.writeEvent) return `↔ ${binding.readSimVar}`;
-    if (binding.readSimVar) return `→ ${binding.readSimVar}`;
-    if (binding.writeEvent) return `⇄ ${binding.writeEvent}`;
-    if (binding.stateVar) return `state: ${binding.stateVar}`;
-    if (binding.stateRef) return `state: ${binding.stateRef}`;
-    return 'Not bound';
+    return buildDataBadge(this, comp);
   }
 
+  /** Summarizes interaction count, conditional visibility and guard. */
   buildBehaviorBadge(comp) {
-    const count = comp.interactions?.length || 0;
-    const parts = [`${count} interaction${count === 1 ? '' : 's'}`];
-    if (comp.visibleWhen) parts.push('conditional visibility');
-    if (comp.layout?.guard) parts.push('guarded');
-    return parts.join(' · ');
+    return buildBehaviorBadge(this, comp);
   }
 
-  /**
-   * @param {string} badge — optional plain-text summary shown in the header,
-   * visible whether the group is expanded or collapsed (e.g. "3 interactions",
-   * "→ nav1ActFreq"). Widget Studio 2.0, Phase 6: previously every collapsed
-   * group told you nothing about what it held — a power user had to expand
-   * each of a component's 8 sections just to see if anything was set. Purely
-   * a summary string computed by the caller (see buildLayoutBadge() and
-   * siblings below) — not tied to PropertyRegistry field iteration, since
-   * most of these sections still hand-build their markup rather than walking
-   * the registry (see the file-header comment on why that's deliberate here).
-   * @param {object} [jsonData] — G10 (Wave 2): this section's own underlying data,
-   * for Full tier's "View JSON" affordance — see applySectionJsonViews(). Just
-   * recorded here (keyed by title, into this._sectionJsonData); the actual
-   * rendering happens in that separate deferred pass, not here, for the same
-   * "must run after the whole panel renders" reason the "N more" badge does.
-   */
+  /** Builds one accordion section (or a flat tab section when `nonCollapsible`) and records its section JSON. */
   buildAccordionGroup(title, isOpenDefault, renderFn, badge, jsonData, nonCollapsible = false) {
-    if (jsonData !== undefined) this._sectionJsonData[title] = jsonData;
-    // Only seed from isOpenDefault the first time this title is ever seen;
-    // afterwards, the user's own expand/collapse choice (tracked in
-    // this.expandedGroups) wins on every re-render.
-    if (!this.knownGroupTitles.has(title)) {
-      this.knownGroupTitles.add(title);
-      if (isOpenDefault) this.expandedGroups.add(title);
-    }
-    const isOpen = this.expandedGroups.has(title);
-    const isTierOverridden = this.tierOverrideGroups.has(title);
-
-    const group = document.createElement('div');
-    group.className = `inspector-group${isTierOverridden ? ' tier-override' : ''}${nonCollapsible ? ' non-collapsible' : ''}`;
-
-    // t01: For non-collapsible sections (inside tabs), render simplified header without chevron
-    if (nonCollapsible) {
-      const header = document.createElement('div');
-      header.className = 'inspector-tab-section-header';
-      header.innerHTML = `
-        <span class="group-title-cluster">
-          <span class="group-title">${title}</span>
-          ${badge ? `<span class="group-badge">${badge}</span>` : ''}
-        </span>
-      `;
-      group.appendChild(header);
-    } else {
-      const header = document.createElement('div');
-      header.className = 'inspector-group-header';
-      header.innerHTML = `
-        <span class="group-title-cluster">
-          <span class="group-title">${title}</span>
-          ${badge ? `<span class="group-badge">${badge}</span>` : ''}
-        </span>
-        <svg class="group-chevron ${isOpen ? 'open' : ''}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-      `;
-
-      header.addEventListener('click', () => {
-        const nowOpen = !body.classList.contains('open');
-        body.classList.toggle('open', nowOpen);
-        body.classList.toggle('collapsed', !nowOpen);
-        header.querySelector('.group-chevron')?.classList.toggle('open', nowOpen);
-        if (nowOpen) this.expandedGroups.add(title);
-        else this.expandedGroups.delete(title);
-      });
-
-      group.appendChild(header);
-    }
-
-    const body = document.createElement('div');
-    body.className = nonCollapsible ? 'inspector-group-body open' : `inspector-group-body ${isOpen ? 'open' : 'collapsed'}`;
-
-    renderFn(body);
-    // Part 2's "⋯ N more" badge is NOT injected here — see
-    // applyTierMoreBadges(). APPEARANCE and DATA & CONTENT (below, in
-    // renderComponentInspector()) build their accordion shell with an EMPTY
-    // renderFn and populate .inspector-group-body separately afterward, so
-    // counting hidden fields synchronously at this point would see an empty
-    // body for those two sections and always undercount to zero. The badge
-    // pass instead runs once, after the ENTIRE panel (every section, however
-    // it populates itself) has finished rendering — same timing requirement
-    // applyUiMode() already has, and called right alongside it.
-
-    group.appendChild(body);
-    return group;
+    return buildAccordionGroup(this, title, isOpenDefault, renderFn, badge, jsonData, nonCollapsible);
   }
 }
