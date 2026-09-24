@@ -21,9 +21,10 @@ import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS, TYPE_FIELDS
 import { STYLE_PRESETS } from './StudioStylePresets.js';
 import { themeAdjustColor, themeAdjustGradient } from '../widgets/components/ThemeColor.js';
 import { resolveFeelFloor, resolveGesture, MIN_DEGREES_PER_UNIT } from '../widgets/components/rotaryEngine.js';
-import { applyRotaryContextChange, applyRotaryFeelEntry, isRotaryFeelContextPath, isRotaryFeelPath, describePulseFeel } from './RotaryDefaults.js';
+import { describePulseFeel } from './RotaryDefaults.js';
 import { CUSTOM_OPTION_VALUE, GRADIENT_VALUE_RE, escapeHtmlAttr, CATEGORY_LABELS } from './inspector/inspectorMarkup.js';
 import { createFieldRenderers } from './inspector/fieldRenderers.js';
+import { getFieldValue, commitRotaryFeelContext, commitRotaryFeelEntry, commitField, updateCompProp, updateCompJsonProp } from './inspector/InspectorEdits.js';
 // Widget Studio 2.0, Phase 2: interactions[].feedback (FDWS v1.2 §4.1 haptic/
 // audio) — a real, working runtime feature since v1.2 that never had Studio
 // UI until now. Not imported from PropertyRegistry.js's INTERACTION_FIELDS
@@ -3451,25 +3452,8 @@ export class StudioInspector {
     }
   }
 
-  /**
-   * Parses a JSON-array/object prop field and applies it. On invalid JSON the
-   * edit is NOT applied (so a typo can't corrupt the widget def), but unlike
-   * the old silent-console-only behavior, this surfaces the parse error
-   * inline next to the field so the user actually sees why nothing happened.
-   */
   updateCompJsonProp(comp, propKey, rawValue, errorEl) {
-    try {
-      const parsed = JSON.parse(rawValue);
-      this.updateCompProp(comp, propKey, parsed);
-      if (errorEl) errorEl.classList.add('hidden');
-    } catch (err) {
-      if (errorEl) {
-        errorEl.textContent = `Invalid JSON — edit not applied: ${err.message}`;
-        errorEl.classList.remove('hidden');
-      } else {
-        console.warn(`[StudioInspector] Invalid JSON for prop "${propKey}"; change ignored.`, err);
-      }
-    }
+    return updateCompJsonProp(this, comp, propKey, rawValue, errorEl);
   }
 
   /** A compact two-number range editor (min/max pair) replacing a raw JSON [a,b] text field. */
@@ -3679,9 +3663,8 @@ export class StudioInspector {
 
   FIELD_RENDERERS = createFieldRenderers(this);
 
-  /** path.split('.') get, tolerant of missing intermediate objects. */
   getFieldValue(comp, path) {
-    return path.split('.').reduce((cur, seg) => (cur == null ? undefined : cur[seg]), comp);
+    return getFieldValue(comp, path);
   }
 
   /**
@@ -3690,9 +3673,7 @@ export class StudioInspector {
    * else the Author set is carried across untouched, and the toast says what changed and why.
    */
   commitRotaryFeelContext(comp, path, value) {
-    const { props, message } = applyRotaryContextChange(comp.props, path.slice('props.'.length), value);
-    this.state.updateComponent(comp.id, { props });
-    if (message) showToast(message);
+    return commitRotaryFeelContext(this, comp, path, value);
   }
 
   /**
@@ -3702,75 +3683,11 @@ export class StudioInspector {
    * was stored even when that equals the value already there.
    */
   commitRotaryFeelEntry(comp, value) {
-    const { props, message } = applyRotaryFeelEntry(comp.props, value);
-    this.state.updateComponent(comp.id, { props });
-    if (message) showToast(message);
+    return commitRotaryFeelEntry(this, comp, value);
   }
 
-  /**
-   * Generic nested-path commit — clones only the objects along `path` (not
-   * the whole component), splices in the leaf value, and commits the ONE
-   * top-level key via the existing updateComponent(). Mirrors the manual
-   * per-field pattern already hand-written throughout this file (e.g.
-   * `updateStyle({ typography: { ...(comp.style?.typography||{}), color } })`),
-   * generalized once instead of repeated per field.
-   *
-   * Ticket 11: `comp` may be the multi-select Style tab's synthetic proxy
-   * (see buildMultiSelectStyleProxy()) — recognisable by `comp.__multiSelect`
-   * — in which case the write fans out across every real selected component
-   * (StudioState.applyFieldToSelection()) instead of targeting a single
-   * `comp.id` that doesn't correspond to a real widgetDef component. This is
-   * the ONE place that distinction needs to live: every caller (registry
-   * fields, renderBaseThemeAwareAppearanceFields()'s color pickers, override
-   * "clear" icons) already goes through here, so none of them need their own
-   * proxy-awareness.
-   */
   commitField(comp, path, value) {
-    if (comp.__multiSelect) {
-      const notes = this.state.applyFieldToSelection(path, value);
-      if (notes.length === 1) showToast(notes[0].message);
-      else if (notes.length > 1) {
-        showToast(isRotaryFeelPath(path)
-          ? `Feel was raised to the floor on ${notes.length} Rotaries. Ctrl+Z undoes all of it.`
-          : `Feel was adjusted on ${notes.length} Rotaries to fit the new setting. Ctrl+Z undoes all of it.`);
-      }
-      return;
-    }
-    if (comp.type === 'core.rotary' && isRotaryFeelContextPath(path)) {
-      this.commitRotaryFeelContext(comp, path, value);
-      return;
-    }
-    if (comp.type === 'core.rotary' && isRotaryFeelPath(path)) {
-      this.commitRotaryFeelEntry(comp, value);
-      return;
-    }
-    const segs = path.split('.');
-    const topKey = segs[0];
-    // Wave 4, §10.4: a bare top-level path (no dots) — never exercised before
-    // this slice, since every prior call site committed a nested field. The
-    // multi-segment branch below clones the OLD top-level value and only ever
-    // splices into it, so it would silently re-commit the unchanged value for
-    // a single-segment path instead of applying `value` at all. Caught while
-    // wiring up the "wholly unclassified component-root key" bucket, which by
-    // definition produces exactly this shape.
-    if (segs.length === 1) {
-      this.state.updateComponent(comp.id, { [topKey]: value });
-      return;
-    }
-    // Wave 2 Part B2: style.rules is an ARRAY — {...arr} produces a plain
-    // object with numeric string keys, silently corrupting Array.isArray()
-    // and .length for every downstream consumer (resolveActiveRuleStyle(),
-    // the rule chip list). Preserving array-ness here is what makes it safe
-    // to commitField() through a `style.rules.<idx>.style.*` path at all.
-    const cloneLevel = (obj) => (Array.isArray(obj) ? [...obj] : (obj && typeof obj === 'object' ? { ...obj } : {}));
-    const topVal = cloneLevel(comp[topKey]);
-    let cur = topVal;
-    for (let i = 1; i < segs.length - 1; i++) {
-      cur[segs[i]] = cloneLevel(cur[segs[i]]);
-      cur = cur[segs[i]];
-    }
-    cur[segs[segs.length - 1]] = value;
-    this.state.updateComponent(comp.id, { [topKey]: topVal });
+    return commitField(this, comp, path, value);
   }
 
   /**
@@ -4793,8 +4710,7 @@ export class StudioInspector {
   }
 
   updateCompProp(comp, propKey, value) {
-    const nextProps = { ...(comp.props || {}), [propKey]: value };
-    this.state.updateComponent(comp.id, { props: nextProps });
+    return updateCompProp(this, comp, propKey, value);
   }
 
   /**
