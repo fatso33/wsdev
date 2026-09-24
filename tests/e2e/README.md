@@ -4,15 +4,16 @@ For real-browser rendering checks — Shadow DOM, `adoptedStyleSheets`, theme/fu
 CSS-class toggling — the things `jsdom` doesn't faithfully emulate and this codebase has
 been bitten by before (see CLAUDE.md's Shadow DOM selector-boundary gotcha).
 
-**One-time setup, before writing or running the first test here:**
+**One-time setup, before running these tests on a new machine:**
 
 ```bash
 npx playwright install chromium
 ```
 
 This downloads a real Chromium build (not installed by `npm install` — deliberately, since
-it's a large download you only want once you actually need it). Not run yet as part of the
-initial test-runner setup.
+it's a large download you only want once you actually need it). Then run
+`npm run test:e2e` here, or from the repository root, where `npm run test:e2e` syncs the
+shared copies first and runs both the Studio and PWA suites.
 
 Sixteen specs cover the Property Inspector (tabs, scroll preservation, numeric and
 compound inputs, the override indicator, the multi-select shell), the color picker
