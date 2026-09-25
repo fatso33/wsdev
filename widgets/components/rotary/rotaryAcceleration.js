@@ -8,13 +8,17 @@ import { clamp, resolveDegreesPerUnit } from './rotaryConfig.js';
 
 /** Fine tier identity used when seeding and reporting Rotary state. */
 export const TIER_FINE = 'fine';
+// Exactly two tiers rather than a continuous velocity curve: a scale that differs
+// every frame would make an exact value unreachable.
 const TIER_COARSE = 'coarse';
 const DEFAULT_ACCELERATION_ENTER_RATE = 20;
 const ACCELERATION_EXIT_RATIO = 0.5;
 const DEFAULT_ACCELERATION_COARSE_STEP = 10;
 
 // Rate is measured from travel accumulated across a 40 ms window, not from one
-// pointer event. Each window stands alone, so tier changes have no momentum or decay.
+// pointer event. Events a millisecond apart carry no rate information of their own,
+// and judging each alone would let ordinary timing jitter move a steady turn between
+// tiers. Each window stands alone, so tier changes have no momentum or decay.
 const ACCELERATION_SAMPLE_MS = 40;
 
 // A coarse step below one would be finer than the fine step; it means one instead.

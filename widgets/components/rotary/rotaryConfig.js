@@ -123,6 +123,11 @@ export function resolveDisplayValue(rawValue, min, max, mode) {
 
 /**
  * The smallest permitted Feel magnitude; it keeps the degrees-per-unit divisor nonzero.
+ * Nothing upstream bounds Feel: the Inspector coerces blank or invalid input to 0 and
+ * the registry declares no range. A zero divisor drives the value to Infinity and then
+ * NaN, which clamp() preserves through `previousState`, so the knob stays dead. The
+ * engine applies the floor because Studio preview, the PWA and imported widgets all
+ * resolve through it.
  */
 export const MIN_DEGREES_PER_UNIT = 0.01;
 

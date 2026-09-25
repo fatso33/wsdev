@@ -8,7 +8,10 @@
 import { accelerateTravel, advanceRawValue } from './rotaryAcceleration.js';
 import { resolveDisplayValue } from './rotaryConfig.js';
 
-/** Default pixel radius below which Arc projects tangential travel onto the floor. */
+/**
+ * Default pixel radius below which Arc projects tangential travel onto the floor;
+ * roughly a fingertip contact radius (ADR 0001).
+ */
 export const DEFAULT_MIN_EFFECTIVE_RADIUS = 24;
 
 /**
