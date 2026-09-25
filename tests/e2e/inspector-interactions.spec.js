@@ -1,0 +1,206 @@
+import { expect, openStudio, test } from './fixtures/inspectorHarness.js';
+
+async function setup(page, { tier = 'full', type = 'core.button', interactions = [], binding = {} } = {}) {
+  await page.addInitScript((mode) => localStorage.setItem('fdws_studio_uiMode', mode), tier);
+  await openStudio(page);
+  await page.evaluate(({ type, interactions, binding }) => {
+    const state = window.__studioApp.state;
+    state.widgetDef.components.push({ id: 'interaction-pin', type, label: 'Pin', props: {}, binding, interactions });
+    state.undoStack = [];
+    state.selectComponent('interaction-pin');
+  }, { type, interactions, binding });
+}
+
+async function open(page, editIdx = null) {
+  await page.evaluate((index) => {
+    const app = window.__studioApp;
+    app.inspector.openAddInteractionModal(app.state.getComponent('interaction-pin'), index);
+  }, editIdx);
+  await expect(page.locator('.studio-modal-box')).toBeVisible();
+}
+
+async function action(page, type) {
+  await page.locator('#im-action-type').selectOption(type);
+}
+
+async function submit(page) {
+  await page.locator('[data-modal-submit]').click();
+  await expect(page.locator('.studio-modal-box')).toHaveCount(0);
+  return page.evaluate(() => window.__studioApp.state.getComponent('interaction-pin').interactions.at(-1));
+}
+
+async function interactions(page) {
+  return page.evaluate(() => window.__studioApp.state.getComponent('interaction-pin').interactions);
+}
+
+test('list shows action details and feedback; delete confirms exact message', async ({ page }) => {
+  const rows = [{ trigger: 'tap', action: { type: 'core.dispatchEvent', event: 'K:TEST' }, feedback: { haptic: 'medium', sound: 'click' } }];
+  await setup(page, { interactions: rows });
+  await page.getByTestId('inspector-tab-events').click();
+  await expect(page.locator('.interaction-card')).toContainText('tap');
+  await expect(page.locator('.interaction-card')).toContainText('Event: K:TEST');
+  await expect(page.locator('.interaction-card')).toContainText('Feedback: medium haptic, sound: click');
+  await page.locator('.btn-del-inter').click();
+  await expect(page.locator('.modal-confirm-text')).toHaveText('Remove the "tap" → dispatchEvent interaction?');
+  await page.locator('[data-modal-cancel]').click();
+  expect(await interactions(page)).toEqual(rows);
+  await page.locator('.btn-del-inter').click();
+  await page.locator('[data-modal-submit]').click();
+  await expect(page.locator('.interaction-card')).toHaveCount(0);
+  expect(await interactions(page)).toEqual([]);
+});
+
+test('tier and component type filter triggers and actions; edit prefill belongs to saved type', async ({ page }) => {
+  await setup(page, { tier: 'build', type: 'core.stepper', interactions: [{ trigger: 'increment', action: { type: 'core.setLocalState', field: 'saved', value: 7 } }] });
+  await open(page, 0);
+  expect(await page.locator('#im-trigger option').evaluateAll((els) => els.map((el) => el.value))).toEqual(['tap', 'longpress', 'guardOpen', 'guardClose', 'increment', 'decrement']);
+  expect(await page.locator('#im-action-type option').evaluateAll((els) => els.map((el) => [el.value, el.textContent]))).toEqual([
+    ['core.dispatchEvent', 'Send a Value to the Simulator'], ['core.setLocalState', 'Set a Value'],
+    ['core.swapLocalState', 'Swap Two Values'], ['core.toggleLocalState', 'Toggle On / Off'],
+    ['core.openWidgetPopover', 'Open a Popup'],
+  ]);
+  await expect(page.locator('#im-field')).toHaveValue('saved');
+  await action(page, 'core.toggleLocalState');
+  await expect(page.locator('#im-field')).toHaveValue('switchOn');
+  await page.locator('[data-modal-cancel]').click();
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; });
+  await open(page);
+  expect(await page.locator('#im-trigger option').evaluateAll((els) => els.map((el) => el.value))).toEqual(['tap', 'longpress', 'guardOpen', 'guardClose', 'increment', 'decrement', 'hold', 'doubleTap', 'release']);
+  expect(await page.locator('#im-action-type option').evaluateAll((els) => els.map((el) => el.value))).toEqual([
+    'core.dispatchEvent', 'core.setLocalState', 'core.swapLocalState', 'core.toggleLocalState',
+    'core.ackIndicator', 'core.openWidgetPopover', 'core.commitToHost', 'core.closePopover',
+  ]);
+  await page.locator('[data-modal-cancel]').click();
+  expect(await interactions(page)).toHaveLength(1);
+});
+
+test('action fields validate and coerce literal values, with state ref precedence', async ({ page }) => {
+  await setup(page);
+  const error = page.locator('[data-modal-error]');
+  const cases = [
+    ['core.dispatchEvent', '#im-event', 'Choose or type an event to dispatch.'],
+    ['core.toggleLocalState', '#im-field', 'State field name is required.'],
+    ['core.setLocalState', '#im-field', 'State field name is required.'],
+    ['core.swapLocalState', '#im-field1', 'Both fields are required.'],
+    ['core.openWidgetPopover', null, 'Save a popover widget first, then pick it here.'],
+    ['core.commitToHost', '#im-contextkey', 'Context key is required.'],
+  ];
+  for (const [type, field, message] of cases) {
+    await open(page);
+    await action(page, type);
+    if (field === '#im-event') await page.locator(field).selectOption('');
+    else if (field) await page.locator(field).fill('');
+    await page.locator('[data-modal-submit]').click();
+    await expect(error).toHaveText(message);
+    await page.locator('[data-modal-cancel]').click();
+  }
+  for (const [value, expected] of [['true', true], ['false', false], ['12.5', 12.5], ['hello', 'hello'], ['', '']]) {
+    await open(page);
+    await page.locator('#im-event').selectOption('__custom__');
+    await page.locator('#im-event-custom').fill('K:TEST');
+    await page.locator('#im-value').fill(value);
+    expect((await submit(page)).action).toEqual({ type: 'core.dispatchEvent', event: 'K:TEST', value: expected });
+  }
+  await open(page);
+  await page.locator('#im-event').selectOption('__custom__');
+  await page.locator('#im-event-custom').fill('K:TEST');
+  await page.locator('#im-value').fill('33');
+  await page.locator('#im-fromstateref').fill('presets[0].freq');
+  expect((await submit(page)).action).toEqual({ type: 'core.dispatchEvent', event: 'K:TEST', fromStateRef: 'presets[0].freq' });
+  await open(page);
+  await action(page, 'core.setLocalState');
+  await page.locator('#im-fromstateref').fill('preset.value');
+  expect((await submit(page)).action).toEqual({ type: 'core.setLocalState', field: 'activeMode', fromStateRef: 'preset.value' });
+});
+
+test('each remaining action stores its own payload and omits empty feedback', async ({ page }) => {
+  await setup(page);
+  await open(page);
+  await action(page, 'core.toggleLocalState');
+  expect((await submit(page)).action).toEqual({ type: 'core.toggleLocalState', field: 'switchOn' });
+  await open(page);
+  await action(page, 'core.swapLocalState');
+  expect((await submit(page)).action).toEqual({ type: 'core.swapLocalState', fields: ['actFreq', 'stbyFreq'] });
+  await open(page);
+  await action(page, 'core.commitToHost');
+  await page.locator('#im-commit-field').fill('scratch');
+  expect((await submit(page)).action).toEqual({ type: 'core.commitToHost', contextKey: 'currentLabel', field: 'scratch' });
+  await open(page);
+  await action(page, 'core.ackIndicator');
+  expect((await submit(page)).action).toEqual({ type: 'core.ackIndicator' });
+  await open(page);
+  await action(page, 'core.ackIndicator');
+  await page.locator('#im-event').selectOption('__custom__');
+  await page.locator('#im-event-custom').fill('K:ACK');
+  expect((await submit(page)).action).toEqual({ type: 'core.ackIndicator', event: 'K:ACK' });
+  await open(page);
+  await action(page, 'core.closePopover');
+  expect(await submit(page)).toEqual({ trigger: 'tap', action: { type: 'core.closePopover' } });
+});
+
+test('popover context rows retain writable applyOn and omit it for read-only rows', async ({ page }) => {
+  await setup(page);
+  await page.evaluate(() => {
+    localStorage.setItem('fdws_saved_widgets', JSON.stringify([{ id: 'pin-popover', kind: 'popover', meta: { name: 'Pin Popover' } }]));
+  });
+  await open(page);
+  await action(page, 'core.openWidgetPopover');
+  await page.locator('#im-context-add').click();
+  await page.locator('.ctx-key').fill('readOnly');
+  await page.locator('.ctx-key').dispatchEvent('change');
+  await page.locator('.ctx-stateref').fill('source.value');
+  await page.locator('.ctx-stateref').dispatchEvent('change');
+  await expect(page.locator('.ctx-applyon')).toBeHidden();
+  await page.locator('#im-context-add').click();
+  await page.locator('.ctx-key').last().fill('editable');
+  await page.locator('.ctx-key').last().dispatchEvent('change');
+  await page.locator('.ctx-stateref').last().fill('scratch');
+  await page.locator('.ctx-stateref').last().dispatchEvent('change');
+  await page.locator('.ctx-writable').last().check();
+  await page.locator('.ctx-applyon').last().selectOption('immediate');
+  expect((await submit(page)).action).toEqual({ type: 'core.openWidgetPopover', popoverWidgetId: 'pin-popover', context: {
+    readOnly: { value: { stateRef: 'source.value' }, writable: false },
+    editable: { value: { stateRef: 'scratch' }, writable: true, applyOn: 'immediate' },
+  } });
+  await open(page, 0);
+  await expect(page.locator('.ctx-key')).toHaveCount(2);
+  await page.locator('.ctx-remove').first().click();
+  await expect(page.locator('.ctx-key')).toHaveCount(1);
+  await page.locator('[data-modal-cancel]').click();
+  expect((await interactions(page))[0].action.context.readOnly).toBeDefined();
+});
+
+test('condition editing is deferred, unchecked condition and cancel leave state untouched', async ({ page }) => {
+  await setup(page);
+  await open(page);
+  await page.locator('#im-condition-on').check();
+  await page.locator('#imcond-add-condition').last().click();
+  expect(await interactions(page)).toEqual([]);
+  await page.locator('#im-condition-on').uncheck();
+  await page.locator('[data-modal-cancel]').click();
+  expect(await interactions(page)).toEqual([]);
+  await open(page);
+  await page.locator('#im-condition-on').check();
+  await page.locator('#imcond-add-condition').last().click();
+  await page.locator('#im-condition-on').uncheck();
+  await page.locator('#im-event').selectOption('__custom__');
+  await page.locator('#im-event-custom').fill('K:TEST');
+  expect(await submit(page)).toEqual({ trigger: 'tap', action: { type: 'core.dispatchEvent', event: 'K:TEST', value: 1 } });
+});
+
+test('own value commits state var and interaction in one labelled undo step for add and edit', async ({ page }) => {
+  await setup(page, { binding: { readSimVar: 'A:TEST VALUE', writeEvent: 'K:TEST' } });
+  for (const [index, label] of [[null, 'Add Interaction'], [0, 'Edit Interaction']]) {
+    await page.evaluate(() => { window.__studioApp.state.undoStack = []; });
+    const before = await page.evaluate(() => window.__studioApp.state.widgetDef.state.length);
+    await open(page, index);
+    await page.locator('#im-condition-on').check();
+    await page.locator('#imcond-add-condition').last().click();
+    await page.locator('.imcond-state').last().selectOption('__own_value__');
+    expect(await page.evaluate(() => window.__studioApp.state.widgetDef.state.length)).toBe(before);
+    await submit(page);
+    expect(await page.evaluate(() => window.__studioApp.state.undoStack.map((entry) => entry.label))).toEqual([label]);
+    expect(await page.evaluate(() => window.__studioApp.state.widgetDef.state.length)).toBe(index === null ? before + 1 : before);
+    expect((await interactions(page))[0].condition).toBeDefined();
+  }
+});
