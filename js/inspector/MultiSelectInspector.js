@@ -174,7 +174,7 @@ export function renderMultiSelectInspector(host) {
         <button type="button" class="mode-toggle-btn ${activeTab === 'normal' ? 'active' : ''}" id="ms-styletab-normal" style="flex:0 1 auto;">Normal</button>
         <button type="button" class="mode-toggle-btn ${activeTab === 'state' ? 'active' : ''}" id="ms-styletab-state" data-testid="style-state-tab-${availability.stateTabName}" style="flex:0 1 auto;">${availability.stateTabLabel || 'State'}</button>
       </div>
-      ${activeTab === 'state' ? `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style while ${comps.length > 1 ? 'these components are' : 'this component is'} ${(availability.stateTabLabel || 'State').toLowerCase()} — applied identically to all ${comps.length} selected. Fields with an accent left border are overridden for this state.</div>` : ''}
+      ${activeTab === 'state' ? `<div class="prop-hint-block" style="font-size:11px;opacity:0.7;margin-bottom:8px;">Overrides merged over the base style while ${comps.length > 1 ? 'these components are' : 'this component is'} ${(availability.stateTabLabel || 'in this state').toLowerCase()} — applied identically to all ${comps.length} selected. Fields with an accent left border are overridden for this state.</div>` : ''}
       ` : ''}
 
       <div id="ms-appearance-fields"></div>
