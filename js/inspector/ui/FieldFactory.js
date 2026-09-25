@@ -6,7 +6,7 @@
  * color pairs keep closure-local deduplication state and reuse the existing color-picker popover.
  * The host methods used are step and field lookup, label/id formatting, value resolution, showWhen
  * evaluation, field/control delegates, and commitField; state reads use host.state.widgetDef.state/assets.
- * StudioInspector remains the owner of component state and DOM replacement during render. DOM,
+ * StudioState owns component data and history; StudioInspector owns DOM replacement during render. DOM,
  * collaborator and commit-callback errors propagate through their existing call or event path.
  */
 

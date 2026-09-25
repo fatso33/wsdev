@@ -62,4 +62,12 @@ describe('StudioInspector facade surface', () => {
       .filter((name) => name !== 'constructor' && proto[name].constructor.name === 'AsyncFunction');
     expect(asyncNames.sort()).toEqual(ASYNC_METHODS);
   });
+
+  it('keeps delegate defaults and value-returning field lookup on the public prototype', () => {
+    const proto = inspectorModule.StudioInspector.prototype;
+    expect(proto.buildInspectorTabShell.length).toBe(0);
+    expect(proto.openAddInteractionModal.length).toBe(1);
+    expect(proto.openConnectDialog.length).toBe(3);
+    expect(proto.getFieldValue.call({}, { props: { label: 'Pinned' } }, 'props.label')).toBe('Pinned');
+  });
 });

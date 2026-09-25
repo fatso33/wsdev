@@ -1,7 +1,8 @@
 /**
- * StudioInspector.js
- * Right Sidebar Property Inspector for Flight Deck Widget Studio
- * Organized into intuitive, structured accordion property groups adhering strictly to FDWS v1.4
+ * @module StudioInspector
+ * Right sidebar Property Inspector facade. It owns the live host, state subscription,
+ * render branches and focus restoration; named inspector modules own the sections,
+ * controls and edit paths reached through its stable methods.
  */
 
 import { computeScrollAnchorDelta } from './InspectorLogic.js';
@@ -25,10 +26,8 @@ export class StudioInspector {
   constructor(container, state, simBridge) {
     this.container = container;
     this.state = state;
-    // 0.3-B: live paste-and-test probes + Deck Event unit resolution
-    // through StudioApp.js's PC Bridge connection. Optional — every call
-    // site below checks it's present and connected before using it, so the
-    // inspector still renders fully offline (just without the live-test row).
+    // The Bridge is optional; connected checks in the binding UI preserve
+    // offline rendering while gating live probes and Deck Event resolution.
     this.simBridge = simBridge || null;
 
     // Every prop edit (even a single keystroke's "change" event, or a color
@@ -45,38 +44,25 @@ export class StudioInspector {
     // way expandedGroups does, for the same reason.
     this._bindingAdvancedOpen = false;
 
-    // Widget Studio 2.0, Phase 1 (binary) -> Part 2 (three tiers). Persisted
-    // per-browser (not per-widget, not synced to the widget def) — a user's
-    // own experience-level preference, not something that should change when
-    // they open a different widget or hand a file to someone else. Fields
-    // tagged data-tier="advanced"/"build" in the panels below are hidden per
-    // tier via the existing .hidden utility class, toggled after each render
-    // rather than baked into the HTML strings, so the same markup serves all
-    // three tiers (applyUiMode()).
-    //
-    // Migration (proposal §2.2): the old binary's only ever-written values
-    // were 'simple'/'advanced' — those map onto the new tiers one-for-one
-    // (advanced -> full, simple -> build) rather than collapsing into Guided,
-    // so an existing user's screen doesn't get MORE sparse than what they were
-    // already used to. A genuinely first-run browser (no saved value at all)
-    // defaults to the new, more guided tier — that's the actual point of
-    // adding it.
+    // The tier is a browser preference, not widget data. Apply its visibility
+    // after each render so one markup tree serves all tiers. Legacy binary
+    // preferences map to equivalent access levels; a new browser starts Guided.
     const savedTier = localStorage.getItem('fdws_studio_uiMode');
     this.uiTier = savedTier === 'advanced' ? 'full'
       : savedTier === 'simple' ? 'build'
       : (savedTier === 'guided' || savedTier === 'build' || savedTier === 'full') ? savedTier
       : 'guided';
-    // Part 2: per-accordion-section "show hidden fields anyway, without
+    // Per-accordion-section "show hidden fields anyway, without
     // leaving the tier" override — see buildAccordionGroup()'s "N more"
     // affordance. Keyed by group title, same persists-across-renders pattern
     // as expandedGroups/knownGroupTitles above.
     this.tierOverrideGroups = new Set();
-    // G10 (Wave 2): per-section "View JSON" open/closed state, Full tier only
+    // Per-section "View JSON" open/closed state, Full tier only
     // — see applySectionJsonViews(). Keyed by group title, same
     // persists-across-renders pattern as expandedGroups/tierOverrideGroups.
     this.jsonViewOpenTitles = new Set();
 
-    // t01: Inspector tab shell — outer tab (General/Style/Data/Events)
+    // The outer tab (General/Style/Data/Events)
     // persists across widget selection.
     this.activeInspectorTab = 'general';
 
@@ -96,17 +82,9 @@ export class StudioInspector {
   }
 
   /**
-   * Wave 0b (V6): renderInner() unconditionally does `innerHTML = ''` and
-   * rebuilds — every prop edit, including every 'input' frame while dragging
-   * a color swatch, destroys and recreates the whole panel. expandedGroups
-   * (a class-instance Set, not DOM state) already survives that; the actual
-   * focused element does not — document.activeElement drops to <body> mid-
-   * edit. This wrapper captures which element (by id) had focus and its text
-   * selection range before the rebuild, then restores both after, so typing
-   * or dragging is never interrupted. Deliberately NOT a rewrite of the
-   * render architecture itself (no debounce/patch-in-place infra exists
-   * anywhere in this codebase to build on — see Wave 0b plan) — this fixes
-   * the actual user-visible symptom at a fraction of that risk.
+   * Preserves focus, text selection and the focused element's scroll position
+   * while renderInner() replaces the panel DOM on every edit. The class sets
+   * retain accordion choices; DOM focus needs explicit restoration.
    */
   render() {
     const active = this.container.contains(document.activeElement) ? document.activeElement : null;
@@ -115,7 +93,7 @@ export class StudioInspector {
       ? [active.selectionStart, active.selectionEnd]
       : null;
 
-    // Ticket 14: anchor the focused element's on-screen position relative to
+    // Anchor the focused element's on-screen position relative to
     // its scrollable `.inspector-panel` before the wipe, mirroring the focus
     // preservation just below — restoring a raw scrollTop instead would break
     // the moment the rebuild changes content height above the focused element
@@ -160,17 +138,14 @@ export class StudioInspector {
 
   renderInner() {
     this.container.innerHTML = '';
-    // G10: reset each render — every buildAccordionGroup() call below repopulates
+    // Reset each render — every buildAccordionGroup() call below repopulates
     // it fresh, so a section removed between renders (e.g. deselecting a component)
     // can't leave a stale entry behind.
     this._sectionJsonData = {};
     this.container.appendChild(this.buildModeToggle());
 
-    // Widget Studio 2.0, Phase 3: a 2+ multi-selection gets its own bulk-edit
-    // view instead of falling through to the single "primary" component's
-    // full panel — previously selecting several components silently showed
-    // just the last-touched one's properties with no indication anything
-    // else was even selected.
+    // A multi-selection uses its bulk-edit view instead of a single
+    // component's panel, so edits apply to the complete selection.
     if (this.state.multiSelectedIds.size > 1) {
       this.renderMultiSelectInspector();
       this.applyUiMode();
@@ -310,13 +285,6 @@ export class StudioInspector {
     return renderVisibilityAndGuard(this, comp, def, body);
   }
 
-  // Wave 2 Part B2: the old row-list editor for style.rules (with its own
-  // compact typography.color/border.color/background controls + per-row
-  // JSON fallback) is DELETED — superseded by rule chips in the Appearance
-  // panel's target strip (main IIFE in renderComponentInspector()), which
-  // render every rule's style through the same generic field engine
-  // Normal/State already use. See renderAppearanceSection()'s doc comment.
-
   renderConditionListEditor(comp, def, expr, idPrefix, onCommit, options = {}) {
     return renderConditionListEditor(this, comp, def, expr, idPrefix, onCommit, options);
   }
@@ -389,7 +357,7 @@ export class StudioInspector {
   }
 
   /**
-   * Wave 4, §10.4: renders a small "Unrecognised properties" block for
+   * Renders a small "Unrecognised properties" block for
    * entries found by StudioValidator's findUnrecognisedComponentPaths()/
    * findUnrecognisedDefPaths() — JSON keys this build's registry doesn't
    * declare, so they'd otherwise be invisible even though they already

@@ -1,7 +1,7 @@
 /**
  * @module ConditionsSection
- * Builds visibility and guard controls. StudioInspector owns live state and
- * rendering; StudioModal owns modal cleanup. Editor listeners live only with
+ * Builds visibility and guard controls. StudioState owns widget data and history;
+ * StudioInspector owns rendering; StudioModal owns modal cleanup. Editor listeners live only with
  * their mount DOM, and deferred callers choose when to persist expressions.
  */
 import { openModal } from '../../StudioModal.js';

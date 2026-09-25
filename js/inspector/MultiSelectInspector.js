@@ -2,7 +2,8 @@
  * @module MultiSelectInspector
  *
  * Renders and supports multi-selection in the Inspector. The live
- * `StudioInspector` host remains the sole owner of state: rendering reads
+ * `StudioInspector` host owns transient Inspector view state, while StudioState
+ * owns selection, component data and history. Rendering reads
  * `host.state.multiSelectedIds`, calls `host.state.getComponent`, reads
  * `host.state.copiedStyle`, `copiedStateKey`, `copiedRuleScoped`,
  * `previewTheme` and `widgetDef.assets`. Render coordination stores the

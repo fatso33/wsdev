@@ -1,8 +1,8 @@
 /**
  * @module InteractionsSection
  * Renders component interaction cards and edits their trigger, action, optional
- * feedback and condition. StudioInspector owns uiTier, widget state, history and
- * rendering. This module reads saved popovers, assets and component bindings;
+ * feedback and condition. StudioInspector owns uiTier and rendering; StudioState
+ * owns widget data and history. This module reads saved popovers, assets and component bindings;
  * it calls the host's condition editor, history/syncFrom helpers and state update.
  * StudioModal owns modal removal and keydown cleanup. Card and modal listeners
  * live with their DOM. Draft rows, conditions and own-value bindings live only

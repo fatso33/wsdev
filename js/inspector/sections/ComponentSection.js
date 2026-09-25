@@ -1,8 +1,8 @@
 /**
  * @module ComponentSection
  * Renders the selected component's header, layout, tab sections, type-specific props and
- * unrecognised fields. The live StudioInspector owns selection, tier, target state and rendering;
- * StudioState owns component writes and history. This module keeps only listeners on the
+ * unrecognised fields. StudioState owns selection, component writes and history; the live
+ * StudioInspector owns tier, style-target state and rendering. This module keeps only listeners on the
  * current DOM mount, discarded by the next host render. It creates no persistent resource.
  */
 import { StudioValidator, findUnrecognisedComponentPaths } from '../../StudioValidator.js';

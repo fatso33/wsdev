@@ -6,13 +6,13 @@
  *
  * WHY THIS FILE EXISTS: every prior "Studio doesn't expose X" bug (see
  * docs/CHANGELOG.md and this repo's own audit history) had the same root cause —
- * StudioInspector.js hand-lists fields in its render functions, TRIGGERS/VALUE_FORMATS
+ * Widget Studio's inspector sections hand-list fields in their render functions, TRIGGERS/VALUE_FORMATS
  * were separate hardcoded arrays, and nothing checked either against what the runtime
  * (CompositeWidget.js / shared/widgets/components/*.js) actually reads. Four separate
  * instances of this were found and fixed by hand in one audit session (interaction
  * types, value formats, custom bindings, triggers) before this registry existed.
  *
- * From Widget Studio 2.0 Phase 1 onward, StudioInspector.js renders its panels BY
+ * Widget Studio's inspector/sections and FieldGroups.js render panels BY
  * WALKING THIS REGISTRY instead of hand-coding each field — so adding a field here is
  * the only step required to make it authorable, and scripts/check-registry-drift.mjs
  * can catch a field the registry forgot by diffing FIELDS' `path`s against a grep of
@@ -45,7 +45,7 @@ export const FDWS_VERSIONS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Interaction triggers — replaces StudioInspector.js's hardcoded TRIGGERS array.
+// Interaction triggers — consumed by InteractionsSection.js's trigger picker.
 // `fires` documents which component types/mechanism actually dispatch it, since
 // this exact gap (a real trigger missing from the dropdown) is how 'change'/
 // 'focus'/'blur' were found missing, and 'hold'/'doubleTap'/'release' were found
@@ -57,7 +57,7 @@ export const FDWS_VERSIONS = [
 // a rocker's zone press, a rotary's drag, a slider's detent, a selector/pad's
 // position change, a list row tap and a pad's pan/zoom were all unauthorable
 // in Studio despite firing correctly today. `componentTypes` (new) is what
-// scripts/check-registry-drift.mjs and StudioInspector.js's Trigger dropdown
+// scripts/check-registry-drift.mjs and InteractionsSection.js's Trigger dropdown
 // both key off — '*' means every component type (BaseComponent-level), a
 // specific list means only those types actually dispatch it.
 // ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ export const TRIGGERS = [
 
 // ---------------------------------------------------------------------------
 // Interaction actions — replaces the Add Interaction modal's hand-coded
-// dropdown + per-action field list in StudioInspector.js. `params` drives that
+// dropdown + per-action field list in InteractionsSection.js. `params` drives that
 // modal's form generation directly; `path` (the shared InteractionDispatcher.js
 // switch case it maps to) is what scripts/check-registry-drift.mjs cross-checks.
 // ---------------------------------------------------------------------------
@@ -296,7 +296,7 @@ export const COMMON_FIELDS = [
 
   // --- Theme Override (style.themeOverride.*) — FDWS v1.18. Only meaningful
   // when the widget's own themeMode is "manual" (see the widget-level Theme
-  // group, hand-coded in StudioInspector.js like meta/layout/revision already
+  // group, hand-coded in WidgetSection.js like meta/layout/revision already
   // are — not registry-driven, same as those). Holds this component's literal
   // authored values for whichever theme ISN'T the widget's baseTheme; unset
   // fields keep auto-deriving from style.* even in manual mode.
@@ -325,11 +325,9 @@ export const COMMON_FIELDS = [
   // --- Per-state style overrides ---
   // FDWS v1.25: this field itself (and the runtime that reads it) predates
   // v1.25 -- core.button's toggle variant and core.indicator's severity
-  // states already used it. What's new is Studio UI: StudioInspector.js's
-  // component Appearance section now renders a live editor for whichever
-  // state name applies to the selected component type (see
-  // STATE_STYLE_CONFIG there), so control:'stateStyleEditor' finally has a
-  // real implementation instead of being declared-but-unrendered.
+  // states already used it. AppearanceSection.js renders the live editor for
+  // the state name selected by resolveStateStyleConfig. The generic field
+  // engine defers this bespoke control to that section.
   { path: 'style.states', control: 'stateStyleEditor', tier: 'advanced', group: 'Layout', fdwsMin: '1.25', default: undefined, tooltip: 'Style overrides applied when this component enters a named state (e.g. "pressed", "active", "editState", "dragging") — merged over the base typography/border/background above, not a replacement for them. Which state name applies depends on component type; see the "State Style" section in Appearance for this component.' },
 
   // --- Visibility ---
@@ -439,7 +437,7 @@ export const TYPE_FIELDS = {
     // when props.format === 'ODOMETER', bypassing ValueFormatter entirely (a
     // digit-drum readout isn't a formatted string, it's a set of DOM elements).
     // Wave 1 gap-closing pass (2026-09-04): added showWhen to both fields below,
-    // matching the hand-coded panel's own conditionals (StudioInspector.js:2647-2649)
+    // matching FieldGroups.js's format-dependent showWhen gating
     // — without it, a registry-driven render would show both for every format.
     { path: 'props.odometerDigits', control: 'number', tier: 'simple', group: 'Content', fdwsMin: '1.20', default: 5, tooltip: 'How many whole-number drum positions to show (e.g. 5 for an altimeter up to 99,999). Only used when Value Format is ODOMETER. Default 5.', showWhen: { path: 'props.format', equals: 'ODOMETER' } },
     // Found during live verification of this pass: default was `undefined`, but
@@ -741,7 +739,7 @@ export const TYPE_FIELDS = {
     { path: 'props.itemsBinding.stateVar', control: 'stateVarPicker', tier: 'simple', guided: true, group: 'Content', default: undefined, tooltip: 'Array-typed state variable this list renders one row per item from.' },
     // Step 3 Part A: control changed from 'text' to 'bespoke' — this field needs
     // JSON.parse + validation (updateCompJsonProp) the generic text control doesn't
-    // have, so it stays intentionally hand-rendered (see StudioInspector.js's
+    // have, so it stays intentionally hand-rendered (see ComponentSection.js's
     // core.list case). 'bespoke' is a distinct marker from control:null ("deprecated/
     // hidden") — this field is neither; it's a real, working field with UI on purpose.
     { path: 'props.itemTemplate', control: 'bespoke', tier: 'advanced', group: 'Content', default: undefined, tooltip: 'Template describing how each row is rendered from its item object.' },
@@ -837,7 +835,7 @@ export function getAllFieldPaths() {
 // shared/widgets/components/BaseComponent.js's applyStyles()/
 // applyOptionalStateStyle(), and each component's own render() for where
 // setState()/applyOptionalStateStyle() gets called). Both
-// widget-studio/js/StudioInspector.js (which state-style editor section to
+// widget-studio/js/inspector/sections/AppearanceSection.js (which state-style editor section to
 // show) and StudioValidator.js (flagging an authored style.states entry that
 // component type never reads) import this instead of each keeping their own
 // copy — the same "two files, easy to forget" drift this registry exists to

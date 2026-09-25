@@ -860,3 +860,78 @@ test('every render runs the post-render passes in the same order on all three br
   expect(await sequence([idA])).toEqual(['renderInner', 'buildModeToggle', 'renderComponentInspector', ...passes]);
   expect(await sequence([idA, idB])).toEqual(['renderInner', 'buildModeToggle', 'renderMultiSelectInspector', ...passes]);
 });
+
+test('facade keeps one undo chain across widget, binding, rule and multi-select sections', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('fdws_studio_uiMode', 'full'));
+  await openStudio(page);
+  await page.evaluate(() => {
+    const state = window.__studioApp.state;
+    state.setWidgetDef({ fdws: '1.27', meta: { name: 'Before' }, components: [] }, false);
+    state.undoStack = [];
+    const field = document.querySelector('#w-meta-name');
+    field.value = 'Integrated Inspector';
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.locator('.inspector-group-header').filter({ hasText: 'GRID & DIMENSIONS' }).click();
+  await seedComponents(page, [
+    { id: 'trace-a', type: 'core.button', props: { label: 'A' }, style: {} },
+    { id: 'trace-b', type: 'core.button', props: { label: 'B' }, style: {} },
+  ]);
+  await selectComponents(page, ['trace-a']);
+  await page.getByTestId('inspector-tab-data').click();
+  await page.evaluate(() => document.querySelector('#c-bind-write-connect').click());
+  await page.locator('#cn-tab-raw').click();
+  await page.locator('#cn-raw-input').fill('H:TRACE_EVENT');
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__studioApp.state.getComponent('trace-a').binding?.writeEvent))
+    .toBe('H:TRACE_EVENT');
+  expect(await page.evaluate(() => window.__studioApp.state.getComponent('trace-a').interactions))
+    .toEqual([{ trigger: 'tap', action: { type: 'core.dispatchEvent' } }]);
+
+  await page.getByTestId('inspector-tab-style').click();
+  await page.evaluate(() => document.querySelector('#c-styletab-addrule').click());
+  await expect.poll(() => page.evaluate(() => window.__studioApp.state.getComponent('trace-a').style.rules.length)).toBe(1);
+  await selectComponents(page, ['trace-a', 'trace-b']);
+  await page.locator('.style-preset-swatch').first().click();
+  const beforeUndo = await page.evaluate(() => {
+    const { inspector, state } = window.__studioApp;
+    return {
+      name: state.widgetDef.meta.name,
+      ids: state.widgetDef.components.map((comp) => comp.id),
+      write: state.getComponent('trace-a').binding.writeEvent,
+      ruleCount: state.getComponent('trace-a').style.rules.length,
+      styleA: state.getComponent('trace-a').style,
+      styleB: state.getComponent('trace-b').style,
+      tab: inspector.activeInspectorTab,
+      tier: inspector.uiTier,
+      expanded: [...inspector.expandedGroups],
+      history: state.undoStack.length,
+    };
+  });
+  expect(beforeUndo).toMatchObject({
+    name: 'Integrated Inspector', ids: ['trace-a', 'trace-b'], write: 'H:TRACE_EVENT',
+    ruleCount: 1, tab: 'style', tier: 'full', history: 6,
+  });
+  expect(beforeUndo.expanded).toContain('GRID & DIMENSIONS');
+  expect(beforeUndo.styleA.typography).toEqual(beforeUndo.styleB.typography);
+  expect(beforeUndo.styleA.border).toEqual(beforeUndo.styleB.border);
+  await selectComponents(page, ['trace-a']);
+  expect(await page.evaluate(() => ({
+    tab: window.__studioApp.inspector.activeInspectorTab,
+    tier: window.__studioApp.inspector.uiTier,
+    expanded: [...window.__studioApp.inspector.expandedGroups],
+  }))).toEqual({ tab: beforeUndo.tab, tier: beforeUndo.tier, expanded: beforeUndo.expanded });
+
+  const undo = () => page.evaluate(() => window.__studioApp.state.undo());
+  await undo();
+  expect(await page.evaluate(() => window.__studioApp.state.getComponent('trace-a').style.rules)).toHaveLength(1);
+  await undo();
+  expect(await page.evaluate(() => window.__studioApp.state.getComponent('trace-a').style.rules)).toBeUndefined();
+  await undo();
+  expect(await page.evaluate(() => window.__studioApp.state.getComponent('trace-a').binding?.writeEvent)).toBeUndefined();
+  await undo();
+  await undo();
+  expect(await page.evaluate(() => window.__studioApp.state.widgetDef.components)).toHaveLength(0);
+  await undo();
+  expect(await page.evaluate(() => window.__studioApp.state.widgetDef.meta.name)).not.toBe('Integrated Inspector');
+});
