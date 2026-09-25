@@ -654,7 +654,7 @@ export class StudioInspector {
         this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.label'].filter((f) => f.path !== CONTENT_FIELD_BY_TYPE['core.label']));
         const notice = document.createElement('div');
         notice.className = 'empty-tree-notice';
-        notice.textContent = 'Alignment moved to the "VISUAL STYLING & TYPOGRAPHY" panel below (FDWS v1.8) — now shared by every component type instead of being label-only.';
+        notice.textContent = "Alignment is set in the Style tab's Appearance section, shared by every component type.";
         body.appendChild(notice);
         break;
       }
@@ -886,7 +886,7 @@ export class StudioInspector {
         this.renderRegistryFields(comp, fieldMount, REGISTRY_TYPE_FIELDS['core.divider']);
         const notice = document.createElement('div');
         notice.className = 'empty-tree-notice';
-        notice.textContent = 'Thickness, color, and dash style are set on the "VISUAL STYLING & TYPOGRAPHY" panel\'s Border section below — this line reuses those same fields.';
+        notice.textContent = "Thickness, color and dash style are set in the Style tab's Appearance section, under Border. This line reuses those fields.";
         body.appendChild(notice);
         break;
       }
