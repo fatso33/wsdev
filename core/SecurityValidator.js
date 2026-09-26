@@ -291,7 +291,7 @@ export class SecurityValidator {
   }
 
   /**
-   * Flight Deck Widget Standard (FDWS, current version v1.8) Package & Definition
+   * Flight Deck Widget Standard (FDWS) Package & Definition
    * Validator (§11). Structural/security gate only — this is the check every
    * import path in every app runs before a definition is allowed in at all, so it
    * must accept every FDWS version any app in the suite actually supports, kept
