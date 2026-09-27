@@ -579,7 +579,7 @@ test('sweep A1: typography, border and background colors, gradient and image pos
   await expect(page.locator('#c-bg-color')).toHaveValue(P);
   await expect(page.locator('#c-bg-gradient')).toHaveValue(P);
   await expect(page.locator('#c-bg-image-position')).toHaveValue(P);
-  expect(await optionsOf(page, '#c-bg-image-asset')).toContainEqual([P, `${P} (${P})`]);
+  expect(await optionsOf(page, '#c-bg-image-asset')).toEqual([['', '— none —'], [P, `${P} (${P})`]]);
 
   expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
   expect(renderErrors).toEqual([]);

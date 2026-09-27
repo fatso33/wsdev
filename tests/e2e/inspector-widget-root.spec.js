@@ -287,16 +287,16 @@ async function openWidgetRootCase(page, seedArg, seedFn) {
   return renderErrors;
 }
 
-const W1_NUMBER_SELECTORS = ['#w-revision', '#w-grid-cols', '#w-grid-rows', '#w-def-w', '#w-def-h', '#w-min-w', '#w-min-h', '#w-max-w', '#w-max-h'];
+const W1_NUMBER_SELECTORS = ['#w-revision', '#w-grid-cols', '#w-grid-rows', '#w-def-w', '#w-def-h', '#w-min-w', '#w-min-h', '#w-max-w', '#w-max-h', '#w-border-w', '#w-border-rad'];
 
 test('sweep W1: metadata, grid/layout numbers, canvas colors, Deck Events and capability tags render exactly with a solid background', async ({ page }) => {
   const def = {
-    fdws: '1.27',
+    fdws: P,
     id: P,
     revision: P,
     meta: { name: P, shortName: P, author: P, description: P, category: 'Avionics' },
     layout: { grid: { columns: P, rows: P }, defaultW: P, defaultH: P, minW: P, minH: P, maxW: P, maxH: P },
-    style: { border: { width: 1, color: P, radius: 10 }, background: { type: 'color', color: P } },
+    style: { border: { width: P, color: P, radius: P }, background: { type: 'color', color: P } },
     deckEvents: [
       { name: P, kind: 'read', label: P, category: P, suggest: { simvar: P, unit: P } },
       { name: P, kind: 'write', label: P, category: P, suggest: { event: P, valueFormat: P } },
@@ -320,6 +320,8 @@ test('sweep W1: metadata, grid/layout numbers, canvas colors, Deck Events and ca
   await expect(capabilityTags).toHaveCount(2);
   expect(await countInjectedInInspector(page)).toBe(0);
 
+  await expect(page.locator('.inspector-header .inspector-title')).toHaveText(P);
+  await expect(page.locator('.inspector-header .inspector-sub')).toHaveText(`${P} (FDWS v${P})`);
   await expect(page.locator('#w-meta-name')).toHaveValue(P);
   await expect(page.locator('#w-meta-short')).toHaveValue(P);
   await expect(page.locator('#w-author')).toHaveValue(P);
@@ -330,8 +332,12 @@ test('sweep W1: metadata, grid/layout numbers, canvas colors, Deck Events and ca
   for (const selector of W1_NUMBER_SELECTORS) {
     await expect(page.locator(selector), selector).toHaveAttribute('value', P);
   }
-  for (const row of await page.locator('.de-row').all()) {
-    await expect(row).toContainText(P);
+  const deckEventRows = page.locator('.de-row');
+  for (const [index, suggestion] of [[0, `→ ${P} / ${P}`], [1, `⇄ ${P} / ${P}`]]) {
+    const row = deckEventRows.nth(index);
+    await expect(row.locator('.de-row-head strong')).toHaveText(P);
+    await expect(row.locator('.de-row-sub').nth(0)).toHaveText(`${P} · ${P}`);
+    await expect(row.locator('.de-row-sub').nth(1)).toHaveText(suggestion);
   }
   for (const tag of await capabilityTags.all()) {
     await expect(tag).toHaveText(P);
@@ -386,9 +392,8 @@ test('journey: an imported widget with recovery-mode values renders literally th
     buffer: Buffer.from(JSON.stringify(journeyDef)),
   });
 
-  // The recovery modal renders the raw validation-error list unescaped, so it does contain
-  // #injected. That is expected and out of scope here — the journey's own injection checks
-  // run only after Import Anyway has closed this overlay and it has left the document.
+  // The recovery overlay lists validation errors, which can carry the payload, and is not part of
+  // the Inspector; the injection checks below run only after Import Anyway has closed it.
   await expect(page.locator('.studio-modal-box .modal-title')).toHaveText('Import Has Validation Errors');
   await page.locator('[data-modal-submit]').click();
   await expect(page.locator('.studio-modal-box')).toHaveCount(0);
@@ -402,6 +407,8 @@ test('journey: an imported widget with recovery-mode values renders literally th
   }
 
   await expect(page.locator('#c-bind-read-custom-input')).toHaveValue(P);
+  const stateOptions = await page.locator('#c-bind-state option').evaluateAll((options) => options.map((o) => [o.value, o.textContent]));
+  expect(stateOptions).toContainEqual([P, `${P} (string)`]);
   const assetOptionValues = await page.locator('#c-bg-image-asset option').evaluateAll((options) => options.map((o) => o.value));
   expect(assetOptionValues).toContain(P);
   await expect(page.locator('.interaction-card .inter-tag')).toHaveText(P);
