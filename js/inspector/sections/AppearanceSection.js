@@ -375,7 +375,7 @@ export function renderComponentAppearance(host, comp, def, body) {
     body.querySelector('#c-rule-move-down')?.addEventListener('click', () => moveRule(1));
 
     body.querySelector('#c-rule-remove')?.addEventListener('click', async () => {
-      const ok = await confirmModal(`Remove this rule (${summarizeCondition(activeRule.when)})?`, { title: 'Remove Rule', danger: true });
+      const ok = await confirmModal(`Remove this rule (${escapeHtmlAttr(summarizeCondition(activeRule.when))})?`, { title: 'Remove Rule', danger: true });
       if (!ok) return;
       const nextRules = rules.filter((_, i) => i !== activeRuleIndex);
       host._styleTabRuleIndex = null;
@@ -637,7 +637,7 @@ export function renderBaseThemeAwareAppearanceFields(host, comp, groupName, moun
           <label>Text Color</label>
           <div class="color-picker-wrap">
             <button type="button" class="color-swatch" id="c-typo-color-pick" data-color="${host.toHexColor(effTypoColor) || '#f8fafc'}" style="background:${host.toHexColor(effTypoColor) || '#f8fafc'}" aria-label="Pick color"></button>
-            <input type="text" id="c-typo-color" class="prop-input" value="${effTypoColor || '#f8fafc'}" />
+            <input type="text" id="c-typo-color" class="prop-input" value="${escapeHtmlAttr(effTypoColor || '#f8fafc')}" />
           </div>
         </div>
         <div class="prop-field" data-testid="style-field-typography.stroke.color">
@@ -680,7 +680,7 @@ export function renderBaseThemeAwareAppearanceFields(host, comp, groupName, moun
           <label>Border Color</label>
           <div class="color-picker-wrap">
             <button type="button" class="color-swatch" id="c-border-color-pick" data-color="${host.toHexColor(effBorderColor) || '#273344'}" style="background:${host.toHexColor(effBorderColor) || '#273344'}" aria-label="Pick color"></button>
-            <input type="text" id="c-border-color" class="prop-input" value="${effBorderColor || '#273344'}" />
+            <input type="text" id="c-border-color" class="prop-input" value="${escapeHtmlAttr(effBorderColor || '#273344')}" />
           </div>
         </div>
         <div class="prop-field" data-testid="style-field-border.glow.color">
@@ -724,19 +724,19 @@ export function renderBaseThemeAwareAppearanceFields(host, comp, groupName, moun
         <label>Background Color</label>
         <div class="color-picker-wrap">
           <button type="button" class="color-swatch" id="c-bg-color-pick" data-color="${host.toHexColor(effBg.color) || '#131b26'}" style="background:${host.toHexColor(effBg.color) || '#131b26'}" aria-label="Pick color"></button>
-          <input type="text" id="c-bg-color" class="prop-input" value="${effBg.color || '#131b26'}" />
+          <input type="text" id="c-bg-color" class="prop-input" value="${escapeHtmlAttr(effBg.color || '#131b26')}" />
         </div>
       </div>
       <div id="c-bg-gradient-field" class="prop-field" data-testid="style-field-background.gradient" style="${effBg.type === 'gradient' ? '' : 'display:none;'}">
         <label>CSS Gradient</label>
-        <input type="text" id="c-bg-gradient" class="prop-input" value="${effBg.gradient || ''}" placeholder="linear-gradient(180deg, #1a2332, #0b0f17)" />
+        <input type="text" id="c-bg-gradient" class="prop-input" value="${escapeHtmlAttr(effBg.gradient || '')}" placeholder="linear-gradient(180deg, #1a2332, #0b0f17)" />
       </div>
       <div id="c-bg-image-fields" style="${effBg.type === 'image' ? '' : 'display:none;'}">
         <div class="prop-field" data-testid="style-field-background.image.assetId">
           <label>Image <span class="prop-hint" title="FDWS v1.8 background.image, already fully supported at runtime. Add images on the Assets tab first. For a switch/control that looks different per position, use Conditional Formatting (below) to swap this per state instead of picking one fixed image here.">ⓘ</span></label>
           <select id="c-bg-image-asset" class="prop-select">
             <option value="">— none —</option>
-            ${assets.map((a) => `<option value="${a.id}" ${effBg.image?.assetId === a.id ? 'selected' : ''}>${a.id} (${a.mimeType})</option>`).join('')}
+            ${assets.map((a) => `<option value="${escapeHtmlAttr(a.id)}" ${effBg.image?.assetId === a.id ? 'selected' : ''}>${escapeHtmlAttr(a.id)} (${escapeHtmlAttr(a.mimeType)})</option>`).join('')}
           </select>
           ${assets.length === 0 ? '<div class="caps-empty">No assets uploaded yet — add one on the Assets tab.</div>' : ''}
         </div>
@@ -751,7 +751,7 @@ export function renderBaseThemeAwareAppearanceFields(host, comp, groupName, moun
           </div>
           <div class="prop-field" data-testid="style-field-background.image.position">
             <label>Position</label>
-            <input type="text" id="c-bg-image-position" class="prop-input" value="${effBg.image?.position || ''}" placeholder="center" />
+            <input type="text" id="c-bg-image-position" class="prop-input" value="${escapeHtmlAttr(effBg.image?.position || '')}" placeholder="center" />
           </div>
         </div>
       </div>

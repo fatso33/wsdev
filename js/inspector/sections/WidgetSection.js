@@ -43,10 +43,10 @@ export function renderWidgetInspector(host) {
   header.innerHTML = `
     <div class="inspector-title-row">
       <span class="inspector-badge">WIDGET</span>
-      <h3 class="inspector-title">${def.meta?.name || 'Untitled Widget'}</h3>
+      <h3 class="inspector-title">${escapeHtmlAttr(def.meta?.name || 'Untitled Widget')}</h3>
       ${host.uiTier === 'full' ? '<button type="button" class="bar-btn" id="btn-full-json">{ } Full JSON</button>' : ''}
     </div>
-    <div class="inspector-sub">${def.id || 'com.flightdeck.widget'} (FDWS v${def.fdws || '1.1'})</div>
+    <div class="inspector-sub">${escapeHtmlAttr(def.id || 'com.flightdeck.widget')} (FDWS v${escapeHtmlAttr(def.fdws || '1.1')})</div>
   `;
   host.container.appendChild(header);
   header.querySelector('#btn-full-json')?.addEventListener('click', () => host.openFullJsonPanel());
@@ -61,12 +61,12 @@ export function renderWidgetInspector(host) {
     body.innerHTML = `
       <div class="prop-field">
         <label>Display Name (Title)</label>
-        <input type="text" id="w-meta-name" class="prop-input" value="${def.meta?.name || ''}" placeholder="e.g. NAV 1 Radio" />
+        <input type="text" id="w-meta-name" class="prop-input" value="${escapeHtmlAttr(def.meta?.name || '')}" placeholder="e.g. NAV 1 Radio" />
       </div>
       <div class="prop-row-2" data-tier="build">
         <div class="prop-field">
           <label>Short Name</label>
-          <input type="text" id="w-meta-short" class="prop-input" value="${def.meta?.shortName || ''}" placeholder="NAV1" />
+          <input type="text" id="w-meta-short" class="prop-input" value="${escapeHtmlAttr(def.meta?.shortName || '')}" placeholder="NAV1" />
         </div>
         <div class="prop-field">
           <label>Category</label>
@@ -81,21 +81,21 @@ export function renderWidgetInspector(host) {
       </div>
       <div class="prop-field" data-tier="build">
         <label>Package ID (Reverse-DNS)</label>
-        <input type="text" id="w-id" class="prop-input" value="${def.id || ''}" placeholder="com.author.widgetname" />
+        <input type="text" id="w-id" class="prop-input" value="${escapeHtmlAttr(def.id || '')}" placeholder="com.author.widgetname" />
       </div>
       <div class="prop-row-2" data-tier="build">
         <div class="prop-field">
           <label>Revision</label>
-          <input type="number" id="w-revision" class="prop-input" value="${def.revision || 1}" min="1" />
+          <input type="number" id="w-revision" class="prop-input" value="${escapeHtmlAttr(def.revision || 1)}" min="1" />
         </div>
         <div class="prop-field">
           <label>Author</label>
-          <input type="text" id="w-author" class="prop-input" value="${def.meta?.author || ''}" placeholder="Author Name" />
+          <input type="text" id="w-author" class="prop-input" value="${escapeHtmlAttr(def.meta?.author || '')}" placeholder="Author Name" />
         </div>
       </div>
       <div class="prop-field" data-tier="build">
         <label>Description</label>
-        <textarea id="w-desc" class="prop-textarea" rows="2" placeholder="Brief widget description...">${def.meta?.description || ''}</textarea>
+        <textarea id="w-desc" class="prop-textarea" rows="2" placeholder="Brief widget description...">${escapeHtmlAttr(def.meta?.description || '')}</textarea>
       </div>
     `;
 
@@ -123,11 +123,11 @@ export function renderWidgetInspector(host) {
       <div class="prop-row-2" data-tier="build">
         <div class="prop-field">
           <label>Sub-Grid Columns</label>
-          <input type="number" id="w-grid-cols" class="prop-input" value="${grid.columns || 12}" min="2" max="64" />
+          <input type="number" id="w-grid-cols" class="prop-input" value="${escapeHtmlAttr(grid.columns || 12)}" min="2" max="64" />
         </div>
         <div class="prop-field">
           <label>Sub-Grid Rows</label>
-          <input type="number" id="w-grid-rows" class="prop-input" value="${grid.rows || 6}" min="2" max="64" />
+          <input type="number" id="w-grid-rows" class="prop-input" value="${escapeHtmlAttr(grid.rows || 6)}" min="2" max="64" />
         </div>
       </div>
 
@@ -135,26 +135,26 @@ export function renderWidgetInspector(host) {
       <div class="prop-row-2" data-tier="build">
         <div class="prop-field">
           <label>Default Width (W)</label>
-          <input type="number" id="w-def-w" class="prop-input" value="${layout.defaultW || 8}" min="1" max="44" />
+          <input type="number" id="w-def-w" class="prop-input" value="${escapeHtmlAttr(layout.defaultW || 8)}" min="1" max="44" />
         </div>
         <div class="prop-field">
           <label>Default Height (H)</label>
-          <input type="number" id="w-def-h" class="prop-input" value="${layout.defaultH || 4}" min="1" max="44" />
+          <input type="number" id="w-def-h" class="prop-input" value="${escapeHtmlAttr(layout.defaultH || 4)}" min="1" max="44" />
         </div>
       </div>
       <div class="prop-row-2" data-tier="advanced">
         <div class="prop-field">
           <label>Min Size (W × H)</label>
           <div style="display:flex;gap:4px;">
-            <input type="number" id="w-min-w" class="prop-input" value="${layout.minW || 4}" min="1" placeholder="Min W" />
-            <input type="number" id="w-min-h" class="prop-input" value="${layout.minH || 2}" min="1" placeholder="Min H" />
+            <input type="number" id="w-min-w" class="prop-input" value="${escapeHtmlAttr(layout.minW || 4)}" min="1" placeholder="Min W" />
+            <input type="number" id="w-min-h" class="prop-input" value="${escapeHtmlAttr(layout.minH || 2)}" min="1" placeholder="Min H" />
           </div>
         </div>
         <div class="prop-field">
           <label>Max Size (W × H)</label>
           <div style="display:flex;gap:4px;">
-            <input type="number" id="w-max-w" class="prop-input" value="${layout.maxW || 44}" min="1" placeholder="Max W" />
-            <input type="number" id="w-max-h" class="prop-input" value="${layout.maxH || 44}" min="1" placeholder="Max H" />
+            <input type="number" id="w-max-w" class="prop-input" value="${escapeHtmlAttr(layout.maxW || 44)}" min="1" placeholder="Max W" />
+            <input type="number" id="w-max-h" class="prop-input" value="${escapeHtmlAttr(layout.maxH || 44)}" min="1" placeholder="Max H" />
           </div>
         </div>
       </div>
@@ -202,18 +202,18 @@ export function renderWidgetInspector(host) {
       <div class="prop-row-2" data-tier="build">
         <div class="prop-field">
           <label>Border Width (px)</label>
-          <input type="number" id="w-border-w" class="prop-input" value="${border.width ?? 1}" min="0" max="10" ${themeEdit.isOverrideEdit ? 'disabled title="Structural — edit on the base theme."' : ''} />
+          <input type="number" id="w-border-w" class="prop-input" value="${escapeHtmlAttr(border.width ?? 1)}" min="0" max="10" ${themeEdit.isOverrideEdit ? 'disabled title="Structural — edit on the base theme."' : ''} />
         </div>
         <div class="prop-field">
           <label>Corner Radius (px)</label>
-          <input type="number" id="w-border-rad" class="prop-input" value="${border.radius ?? 10}" min="0" max="24" ${themeEdit.isOverrideEdit ? 'disabled title="Structural — edit on the base theme."' : ''} />
+          <input type="number" id="w-border-rad" class="prop-input" value="${escapeHtmlAttr(border.radius ?? 10)}" min="0" max="24" ${themeEdit.isOverrideEdit ? 'disabled title="Structural — edit on the base theme."' : ''} />
         </div>
       </div>
       <div class="prop-field" data-tier="build">
         <label>Border Color</label>
         <div class="color-picker-wrap">
           <button type="button" class="color-swatch" id="w-border-clr-pick" data-color="${host.toHexColor(effBorderColor) || '#1f2937'}" style="background:${host.toHexColor(effBorderColor) || '#1f2937'}" aria-label="Pick color"></button>
-          <input type="text" id="w-border-clr-txt" class="prop-input" value="${effBorderColor || '#1f2937'}" />
+          <input type="text" id="w-border-clr-txt" class="prop-input" value="${escapeHtmlAttr(effBorderColor || '#1f2937')}" />
         </div>
       </div>
 
@@ -230,10 +230,10 @@ export function renderWidgetInspector(host) {
         ${effBg.type === 'color' ? `
           <div class="color-picker-wrap">
             <button type="button" class="color-swatch" id="w-bg-val-pick" data-color="${host.toHexColor(effBg.color) || '#0b0f17'}" style="background:${host.toHexColor(effBg.color) || '#0b0f17'}" aria-label="Pick color"></button>
-            <input type="text" id="w-bg-val" class="prop-input" value="${effBg.color || '#0b0f17'}" />
+            <input type="text" id="w-bg-val" class="prop-input" value="${escapeHtmlAttr(effBg.color || '#0b0f17')}" />
           </div>
         ` : `
-          <input type="text" id="w-bg-val" class="prop-input" value="${effBg.gradient || effBg.image?.assetId || ''}" />
+          <input type="text" id="w-bg-val" class="prop-input" value="${escapeHtmlAttr(effBg.gradient || effBg.image?.assetId || '')}" />
         `}
       </div>
     `;
@@ -374,14 +374,14 @@ export function renderWidgetInspector(host) {
       row.innerHTML = `
         <div class="de-row-head">
           <span class="caps-tag ${isRead ? 'read' : 'write'}">${isRead ? 'READ' : 'WRITE'}</span>
-          <strong>${ev.name || '(unnamed)'}</strong>
+          <strong>${escapeHtmlAttr(ev.name || '(unnamed)')}</strong>
           <button type="button" class="btn-mini-close" data-de-del="${i}" title="Remove">✕</button>
         </div>
-        <div class="de-row-sub">${ev.label || ev.name || ''}${ev.category ? ` · ${ev.category}` : ''}</div>
+        <div class="de-row-sub">${escapeHtmlAttr(ev.label || ev.name || '')}${ev.category ? ` · ${escapeHtmlAttr(ev.category)}` : ''}</div>
         <div class="de-row-sub">${
           isRead
-            ? (ev.suggest?.simvar ? `→ ${ev.suggest.simvar}${ev.suggest.unit ? ` / ${ev.suggest.unit}` : ''}` : '→ no suggested binding')
-            : (ev.suggest?.event ? `⇄ ${ev.suggest.event}${ev.suggest.valueFormat ? ` / ${ev.suggest.valueFormat}` : ''}` : '⇄ no suggested binding')
+            ? (ev.suggest?.simvar ? `→ ${escapeHtmlAttr(ev.suggest.simvar)}${ev.suggest.unit ? ` / ${escapeHtmlAttr(ev.suggest.unit)}` : ''}` : '→ no suggested binding')
+            : (ev.suggest?.event ? `⇄ ${escapeHtmlAttr(ev.suggest.event)}${ev.suggest.valueFormat ? ` / ${escapeHtmlAttr(ev.suggest.valueFormat)}` : ''}` : '⇄ no suggested binding')
         }</div>
       `;
       list.appendChild(row);
@@ -478,12 +478,12 @@ export function renderWidgetInspector(host) {
       <div class="caps-summary-box">
         <div class="caps-sub-title">READ SIMVARS (${caps.readSimVars?.length || 0}):</div>
         <div class="caps-tags-list">
-          ${(caps.readSimVars || []).map((sv) => `<span class="caps-tag read">${sv}</span>`).join('') || '<span class="caps-empty">None</span>'}
+          ${(caps.readSimVars || []).map((sv) => `<span class="caps-tag read">${escapeHtmlAttr(sv)}</span>`).join('') || '<span class="caps-empty">None</span>'}
         </div>
 
         <div class="caps-sub-title" style="margin-top:10px;">WRITE EVENTS (${caps.writeEvents?.length || 0}):</div>
         <div class="caps-tags-list">
-          ${(caps.writeEvents || []).map((ev) => `<span class="caps-tag write">${ev}</span>`).join('') || '<span class="caps-empty">None</span>'}
+          ${(caps.writeEvents || []).map((ev) => `<span class="caps-tag write">${escapeHtmlAttr(ev)}</span>`).join('') || '<span class="caps-empty">None</span>'}
         </div>
       </div>
       <button id="btn-sync-caps" class="panel-full-btn" style="margin-top:8px;">Sync Capabilities with Components</button>

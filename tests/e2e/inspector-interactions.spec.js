@@ -253,24 +253,24 @@ async function openInteractionsCase(page) {
   return renderErrors;
 }
 
-// Seeds an asset with id P (for the Feedback Sound picker) and a saved popover named P, then
-// opens the edit modal for SWEEP_INTERACTIONS[idx] with the host call the ✎ button makes. The
-// component object is not in widgetDef, so no selection renders the other Inspector tabs over
-// the asset P; only the modal is under test.
+// Seeds an asset with id P (for the Feedback Sound picker) and a saved popover named P, selects
+// the sweep component carrying SWEEP_INTERACTIONS, forces the render under test at the Full
+// tier on the Events tab, then opens the edit modal for SWEEP_INTERACTIONS[idx] the same way the
+// app itself does: clicking that card's own ✎ button.
 async function openI2Case(page, idx) {
   const renderErrors = collectRenderErrors(page);
   await openStudio(page);
   await installWriteRecorder(page);
-  await runSeeding(page, ({ widgetId, popoverId, popoverName, assetId }) => {
+  await runSeeding(page, ({ widgetId, componentId, interactionsList, popoverId, popoverName, assetId }) => {
     localStorage.setItem('fdws_saved_widgets', JSON.stringify([{ id: popoverId, kind: 'popover', meta: { name: popoverName } }]));
-    window.__studioApp.state.setWidgetDef({ id: widgetId, assets: [{ id: assetId }] }, false, 'sweep');
-  }, { widgetId: SWEEP_WIDGET_ID, popoverId: SWEEP_POPOVER_ID, popoverName: P, assetId: P });
+    const { state } = window.__studioApp;
+    state.setWidgetDef({ id: widgetId, assets: [{ id: assetId }] }, false, 'sweep');
+    state.addComponent({ id: componentId, type: 'core.button', label: 'Sweep pin', props: {}, style: {}, interactions: interactionsList });
+  }, { widgetId: SWEEP_WIDGET_ID, componentId: SWEEP_COMPONENT_ID, interactionsList: SWEEP_INTERACTIONS, popoverId: SWEEP_POPOVER_ID, popoverName: P, assetId: P });
   await snapshotWidgetDef(page);
-  await page.evaluate(({ componentId, interactionsList, editIdx }) => {
-    window.__studioApp.inspector.uiTier = 'full';
-    const comp = { id: componentId, type: 'core.button', props: {}, style: {}, interactions: interactionsList };
-    window.__im2ModalPromise = window.__studioApp.inspector.openAddInteractionModal(comp, editIdx);
-  }, { componentId: SWEEP_COMPONENT_ID, interactionsList: SWEEP_INTERACTIONS, editIdx: idx });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await page.getByTestId('inspector-tab-events').click();
+  await page.locator(`.btn-edit-inter[data-idx="${idx}"]`).click();
   await expect(page.locator('.studio-modal-box')).toBeVisible();
   return renderErrors;
 }

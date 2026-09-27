@@ -204,34 +204,30 @@ test('visibleWhen own value creates one undo step for the state var and conditio
 const SWEEP_WIDGET_ID = 'com.flightdeck.conditions-sweep';
 const SWEEP_COMPONENT_ID = 'conditions-sweep-pin';
 
-// Loads a blank widget with an asset id P under the write recorder and snapshots it, then
-// renders the visibility and guard section through the host delegate for a component whose
-// visibleWhen comparison value and every layout.guard field are P. The section goes into a
-// mount inside #studio-right-sidebar. The component is not in widgetDef, so no selection
-// renders the other Inspector tabs over the asset P; only this section and its condition
-// popover are under test.
+// Loads a blank widget with an asset id P under the write recorder, selects a component whose
+// visibleWhen comparison value and every layout.guard field are P, then snapshots it and forces
+// the render under test at the Full tier on the Events tab, where the Inspector renders the
+// Conditions section (renderVisibilityAndGuard) through its own real path, alongside Interactions.
 async function openConditionsCase(page) {
   const renderErrors = collectRenderErrors(page);
   await openStudio(page);
   await installWriteRecorder(page);
-  await runSeeding(page, ({ widgetId, assetId }) => {
-    window.__studioApp.state.setWidgetDef({ id: widgetId, assets: [{ id: assetId }] }, false, 'sweep');
-  }, { widgetId: SWEEP_WIDGET_ID, assetId: P });
-  await snapshotWidgetDef(page);
-  await page.evaluate(({ componentId, comparisonValue, guardValue }) => {
-    const comp = {
+  await runSeeding(page, ({ widgetId, assetId, componentId, comparisonValue, guardValue }) => {
+    const { state } = window.__studioApp;
+    state.setWidgetDef({ id: widgetId, assets: [{ id: assetId }] }, false, 'sweep');
+    state.addComponent({
       id: componentId,
       type: 'core.button',
+      label: 'Sweep pin',
       props: {},
       style: {},
       layout: { guard: { enabled: true, closedAsset: guardValue, openAsset: guardValue, autoCloseAfterMs: guardValue } },
       visibleWhen: { state: 'undeclaredVar', equals: comparisonValue },
-    };
-    const mount = document.createElement('div');
-    mount.id = 'conditions-sweep-mount';
-    document.getElementById('studio-right-sidebar').appendChild(mount);
-    window.__studioApp.inspector.renderVisibilityAndGuard(comp, window.__studioApp.state.widgetDef, mount);
-  }, { componentId: SWEEP_COMPONENT_ID, comparisonValue: P, guardValue: P });
+    });
+  }, { widgetId: SWEEP_WIDGET_ID, assetId: P, componentId: SWEEP_COMPONENT_ID, comparisonValue: P, guardValue: P });
+  await snapshotWidgetDef(page);
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await page.getByTestId('inspector-tab-events').click();
   return renderErrors;
 }
 

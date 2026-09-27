@@ -1,4 +1,17 @@
-import { expect, openStudio, readCalls, recordCalls, test } from './fixtures/inspectorHarness.js';
+import {
+  expect,
+  openStudio,
+  readCalls,
+  recordCalls,
+  test,
+  INJECTION_PAYLOAD as P,
+  countInjectedInInspector,
+  collectRenderErrors,
+  installWriteRecorder,
+  runSeeding,
+  snapshotWidgetDef,
+  readWriteCheck,
+} from './fixtures/inspectorHarness.js';
 
 async function openStudioFull(page) {
   await page.addInitScript(() => localStorage.setItem('fdws_studio_uiMode', 'full'));
@@ -255,4 +268,156 @@ test('Full JSON appears only at Full and validates before the whole-definition s
     .toEqual([applied, true, 'Apply Full JSON']);
   expect(await page.evaluate(() => window.__studioApp.state.widgetDef.meta.name)).toBe('Full JSON Applied');
   await expect(page.locator('.studio-toast')).toHaveText('Applied — Undo (Ctrl+Z) to revert if something looks wrong.');
+});
+
+// Loads a definition under the write recorder and snapshots it, then forces the render under
+// test at the Full tier. No component is selected, so the widget-root panels render (all four
+// tab panels are built on every render, regardless of which tab is active).
+async function openWidgetRootCase(page, seedArg, seedFn) {
+  const renderErrors = collectRenderErrors(page);
+  await openStudio(page);
+  await installWriteRecorder(page);
+  await runSeeding(page, seedFn, seedArg);
+  await snapshotWidgetDef(page);
+  await page.evaluate(() => {
+    const { inspector } = window.__studioApp;
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  return renderErrors;
+}
+
+const W1_NUMBER_SELECTORS = ['#w-revision', '#w-grid-cols', '#w-grid-rows', '#w-def-w', '#w-def-h', '#w-min-w', '#w-min-h', '#w-max-w', '#w-max-h'];
+
+test('sweep W1: metadata, grid/layout numbers, canvas colors, Deck Events and capability tags render exactly with a solid background', async ({ page }) => {
+  const def = {
+    fdws: '1.27',
+    id: P,
+    revision: P,
+    meta: { name: P, shortName: P, author: P, description: P, category: 'Avionics' },
+    layout: { grid: { columns: P, rows: P }, defaultW: P, defaultH: P, minW: P, minH: P, maxW: P, maxH: P },
+    style: { border: { width: 1, color: P, radius: 10 }, background: { type: 'color', color: P } },
+    deckEvents: [
+      { name: P, kind: 'read', label: P, category: P, suggest: { simvar: P, unit: P } },
+      { name: P, kind: 'write', label: P, category: P, suggest: { event: P, valueFormat: P } },
+    ],
+    components: [],
+  };
+  const renderErrors = await openWidgetRootCase(page, { def, capsPayload: P }, (arg) => {
+    const { state } = window.__studioApp;
+    state.setWidgetDef(arg.def, false, 'sweep');
+    // A direct capabilities write during seeding, before the render under test — setWidgetDef
+    // would otherwise recompute capabilities from the (empty) component list.
+    state.widgetDef.capabilities = { readSimVars: [arg.capsPayload], writeEvents: [arg.capsPayload] };
+  });
+
+  for (const selector of ['#w-meta-name', '#w-meta-short', '#w-author', '#w-desc', '#w-id', '#w-border-clr-txt', '#w-bg-val', ...W1_NUMBER_SELECTORS]) {
+    await expect(page.locator(selector), selector).toHaveCount(1);
+  }
+  await expect(page.locator('.de-row')).toHaveCount(2);
+  // Scoped to the capability matrix box: .caps-tag alone also matches each de-row's READ/WRITE badge.
+  const capabilityTags = page.locator('.caps-summary-box .caps-tag');
+  await expect(capabilityTags).toHaveCount(2);
+  expect(await countInjectedInInspector(page)).toBe(0);
+
+  await expect(page.locator('#w-meta-name')).toHaveValue(P);
+  await expect(page.locator('#w-meta-short')).toHaveValue(P);
+  await expect(page.locator('#w-author')).toHaveValue(P);
+  await expect(page.locator('#w-desc')).toHaveValue(P);
+  await expect(page.locator('#w-id')).toHaveValue(P);
+  await expect(page.locator('#w-border-clr-txt')).toHaveValue(P);
+  await expect(page.locator('#w-bg-val')).toHaveValue(P);
+  for (const selector of W1_NUMBER_SELECTORS) {
+    await expect(page.locator(selector), selector).toHaveAttribute('value', P);
+  }
+  for (const row of await page.locator('.de-row').all()) {
+    await expect(row).toContainText(P);
+  }
+  for (const tag of await capabilityTags.all()) {
+    await expect(tag).toHaveText(P);
+  }
+
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+test('sweep W2: gradient background value renders exactly', async ({ page }) => {
+  const renderErrors = await openWidgetRootCase(page, {
+    def: { fdws: '1.27', components: [], style: { background: { type: 'gradient', gradient: P } } },
+  }, (arg) => {
+    window.__studioApp.state.setWidgetDef(arg.def, false, 'sweep');
+  });
+
+  await expect(page.locator('#w-bg-val')).toHaveCount(1);
+  expect(await countInjectedInInspector(page)).toBe(0);
+  await expect(page.locator('#w-bg-val')).toHaveValue(P);
+
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+// An Author imports a hand-crafted .fdwidget whose readSimVar fails validation (malformed
+// shape), a state var, a component label, an interaction trigger and an asset id are every one
+// the injection payload. The journey accepts Import Anyway, then visits the whole Inspector.
+test('journey: an imported widget with recovery-mode values renders literally through every Inspector surface', async ({ page }) => {
+  const renderErrors = collectRenderErrors(page);
+  await page.addInitScript(() => localStorage.setItem('fdws_studio_uiMode', 'full'));
+  await openStudio(page);
+
+  const journeyDef = {
+    fdws: '1.27',
+    id: 'com.flightdeck.sweep-journey',
+    meta: { name: 'Journey Widget' },
+    state: [{ name: P, type: 'string' }],
+    assets: [{ id: P, mimeType: 'image/png', encoding: 'base64', data: 'AA==' }],
+    components: [{
+      id: 'journey-comp',
+      type: 'core.button',
+      label: P,
+      layout: { col: 1, row: 1, w: 4, h: 2 },
+      binding: { readSimVar: P },
+      interactions: [{ trigger: P, action: { type: 'core.dispatchEvent', event: 'K:TEST' } }],
+    }],
+  };
+
+  await page.locator('#menu-import-input').setInputFiles({
+    name: 'journey.fdwidget',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(journeyDef)),
+  });
+
+  // The recovery modal renders the raw validation-error list unescaped, so it does contain
+  // #injected. That is expected and out of scope here — the journey's own injection checks
+  // run only after Import Anyway has closed this overlay and it has left the document.
+  await expect(page.locator('.studio-modal-box .modal-title')).toHaveText('Import Has Validation Errors');
+  await page.locator('[data-modal-submit]').click();
+  await expect(page.locator('.studio-modal-box')).toHaveCount(0);
+  await expect(page.locator('.studio-toast')).toHaveText('Imported "Journey Widget" successfully!');
+
+  await page.evaluate(() => window.__studioApp.state.selectComponent('journey-comp'));
+  await expect(page.locator('.inspector-header .inspector-title')).toHaveText(P);
+
+  for (const tabName of ['general', 'style', 'data', 'events']) {
+    await page.getByTestId(`inspector-tab-${tabName}`).click();
+  }
+
+  await expect(page.locator('#c-bind-read-custom-input')).toHaveValue(P);
+  const assetOptionValues = await page.locator('#c-bg-image-asset option').evaluateAll((options) => options.map((o) => o.value));
+  expect(assetOptionValues).toContain(P);
+  await expect(page.locator('.interaction-card .inter-tag')).toHaveText(P);
+
+  await page.locator('.btn-edit-inter[data-idx="0"]').click();
+  await expect(page.locator('.studio-modal-box')).toBeVisible();
+  expect(await countInjectedInInspector(page)).toBe(0);
+  await page.locator('[data-modal-cancel]').click();
+  await expect(page.locator('.studio-modal-box')).toHaveCount(0);
+
+  await page.locator('#vw-edit-condition').click();
+  await expect(page.locator('.studio-modal-box')).toBeVisible();
+  expect(await countInjectedInInspector(page)).toBe(0);
+  await page.locator('[data-modal-cancel]').click();
+  await expect(page.locator('.studio-modal-box')).toHaveCount(0);
+
+  expect(await countInjectedInInspector(page)).toBe(0);
+  expect(renderErrors).toEqual([]);
 });

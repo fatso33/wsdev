@@ -1,4 +1,20 @@
-import { clearCalls, expect, openStudio, readCalls, recordCalls, seedAssets, seedStateVars, test } from './fixtures/inspectorHarness.js';
+import {
+  clearCalls,
+  expect,
+  openStudio,
+  readCalls,
+  recordCalls,
+  seedAssets,
+  seedStateVars,
+  test,
+  INJECTION_PAYLOAD as P,
+  countInjectedInInspector,
+  collectRenderErrors,
+  installWriteRecorder,
+  runSeeding,
+  snapshotWidgetDef,
+  readWriteCheck,
+} from './fixtures/inspectorHarness.js';
 
 // Every case runs at the Full tier so tier-hidden Appearance fields are visible and clickable.
 async function openFull(page) {
@@ -509,4 +525,82 @@ test('Background type switches seed values and a pasted gradient switches the ty
   await expect(page.locator('.studio-toast')).toHaveText('That looks like a CSS gradient, not a color — switched Background Type to "CSS Gradient" so it stays theme-aware.');
   await expect(page.locator('#c-bg-type')).toHaveValue('gradient');
   expect((await readCalls(page, '__studioApp.inspector')).filter((call) => call.method === 'render').length).toBeGreaterThanOrEqual(2);
+});
+
+function optionsOf(page, selector) {
+  return page.locator(selector).locator('option').evaluateAll((options) => options.map((o) => [o.value, o.textContent]));
+}
+
+// Loads a blank widget and seeds under the write recorder, snapshots it, then forces the
+// render under test at the Full tier on the Style tab. addComponent auto-selects, so the
+// seeded component is already selected once seeding returns.
+async function openAppearanceCase(page, seedArg, seedFn) {
+  const renderErrors = collectRenderErrors(page);
+  await openStudio(page);
+  await installWriteRecorder(page);
+  await runSeeding(page, seedFn, seedArg);
+  await snapshotWidgetDef(page);
+  await page.evaluate(() => {
+    const { inspector } = window.__studioApp;
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  await page.getByTestId('inspector-tab-style').click();
+  return renderErrors;
+}
+
+test('sweep A1: typography, border and background colors, gradient and image position render exactly', async ({ page }) => {
+  const renderErrors = await openAppearanceCase(page, {
+    assetId: P,
+    mimeType: P,
+    comp: {
+      id: 'sweep-pin',
+      type: 'core.button',
+      props: {},
+      style: {
+        typography: { color: P },
+        border: { color: P },
+        background: { type: 'color', color: P, gradient: P, image: { assetId: P, position: P } },
+      },
+    },
+  }, (arg) => {
+    const { state } = window.__studioApp;
+    state.setWidgetDef({ assets: [{ id: arg.assetId, mimeType: arg.mimeType }] }, false, 'sweep');
+    state.addComponent(arg.comp);
+  });
+
+  for (const selector of ['#c-typo-color', '#c-border-color', '#c-bg-color', '#c-bg-gradient', '#c-bg-image-position', '#c-bg-image-asset']) {
+    await expect(page.locator(selector), selector).toHaveCount(1);
+  }
+  expect(await countInjectedInInspector(page)).toBe(0);
+
+  await expect(page.locator('#c-typo-color')).toHaveValue(P);
+  await expect(page.locator('#c-border-color')).toHaveValue(P);
+  await expect(page.locator('#c-bg-color')).toHaveValue(P);
+  await expect(page.locator('#c-bg-gradient')).toHaveValue(P);
+  await expect(page.locator('#c-bg-image-position')).toHaveValue(P);
+  expect(await optionsOf(page, '#c-bg-image-asset')).toContainEqual([P, `${P} (${P})`]);
+
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+test('sweep A2: rule-remove confirm shows the exact condition, injects nothing, Cancel writes nothing', async ({ page }) => {
+  const renderErrors = await openAppearanceCase(page, {
+    comp: { id: 'sweep-pin', type: 'core.button', props: {}, style: { rules: [{ when: { state: P, equals: P }, style: {} }] } },
+  }, (arg) => {
+    window.__studioApp.state.addComponent(arg.comp);
+  });
+
+  await page.locator('[data-rule-chip="0"]').click();
+  await page.locator('#c-rule-remove').click();
+  await expect(page.locator('.modal-confirm-text')).toBeVisible();
+  expect(await countInjectedInInspector(page)).toBe(0);
+  await expect(page.locator('.modal-confirm-text')).toContainText(P);
+
+  await page.locator('[data-modal-cancel]').click();
+  await expect(page.locator('.studio-modal-box')).toHaveCount(0);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(await page.evaluate((id) => window.__studioApp.state.getComponent(id).style.rules.length, 'sweep-pin')).toBe(1);
+  expect(renderErrors).toEqual([]);
 });
