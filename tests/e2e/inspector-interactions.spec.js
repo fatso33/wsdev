@@ -220,10 +220,9 @@ const SWEEP_WIDGET_ID = 'com.flightdeck.interactions-sweep';
 const SWEEP_POPOVER_ID = 'com.flightdeck.sweep-popover';
 const SWEEP_COMPONENT_ID = 'interactions-sweep-pin';
 
-// One interaction per non-internal action type (Decision 2), each with trigger P
-// and every action string field it has set to P, plus feedback.haptic/sound = P;
-// the last entry has no real action type, only action.type = P, to exercise the
-// card's own type-badge escaping independent of any known action.
+// One interaction per non-internal action type, each with trigger P and every action
+// string field it has set to P, plus feedback.haptic/sound = P. The last entry has only
+// action.type = P, so the card's type badge is checked apart from any known action.
 const SWEEP_INTERACTIONS = [
   { trigger: P, action: { type: 'core.dispatchEvent', event: P, value: P, fromStateRef: P }, feedback: { haptic: P, sound: P } },
   { trigger: P, action: { type: 'core.setLocalState', field: P, value: P, fromStateRef: P }, feedback: { haptic: P, sound: P } },
@@ -236,11 +235,9 @@ const SWEEP_INTERACTIONS = [
   { trigger: P, action: { type: P } },
 ];
 
-// Loads a blank widget, adds the sweep component with SWEEP_INTERACTIONS under the write
-// recorder (no assets: I1 and I3 don't touch the feedback-sound picker, and a real asset entry
-// would also be picked up by AppearanceSection.js's still-raw asset select — out of this slice's
-// scope, fixed in slice 4 — since selecting this component renders every Inspector tab, Style
-// included), snapshots it, then forces the render under test at the Full tier on the Events tab.
+// Loads a blank widget and adds the sweep component with SWEEP_INTERACTIONS under the write
+// recorder, snapshots it, then forces the render under test at the Full tier on the Events tab.
+// The widget has no assets because the card list and the delete confirm never read them.
 async function openInteractionsCase(page) {
   const renderErrors = collectRenderErrors(page);
   await openStudio(page);
@@ -256,12 +253,10 @@ async function openInteractionsCase(page) {
   return renderErrors;
 }
 
-// I2 needs an asset with id P (for the Feedback Sound picker) and a saved popover with meta.name
-// P, but never selects the sweep component: selection would render every Inspector tab, including
-// the Style tab's still-raw (slice 4) asset select, which would see the same poisoned asset. The
-// edit modal is opened directly on an unselected, orphan component object instead — the real
-// Inspector call `host.openAddInteractionModal(comp, editIdx)` used by the app's own ✎ button
-// (InteractionsSection.js:59), just invoked without a StudioState selection driving it.
+// Seeds an asset with id P (for the Feedback Sound picker) and a saved popover named P, then
+// opens the edit modal for SWEEP_INTERACTIONS[idx] with the host call the ✎ button makes. The
+// component object is not in widgetDef, so no selection renders the other Inspector tabs over
+// the asset P; only the modal is under test.
 async function openI2Case(page, idx) {
   const renderErrors = collectRenderErrors(page);
   await openStudio(page);
@@ -308,6 +303,10 @@ test('sweep I1: one card per interaction renders every action field exactly and 
   expect(renderErrors).toEqual([]);
 });
 
+function optionList(page, selector) {
+  return page.locator(`${selector} option`).evaluateAll((els) => els.map((o) => ({ value: o.value, text: o.textContent })));
+}
+
 const I2_CASES = [
   { id: 'dispatchEvent', idx: 0, controls: ['#im-event-custom', '#im-value', '#im-fromstateref'], visible: ['#im-event-custom'], textValues: { '#im-event-custom': P, '#im-value': P, '#im-fromstateref': P } },
   { id: 'setLocalState', idx: 1, controls: ['#im-field', '#im-value', '#im-fromstateref'], visible: [], textValues: { '#im-field': P, '#im-value': P, '#im-fromstateref': P } },
@@ -324,12 +323,8 @@ for (const c of I2_CASES) {
     for (const selector of [...c.controls, '#im-feedback-sound']) await expect(page.locator(selector), selector).toHaveCount(1);
     for (const selector of c.visible) await expect(page.locator(selector), selector).toBeVisible();
     expect(await countInjectedInInspector(page)).toBe(0);
-    const soundOptionValues = await page.locator('#im-feedback-sound option').evaluateAll((els) => els.map((o) => o.value));
-    expect(soundOptionValues).toContain(P);
-    if (c.checkPopoverOption) {
-      const popoverOptionTexts = await page.locator('#im-popover-id option').allTextContents();
-      expect(popoverOptionTexts).toContain(P);
-    }
+    expect(await optionList(page, '#im-feedback-sound')).toEqual([{ value: '', text: 'None' }, { value: P, text: P }]);
+    if (c.checkPopoverOption) expect(await optionList(page, '#im-popover-id')).toEqual([{ value: SWEEP_POPOVER_ID, text: P }]);
     for (const [selector, value] of Object.entries(c.textValues)) await expect(page.locator(selector), selector).toHaveValue(value);
     await page.locator('[data-modal-cancel]').click();
     await expect(page.locator('.studio-modal-box')).toHaveCount(0);

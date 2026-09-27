@@ -204,14 +204,12 @@ test('visibleWhen own value creates one undo step for the state var and conditio
 const SWEEP_WIDGET_ID = 'com.flightdeck.conditions-sweep';
 const SWEEP_COMPONENT_ID = 'conditions-sweep-pin';
 
-// Loads a blank widget with an asset id P under the write recorder, snapshots it, then renders
-// renderVisibilityAndGuard directly for an orphan component (visibleWhen comparison value and
-// every layout.guard field = P) into a mount appended straight into #studio-right-sidebar.
-// The component is never added to widgetDef or selected: selecting it would render every
-// Inspector tab, including the Style tab's still-raw (slice 4) asset select, which would also
-// pick up this same poisoned asset. Rendering this one section directly, the way the app's own
-// #vw-edit-condition button does through the host delegate (ConditionsSection.js:118-124,
-// StudioInspector.js:284-285), keeps the check scoped to this slice's own fix.
+// Loads a blank widget with an asset id P under the write recorder and snapshots it, then
+// renders the visibility and guard section through the host delegate for a component whose
+// visibleWhen comparison value and every layout.guard field are P. The section goes into a
+// mount inside #studio-right-sidebar. The component is not in widgetDef, so no selection
+// renders the other Inspector tabs over the asset P; only this section and its condition
+// popover are under test.
 async function openConditionsCase(page) {
   const renderErrors = collectRenderErrors(page);
   await openStudio(page);
@@ -243,10 +241,10 @@ test('sweep K1: condition value and guard fields render exactly, inject nothing 
     await expect(page.locator(selector), selector).toHaveCount(1);
   }
   expect(await countInjectedInInspector(page)).toBe(0);
-  const closedOptionValues = await page.locator('#guard-closed-asset option').evaluateAll((els) => els.map((o) => o.value));
-  expect(closedOptionValues).toContain(P);
-  const openOptionValues = await page.locator('#guard-open-asset option').evaluateAll((els) => els.map((o) => o.value));
-  expect(openOptionValues).toContain(P);
+  for (const selector of ['#guard-closed-asset', '#guard-open-asset']) {
+    const options = await page.locator(`${selector} option`).evaluateAll((els) => els.map((o) => ({ value: o.value, text: o.textContent })));
+    expect(options, selector).toEqual([{ value: '', text: '— none —' }, { value: P, text: P }]);
+  }
   await expect(page.locator('#guard-autoclose')).toHaveAttribute('value', P);
 
   await page.locator('#vw-edit-condition').click();
