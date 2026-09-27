@@ -96,20 +96,20 @@ export function renderVisibilityAndGuard(host, comp, def, body) {
           <label>Closed Asset</label>
           <select id="guard-closed-asset" class="prop-select">
             <option value="">— none —</option>
-            ${assets.map((a) => `<option value="${a.id}" ${guard.closedAsset === a.id ? 'selected' : ''}>${a.id}</option>`).join('')}
+            ${assets.map((a) => `<option value="${escapeHtmlAttr(a.id)}" ${guard.closedAsset === a.id ? 'selected' : ''}>${escapeHtmlAttr(a.id)}</option>`).join('')}
           </select>
         </div>
         <div class="prop-field">
           <label>Open Asset</label>
           <select id="guard-open-asset" class="prop-select">
             <option value="">— none —</option>
-            ${assets.map((a) => `<option value="${a.id}" ${guard.openAsset === a.id ? 'selected' : ''}>${a.id}</option>`).join('')}
+            ${assets.map((a) => `<option value="${escapeHtmlAttr(a.id)}" ${guard.openAsset === a.id ? 'selected' : ''}>${escapeHtmlAttr(a.id)}</option>`).join('')}
           </select>
         </div>
       </div>
       <div class="prop-field">
         <label>Auto-Close After (ms, 0 = never)</label>
-        <input type="number" id="guard-autoclose" class="prop-input" value="${guard.autoCloseAfterMs ?? 0}" min="0" />
+        <input type="number" id="guard-autoclose" class="prop-input" value="${escapeHtmlAttr(guard.autoCloseAfterMs ?? 0)}" min="0" />
       </div>
     ` : ''}
   `;
@@ -193,7 +193,7 @@ export function renderConditionListEditor(host, comp, def, expr, idPrefix, onCom
       <select class="row-field ${idPrefix}-op prop-select" data-field="op">
         ${OPS.map((op) => `<option value="${op}" ${OPS.find((o) => cond[o] !== undefined) === op ? 'selected' : ''}>${OP_LABELS[op] || op}</option>`).join('')}
       </select>
-      <input type="text" class="row-field ${idPrefix}-val" data-field="val" value="${(() => { const op = OPS.find((o) => cond[o] !== undefined); return op ? (op === 'between' ? (cond.between || []).join(',') : cond[op]) : ''; })()}" placeholder="${(OPS.find((o) => cond[o] !== undefined) === 'between') ? 'lo,hi' : 'value'}" />
+      <input type="text" class="row-field ${idPrefix}-val" data-field="val" value="${escapeHtmlAttr((() => { const op = OPS.find((o) => cond[o] !== undefined); return op ? (op === 'between' ? (cond.between || []).join(',') : cond[op]) : ''; })())}" placeholder="${(OPS.find((o) => cond[o] !== undefined) === 'between') ? 'lo,hi' : 'value'}" />
     `;
   };
 

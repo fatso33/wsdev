@@ -1,4 +1,15 @@
-import { expect, openStudio, test } from './fixtures/inspectorHarness.js';
+import {
+  expect,
+  openStudio,
+  test,
+  INJECTION_PAYLOAD as P,
+  countInjectedInInspector,
+  collectRenderErrors,
+  installWriteRecorder,
+  runSeeding,
+  snapshotWidgetDef,
+  readWriteCheck,
+} from './fixtures/inspectorHarness.js';
 
 async function open(page) {
   await page.addInitScript(() => localStorage.setItem('fdws_studio_uiMode', 'full'));
@@ -188,4 +199,64 @@ test('visibleWhen own value creates one undo step for the state var and conditio
   await page.evaluate(() => window.__studioApp.state.undo());
   expect(await page.evaluate(() => ({ vars: window.__studioApp.state.widgetDef.state.filter((item) => item.syncFrom === 'A:OWN VALUE'), condition: window.__studioApp.state.getComponent('own-visible').visibleWhen }))).toEqual({ vars: [], condition: before });
   await page.locator('[data-modal-cancel]').click();
+});
+
+const SWEEP_WIDGET_ID = 'com.flightdeck.conditions-sweep';
+const SWEEP_COMPONENT_ID = 'conditions-sweep-pin';
+
+// Loads a blank widget with an asset id P under the write recorder, snapshots it, then renders
+// renderVisibilityAndGuard directly for an orphan component (visibleWhen comparison value and
+// every layout.guard field = P) into a mount appended straight into #studio-right-sidebar.
+// The component is never added to widgetDef or selected: selecting it would render every
+// Inspector tab, including the Style tab's still-raw (slice 4) asset select, which would also
+// pick up this same poisoned asset. Rendering this one section directly, the way the app's own
+// #vw-edit-condition button does through the host delegate (ConditionsSection.js:118-124,
+// StudioInspector.js:284-285), keeps the check scoped to this slice's own fix.
+async function openConditionsCase(page) {
+  const renderErrors = collectRenderErrors(page);
+  await openStudio(page);
+  await installWriteRecorder(page);
+  await runSeeding(page, ({ widgetId, assetId }) => {
+    window.__studioApp.state.setWidgetDef({ id: widgetId, assets: [{ id: assetId }] }, false, 'sweep');
+  }, { widgetId: SWEEP_WIDGET_ID, assetId: P });
+  await snapshotWidgetDef(page);
+  await page.evaluate(({ componentId, comparisonValue, guardValue }) => {
+    const comp = {
+      id: componentId,
+      type: 'core.button',
+      props: {},
+      style: {},
+      layout: { guard: { enabled: true, closedAsset: guardValue, openAsset: guardValue, autoCloseAfterMs: guardValue } },
+      visibleWhen: { state: 'undeclaredVar', equals: comparisonValue },
+    };
+    const mount = document.createElement('div');
+    mount.id = 'conditions-sweep-mount';
+    document.getElementById('studio-right-sidebar').appendChild(mount);
+    window.__studioApp.inspector.renderVisibilityAndGuard(comp, window.__studioApp.state.widgetDef, mount);
+  }, { componentId: SWEEP_COMPONENT_ID, comparisonValue: P, guardValue: P });
+  return renderErrors;
+}
+
+test('sweep K1: condition value and guard fields render exactly, inject nothing and write nothing', async ({ page }) => {
+  const renderErrors = await openConditionsCase(page);
+  for (const selector of ['#vw-edit-condition', '#guard-closed-asset', '#guard-open-asset', '#guard-autoclose']) {
+    await expect(page.locator(selector), selector).toHaveCount(1);
+  }
+  expect(await countInjectedInInspector(page)).toBe(0);
+  const closedOptionValues = await page.locator('#guard-closed-asset option').evaluateAll((els) => els.map((o) => o.value));
+  expect(closedOptionValues).toContain(P);
+  const openOptionValues = await page.locator('#guard-open-asset option').evaluateAll((els) => els.map((o) => o.value));
+  expect(openOptionValues).toContain(P);
+  await expect(page.locator('#guard-autoclose')).toHaveAttribute('value', P);
+
+  await page.locator('#vw-edit-condition').click();
+  await expect(page.locator('.studio-modal-box')).toBeVisible();
+  await expect(page.locator('.vw-val')).toHaveCount(1);
+  expect(await countInjectedInInspector(page)).toBe(0);
+  await expect(page.locator('.vw-val')).toHaveValue(P);
+  await page.locator('[data-modal-cancel]').click();
+  await expect(page.locator('.studio-modal-box')).toHaveCount(0);
+
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
 });

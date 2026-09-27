@@ -1,4 +1,15 @@
-import { expect, openStudio, test } from './fixtures/inspectorHarness.js';
+import {
+  expect,
+  openStudio,
+  test,
+  INJECTION_PAYLOAD as P,
+  countInjectedInInspector,
+  collectRenderErrors,
+  installWriteRecorder,
+  runSeeding,
+  snapshotWidgetDef,
+  readWriteCheck,
+} from './fixtures/inspectorHarness.js';
 
 async function setup(page, { tier = 'full', type = 'core.button', interactions = [], binding = {} } = {}) {
   await page.addInitScript((mode) => localStorage.setItem('fdws_studio_uiMode', mode), tier);
@@ -203,4 +214,139 @@ test('own value commits state var and interaction in one labelled undo step for 
     expect(await page.evaluate(() => window.__studioApp.state.widgetDef.state.length)).toBe(index === null ? before + 1 : before);
     expect((await interactions(page))[0].condition).toBeDefined();
   }
+});
+
+const SWEEP_WIDGET_ID = 'com.flightdeck.interactions-sweep';
+const SWEEP_POPOVER_ID = 'com.flightdeck.sweep-popover';
+const SWEEP_COMPONENT_ID = 'interactions-sweep-pin';
+
+// One interaction per non-internal action type (Decision 2), each with trigger P
+// and every action string field it has set to P, plus feedback.haptic/sound = P;
+// the last entry has no real action type, only action.type = P, to exercise the
+// card's own type-badge escaping independent of any known action.
+const SWEEP_INTERACTIONS = [
+  { trigger: P, action: { type: 'core.dispatchEvent', event: P, value: P, fromStateRef: P }, feedback: { haptic: P, sound: P } },
+  { trigger: P, action: { type: 'core.setLocalState', field: P, value: P, fromStateRef: P }, feedback: { haptic: P, sound: P } },
+  { trigger: P, action: { type: 'core.swapLocalState', fields: [P, P] }, feedback: { haptic: P, sound: P } },
+  { trigger: P, action: { type: 'core.toggleLocalState', field: P }, feedback: { haptic: P, sound: P } },
+  { trigger: P, action: { type: 'core.openWidgetPopover', popoverWidgetId: P, context: { [P]: { value: { stateRef: P }, writable: false } } }, feedback: { haptic: P, sound: P } },
+  { trigger: P, action: { type: 'core.commitToHost', contextKey: P, field: P }, feedback: { haptic: P, sound: P } },
+  { trigger: P, action: { type: 'core.ackIndicator', event: P }, feedback: { haptic: P, sound: P } },
+  { trigger: P, action: { type: 'core.closePopover' }, feedback: { haptic: P, sound: P } },
+  { trigger: P, action: { type: P } },
+];
+
+// Loads a blank widget, adds the sweep component with SWEEP_INTERACTIONS under the write
+// recorder (no assets: I1 and I3 don't touch the feedback-sound picker, and a real asset entry
+// would also be picked up by AppearanceSection.js's still-raw asset select — out of this slice's
+// scope, fixed in slice 4 — since selecting this component renders every Inspector tab, Style
+// included), snapshots it, then forces the render under test at the Full tier on the Events tab.
+async function openInteractionsCase(page) {
+  const renderErrors = collectRenderErrors(page);
+  await openStudio(page);
+  await installWriteRecorder(page);
+  await runSeeding(page, ({ widgetId, componentId, interactionsList }) => {
+    const { state } = window.__studioApp;
+    state.setWidgetDef({ id: widgetId }, false, 'sweep');
+    state.addComponent({ id: componentId, type: 'core.button', label: 'Sweep pin', props: {}, style: {}, interactions: interactionsList });
+  }, { widgetId: SWEEP_WIDGET_ID, componentId: SWEEP_COMPONENT_ID, interactionsList: SWEEP_INTERACTIONS });
+  await snapshotWidgetDef(page);
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await page.getByTestId('inspector-tab-events').click();
+  return renderErrors;
+}
+
+// I2 needs an asset with id P (for the Feedback Sound picker) and a saved popover with meta.name
+// P, but never selects the sweep component: selection would render every Inspector tab, including
+// the Style tab's still-raw (slice 4) asset select, which would see the same poisoned asset. The
+// edit modal is opened directly on an unselected, orphan component object instead — the real
+// Inspector call `host.openAddInteractionModal(comp, editIdx)` used by the app's own ✎ button
+// (InteractionsSection.js:59), just invoked without a StudioState selection driving it.
+async function openI2Case(page, idx) {
+  const renderErrors = collectRenderErrors(page);
+  await openStudio(page);
+  await installWriteRecorder(page);
+  await runSeeding(page, ({ widgetId, popoverId, popoverName, assetId }) => {
+    localStorage.setItem('fdws_saved_widgets', JSON.stringify([{ id: popoverId, kind: 'popover', meta: { name: popoverName } }]));
+    window.__studioApp.state.setWidgetDef({ id: widgetId, assets: [{ id: assetId }] }, false, 'sweep');
+  }, { widgetId: SWEEP_WIDGET_ID, popoverId: SWEEP_POPOVER_ID, popoverName: P, assetId: P });
+  await snapshotWidgetDef(page);
+  await page.evaluate(({ componentId, interactionsList, editIdx }) => {
+    window.__studioApp.inspector.uiTier = 'full';
+    const comp = { id: componentId, type: 'core.button', props: {}, style: {}, interactions: interactionsList };
+    window.__im2ModalPromise = window.__studioApp.inspector.openAddInteractionModal(comp, editIdx);
+  }, { componentId: SWEEP_COMPONENT_ID, interactionsList: SWEEP_INTERACTIONS, editIdx: idx });
+  await expect(page.locator('.studio-modal-box')).toBeVisible();
+  return renderErrors;
+}
+
+test('sweep I1: one card per interaction renders every action field exactly and injects nothing', async ({ page }) => {
+  const renderErrors = await openInteractionsCase(page);
+  const cards = page.locator('.interaction-card');
+  await expect(cards).toHaveCount(SWEEP_INTERACTIONS.length);
+  expect(await countInjectedInInspector(page)).toBe(0);
+  expect(await page.locator('.inter-tag').allTextContents()).toEqual(SWEEP_INTERACTIONS.map(() => P));
+  expect(await page.locator('.inter-action-type').allTextContents()).toEqual([
+    'dispatchEvent', 'setLocalState', 'swapLocalState', 'toggleLocalState',
+    'openWidgetPopover', 'commitToHost', 'ackIndicator', 'closePopover', P,
+  ]);
+  const descTexts = [
+    [`Event: ${P}`, `From: ${P}`, `Feedback: ${P} haptic, sound: ${P}`],
+    [`Field: ${P}`, `From: ${P}`, `Feedback: ${P} haptic, sound: ${P}`],
+    [`Swap: ${P} ↔ ${P}`, `Feedback: ${P} haptic, sound: ${P}`],
+    [`Field: ${P}`, `Feedback: ${P} haptic, sound: ${P}`],
+    [`Popover: ${P}`, `Feedback: ${P} haptic, sound: ${P}`],
+    [`Context Key: ${P}`, `Feedback: ${P} haptic, sound: ${P}`],
+    [`Event: ${P}`, `Feedback: ${P} haptic, sound: ${P}`],
+    [],
+    [],
+  ];
+  for (const [idx, texts] of descTexts.entries()) {
+    for (const text of texts) await expect(cards.nth(idx).locator('.inter-desc'), `card ${idx}: ${text}`).toContainText(text);
+  }
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+const I2_CASES = [
+  { id: 'dispatchEvent', idx: 0, controls: ['#im-event-custom', '#im-value', '#im-fromstateref'], visible: ['#im-event-custom'], textValues: { '#im-event-custom': P, '#im-value': P, '#im-fromstateref': P } },
+  { id: 'setLocalState', idx: 1, controls: ['#im-field', '#im-value', '#im-fromstateref'], visible: [], textValues: { '#im-field': P, '#im-value': P, '#im-fromstateref': P } },
+  { id: 'swapLocalState', idx: 2, controls: ['#im-field1', '#im-field2'], visible: [], textValues: { '#im-field1': P, '#im-field2': P } },
+  { id: 'toggleLocalState', idx: 3, controls: ['#im-field'], visible: [], textValues: { '#im-field': P } },
+  { id: 'openWidgetPopover', idx: 4, controls: ['#im-popover-id', '.ctx-key', '.ctx-stateref'], visible: [], textValues: { '.ctx-key': P, '.ctx-stateref': P }, checkPopoverOption: true },
+  { id: 'commitToHost', idx: 5, controls: ['#im-contextkey', '#im-commit-field'], visible: [], textValues: { '#im-contextkey': P, '#im-commit-field': P } },
+  { id: 'ackIndicator', idx: 6, controls: ['#im-event-custom'], visible: ['#im-event-custom'], textValues: { '#im-event-custom': P } },
+];
+
+for (const c of I2_CASES) {
+  test(`sweep I2 ${c.id}: edit modal prefills exactly, injects nothing and writes nothing`, async ({ page }) => {
+    const renderErrors = await openI2Case(page, c.idx);
+    for (const selector of [...c.controls, '#im-feedback-sound']) await expect(page.locator(selector), selector).toHaveCount(1);
+    for (const selector of c.visible) await expect(page.locator(selector), selector).toBeVisible();
+    expect(await countInjectedInInspector(page)).toBe(0);
+    const soundOptionValues = await page.locator('#im-feedback-sound option').evaluateAll((els) => els.map((o) => o.value));
+    expect(soundOptionValues).toContain(P);
+    if (c.checkPopoverOption) {
+      const popoverOptionTexts = await page.locator('#im-popover-id option').allTextContents();
+      expect(popoverOptionTexts).toContain(P);
+    }
+    for (const [selector, value] of Object.entries(c.textValues)) await expect(page.locator(selector), selector).toHaveValue(value);
+    await page.locator('[data-modal-cancel]').click();
+    await expect(page.locator('.studio-modal-box')).toHaveCount(0);
+    expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+    expect(renderErrors).toEqual([]);
+  });
+}
+
+test('sweep I3: delete confirm shows the exact trigger and action type, injects nothing, Cancel writes nothing', async ({ page }) => {
+  const renderErrors = await openInteractionsCase(page);
+  await page.locator('.btn-del-inter').first().click();
+  await expect(page.locator('.modal-confirm-text')).toBeVisible();
+  expect(await countInjectedInInspector(page)).toBe(0);
+  await expect(page.locator('.modal-confirm-text')).toContainText(P);
+  await page.locator('[data-modal-cancel]').click();
+  await expect(page.locator('.studio-modal-box')).toHaveCount(0);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(await page.evaluate((id) => window.__studioApp.state.getComponent(id).interactions.length, SWEEP_COMPONENT_ID)).toBe(SWEEP_INTERACTIONS.length);
+  expect(renderErrors).toEqual([]);
 });

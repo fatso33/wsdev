@@ -12,7 +12,7 @@
 import { getDeckEventsByKind, DECK_EVENT_NAMES } from '../../../core/deckEvents.js';
 import { TRIGGERS as REGISTRY_TRIGGERS, ACTIONS as REGISTRY_ACTIONS } from '../../../widgets/PropertyRegistry.js';
 import { openModal, confirmModal } from '../../StudioModal.js';
-import { CUSTOM_OPTION_VALUE } from '../inspectorMarkup.js';
+import { CUSTOM_OPTION_VALUE, escapeHtmlAttr } from '../inspectorMarkup.js';
 
 /**
  * Renders one component's interaction list into its existing Behavior mount.
@@ -31,21 +31,21 @@ export function renderComponentInteractions(host, comp, body) {
           ${interactions.map((inter, idx) => `
             <div class="interaction-card">
               <div class="inter-hdr">
-                <span class="inter-tag">${inter.trigger || 'tap'}</span>
-                <span class="inter-action-type">${inter.action?.type?.replace('core.', '') || ''}</span>
+                <span class="inter-tag">${escapeHtmlAttr(inter.trigger || 'tap')}</span>
+                <span class="inter-action-type">${escapeHtmlAttr(inter.action?.type?.replace('core.', '') || '')}</span>
                 <div class="inter-hdr-actions">
                   <button class="btn-edit-inter" data-idx="${idx}" title="Edit this interaction">✎</button>
                   <button class="btn-del-inter" data-idx="${idx}" title="Remove this interaction">✕</button>
                 </div>
               </div>
               <div class="inter-desc">
-                ${inter.action?.event ? `Event: <strong>${inter.action.event}</strong>` : ''}
-                ${inter.action?.field ? `Field: <strong>${inter.action.field}</strong>` : ''}
-                ${inter.action?.fields ? `Swap: <strong>${inter.action.fields.join(' ↔ ')}</strong>` : ''}
-                ${inter.action?.popoverWidgetId ? `Popover: <strong>${inter.action.popoverWidgetId}</strong>` : ''}
-                ${inter.action?.contextKey ? `Context Key: <strong>${inter.action.contextKey}</strong>` : ''}
-                ${inter.action?.fromStateRef ? `From: <strong>${inter.action.fromStateRef}</strong>` : ''}
-                ${inter.feedback?.haptic || inter.feedback?.sound ? `Feedback: <strong>${[inter.feedback.haptic ? `${inter.feedback.haptic} haptic` : '', inter.feedback.sound ? `sound: ${inter.feedback.sound}` : ''].filter(Boolean).join(', ')}</strong>` : ''}
+                ${inter.action?.event ? `Event: <strong>${escapeHtmlAttr(inter.action.event)}</strong>` : ''}
+                ${inter.action?.field ? `Field: <strong>${escapeHtmlAttr(inter.action.field)}</strong>` : ''}
+                ${inter.action?.fields ? `Swap: <strong>${escapeHtmlAttr(inter.action.fields.join(' ↔ '))}</strong>` : ''}
+                ${inter.action?.popoverWidgetId ? `Popover: <strong>${escapeHtmlAttr(inter.action.popoverWidgetId)}</strong>` : ''}
+                ${inter.action?.contextKey ? `Context Key: <strong>${escapeHtmlAttr(inter.action.contextKey)}</strong>` : ''}
+                ${inter.action?.fromStateRef ? `From: <strong>${escapeHtmlAttr(inter.action.fromStateRef)}</strong>` : ''}
+                ${inter.feedback?.haptic || inter.feedback?.sound ? `Feedback: <strong>${escapeHtmlAttr([inter.feedback.haptic ? `${inter.feedback.haptic} haptic` : '', inter.feedback.sound ? `sound: ${inter.feedback.sound}` : ''].filter(Boolean).join(', '))}</strong>` : ''}
               </div>
             </div>
           `).join('')}
@@ -64,7 +64,7 @@ export function renderComponentInteractions(host, comp, body) {
         btn.addEventListener('click', async () => {
           const idx = Number.parseInt(btn.dataset.idx, 10);
           const target = (comp.interactions || [])[idx];
-          const ok = await confirmModal(`Remove the "${target?.trigger}" → ${target?.action?.type?.replace('core.', '') || ''} interaction?`, { title: 'Remove Interaction', danger: true });
+          const ok = await confirmModal(`Remove the "${escapeHtmlAttr(target?.trigger)}" → ${escapeHtmlAttr(target?.action?.type?.replace('core.', '') || '')} interaction?`, { title: 'Remove Interaction', danger: true });
           if (!ok) return;
           const next = [...(comp.interactions || [])];
           next.splice(idx, 1);
@@ -136,7 +136,7 @@ export async function openAddInteractionModal(host, comp, editIdx = null) {
         ${getDeckEventsByKind('write').map((e) => `<option value="${e.name}" ${current === e.name ? 'selected' : ''}>${e.label}</option>`).join('')}
         <option value="${CUSTOM_OPTION_VALUE}" ${current && !DECK_EVENT_NAMES.includes(current) ? 'selected' : ''}>Custom…</option>
       </select>
-      <input type="text" id="${id}-custom" class="prop-input ${current && !DECK_EVENT_NAMES.includes(current) ? '' : 'hidden'}" value="${current && !DECK_EVENT_NAMES.includes(current) ? current : ''}" placeholder="Custom event name" />
+      <input type="text" id="${id}-custom" class="prop-input ${current && !DECK_EVENT_NAMES.includes(current) ? '' : 'hidden'}" value="${escapeHtmlAttr(current && !DECK_EVENT_NAMES.includes(current) ? current : '')}" placeholder="Custom event name" />
     `;
 
     // When editing, dynamicFieldsHtml prefills from the interaction's own
@@ -149,30 +149,30 @@ export async function openAddInteractionModal(host, comp, editIdx = null) {
       if (actionType === 'core.dispatchEvent') {
         return `
           <div class="modal-form-row"><label>Event to Dispatch</label>${eventPickerHtml('im-event', prior?.event || comp.binding?.writeEvent || '')}</div>
-          <div class="modal-form-row"><label>Value</label><input type="text" id="im-value" class="prop-input" value="${prior?.value !== undefined ? prior.value : 1}" placeholder="1" /></div>
+          <div class="modal-form-row"><label>Value</label><input type="text" id="im-value" class="prop-input" value="${escapeHtmlAttr(prior?.value !== undefined ? prior.value : 1)}" placeholder="1" /></div>
           <div class="modal-form-row">
             <label>From State Ref (optional) <span class="prop-hint" title="Overrides Value above — reads via the same 'name[index].field' path grammar popovers use, e.g. presets[0].freq, instead of a static literal. Needed because a plain tap carries no value of its own to dispatch.">ⓘ</span></label>
-            <input type="text" id="im-fromstateref" class="prop-input" value="${prior?.fromStateRef || ''}" placeholder="e.g. presets[0].freq — leave blank to use Value above" />
+            <input type="text" id="im-fromstateref" class="prop-input" value="${escapeHtmlAttr(prior?.fromStateRef || '')}" placeholder="e.g. presets[0].freq — leave blank to use Value above" />
           </div>
         `;
       }
       if (actionType === 'core.toggleLocalState') {
-        return `<div class="modal-form-row"><label>State Field to Toggle</label><input type="text" id="im-field" class="prop-input" value="${prior?.field || comp.binding?.stateVar || 'switchOn'}" /></div>`;
+        return `<div class="modal-form-row"><label>State Field to Toggle</label><input type="text" id="im-field" class="prop-input" value="${escapeHtmlAttr(prior?.field || comp.binding?.stateVar || 'switchOn')}" /></div>`;
       }
       if (actionType === 'core.setLocalState') {
         return `
-          <div class="modal-form-row"><label>State Field</label><input type="text" id="im-field" class="prop-input" value="${prior?.field || 'activeMode'}" /></div>
-          <div class="modal-form-row"><label>Value (true / false / number / text)</label><input type="text" id="im-value" class="prop-input" value="${prior?.value !== undefined ? prior.value : 'true'}" /></div>
+          <div class="modal-form-row"><label>State Field</label><input type="text" id="im-field" class="prop-input" value="${escapeHtmlAttr(prior?.field || 'activeMode')}" /></div>
+          <div class="modal-form-row"><label>Value (true / false / number / text)</label><input type="text" id="im-value" class="prop-input" value="${escapeHtmlAttr(prior?.value !== undefined ? prior.value : 'true')}" /></div>
           <div class="modal-form-row">
             <label>From State Ref (optional) <span class="prop-hint" title="Overrides Value above — reads via the same 'name[index].field' path grammar popovers use, e.g. presets[0].freq, instead of a static literal. Needed because a plain tap carries no value of its own to set.">ⓘ</span></label>
-            <input type="text" id="im-fromstateref" class="prop-input" value="${prior?.fromStateRef || ''}" placeholder="e.g. presets[0].freq — leave blank to use Value above" />
+            <input type="text" id="im-fromstateref" class="prop-input" value="${escapeHtmlAttr(prior?.fromStateRef || '')}" placeholder="e.g. presets[0].freq — leave blank to use Value above" />
           </div>
         `;
       }
       if (actionType === 'core.swapLocalState') {
         return `
-          <div class="modal-form-row"><label>First Field</label><input type="text" id="im-field1" class="prop-input" value="${prior?.fields?.[0] || 'actFreq'}" /></div>
-          <div class="modal-form-row"><label>Second Field</label><input type="text" id="im-field2" class="prop-input" value="${prior?.fields?.[1] || 'stbyFreq'}" /></div>
+          <div class="modal-form-row"><label>First Field</label><input type="text" id="im-field1" class="prop-input" value="${escapeHtmlAttr(prior?.fields?.[0] || 'actFreq')}" /></div>
+          <div class="modal-form-row"><label>Second Field</label><input type="text" id="im-field2" class="prop-input" value="${escapeHtmlAttr(prior?.fields?.[1] || 'stbyFreq')}" /></div>
         `;
       }
       if (actionType === 'core.openWidgetPopover') {
@@ -182,7 +182,7 @@ export async function openAddInteractionModal(host, comp, editIdx = null) {
             <label>Popover Widget</label>
             ${popovers.length === 0
               ? '<div class="caps-empty">No saved popover widgets yet. Use "New Popover" in the bottom bar to design one first, then save it.</div>'
-              : `<select id="im-popover-id" class="prop-select">${popovers.map((w) => `<option value="${w.id}" ${prior?.popoverWidgetId === w.id ? 'selected' : ''}>${w.meta?.name || w.id}</option>`).join('')}</select>`}
+              : `<select id="im-popover-id" class="prop-select">${popovers.map((w) => `<option value="${escapeHtmlAttr(w.id)}" ${prior?.popoverWidgetId === w.id ? 'selected' : ''}>${escapeHtmlAttr(w.meta?.name || w.id)}</option>`).join('')}</select>`}
           </div>
           <div class="modal-form-row">
             <label>Context Map (data passed into the popover)</label>
@@ -193,10 +193,10 @@ export async function openAddInteractionModal(host, comp, editIdx = null) {
       }
       if (actionType === 'core.commitToHost') {
         return `
-          <div class="modal-form-row"><label>Context Key to Commit</label><input type="text" id="im-contextkey" class="prop-input" value="${prior?.contextKey || 'currentLabel'}" placeholder="Must match a key the host declared writable" /></div>
+          <div class="modal-form-row"><label>Context Key to Commit</label><input type="text" id="im-contextkey" class="prop-input" value="${escapeHtmlAttr(prior?.contextKey || 'currentLabel')}" placeholder="Must match a key the host declared writable" /></div>
           <div class="modal-form-row">
             <label>Local State Field to Commit (optional) <span class="prop-hint" title="Leave blank to commit whatever value triggered this interaction (e.g. a core.input's own change event). Set this to commit a NAMED local state var instead — needed for a Save button, whose own tap carries no value: stage edits into local state first via core.setLocalState, then have Save read that field name here.">ⓘ</span></label>
-            <input type="text" id="im-commit-field" class="prop-input" value="${prior?.field || ''}" placeholder="e.g. scratchLabel — leave blank to use the triggering event's own value" />
+            <input type="text" id="im-commit-field" class="prop-input" value="${escapeHtmlAttr(prior?.field || '')}" placeholder="e.g. scratchLabel — leave blank to use the triggering event's own value" />
           </div>
         `;
       }
@@ -246,7 +246,7 @@ export async function openAddInteractionModal(host, comp, editIdx = null) {
             <label style="font-weight:400;">Sound</label>
             <select id="im-feedback-sound" class="prop-select">
               <option value="" ${!existing?.feedback?.sound ? 'selected' : ''}>None</option>
-              ${(host.state.widgetDef.assets || []).map((a) => `<option value="${a.id}" ${existing?.feedback?.sound === a.id ? 'selected' : ''}>${a.id}</option>`).join('')}
+              ${(host.state.widgetDef.assets || []).map((a) => `<option value="${escapeHtmlAttr(a.id)}" ${existing?.feedback?.sound === a.id ? 'selected' : ''}>${escapeHtmlAttr(a.id)}</option>`).join('')}
             </select>
             ${(host.state.widgetDef.assets || []).length === 0 ? '<div class="caps-empty">No assets uploaded yet — add one on the Assets tab for a switch-click sound.</div>' : ''}
           </div>
@@ -267,8 +267,8 @@ export async function openAddInteractionModal(host, comp, editIdx = null) {
           if (!mount) return;
           mount.innerHTML = contextRows.length === 0 ? '<div class="caps-empty">None yet.</div>' : contextRows.map((row, idx) => `
             <div class="row-list-item" data-ctx-idx="${idx}">
-              <input type="text" class="row-field ctx-key" value="${row.key}" placeholder="Context key" />
-              <input type="text" class="row-field ctx-stateref" value="${row.stateRef}" placeholder="Host stateRef path" />
+              <input type="text" class="row-field ctx-key" value="${escapeHtmlAttr(row.key)}" placeholder="Context key" />
+              <input type="text" class="row-field ctx-stateref" value="${escapeHtmlAttr(row.stateRef)}" placeholder="Host stateRef path" />
               <label style="display:flex;align-items:center;gap:4px;font-size:10px;"><input type="checkbox" class="ctx-writable" ${row.writable ? 'checked' : ''} /> Writable</label>
               <select class="row-field ctx-applyon prop-select ${row.writable ? '' : 'hidden'}">
                 <option value="immediate" ${row.applyOn === 'immediate' ? 'selected' : ''}>Apply immediately</option>
