@@ -343,8 +343,9 @@ export const COMMON_FIELDS = [
   { path: 'binding.pollGroup', control: 'text', tier: 'advanced', group: 'Bindings', fdwsMin: '1.26', default: undefined, tooltip: 'Which PC Bridge polling chunk this SimVar joins. Leave blank to default to this widget’s own id, which already groups all of this widget’s own bindings together and away from unrelated widgets’ vars. Only set this to deliberately merge chunks across widgets (e.g. two widgets that share a bus and should always update in lockstep), or to split one unusually noisy var out of an otherwise-quiet widget.' },
   { path: 'binding.deadband', control: 'number', tier: 'advanced', group: 'Bindings', default: 0, tooltip: 'Ignore changes smaller than this, so a jittery sensor doesn’t spam re-renders.' },
   // `bespoke`: Widget Studio's Bindings panel hand-writes this {durationMs, easing}
-  // object outside the generic field engine. `fields` mirrors ACTIONS[].params'
-  // shape (`:127` above).
+  // object outside the generic field engine. `fields` mirrors `ACTIONS[].params`'
+  // shape. `easing.default` is the value the Bindings panel preselects and writes;
+  // the runtime's fallback for a stored transition without `easing` stays 'ease-out'.
   { path: 'binding.transition', control: 'bespoke', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Animates value changes instead of snapping instantly.', fields: [
     { key: 'durationMs', control: 'number', default: undefined, tooltip: 'Animation length in milliseconds. Leave blank for none.' },
     { key: 'easing', control: 'select', options: ['linear', 'ease-out', 'ease-in-out'], default: 'linear', tooltip: 'Animation curve.' }
