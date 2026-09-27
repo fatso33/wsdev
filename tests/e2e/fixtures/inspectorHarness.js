@@ -287,3 +287,191 @@ export async function clearCalls(page, path) {
     if (log) log.length = 0;
   }, path);
 }
+
+/**
+ * Markup-injection payload for the Inspector escaping sweep. Parsed as markup, it closes a
+ * `textarea`, an `option` and a `select`, and plants an `<img id="injected">`. It carries both
+ * quote kinds, and its literal `&amp;` shows as `&` if the value is decoded twice.
+ * @type {string}
+ */
+export const INJECTION_PAYLOAD = `x"'&amp;</textarea></option></select><img id="injected">`;
+
+/**
+ * A second payload, `INJECTION_PAYLOAD` followed by `2`, for cases that need two different strings.
+ * @type {string}
+ */
+export const INJECTION_PAYLOAD_2 = `${INJECTION_PAYLOAD}2`;
+
+/**
+ * Counts `#injected` elements inside the Inspector's containers: `#studio-right-sidebar` and every
+ * open `.studio-modal-overlay`, meaning one without the `hidden` class (the menu bar and status bar
+ * keep hidden overlays of their own). Other panels render the same authored values, so an
+ * `#injected` anywhere else in the document is not counted.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @returns {Promise<number>} Distinct `#injected` elements found.
+ * @throws {Error} When `#studio-right-sidebar` is missing, so a missing Inspector never counts 0.
+ */
+export async function countInjectedInInspector(page) {
+  return page.evaluate(() => {
+    const sidebar = document.getElementById('studio-right-sidebar');
+    if (!sidebar) throw new Error('[inspectorHarness] #studio-right-sidebar is missing');
+    const found = new Set();
+    for (const root of [sidebar, ...document.querySelectorAll('.studio-modal-overlay:not(.hidden)')]) {
+      for (const el of root.querySelectorAll('#injected')) found.add(el);
+    }
+    return found.size;
+  });
+}
+
+/**
+ * Collects the errors `StudioState.notify` would otherwise swallow into a log line: every
+ * `pageerror`, and every console error whose text contains `[StudioState] Listener error`. Call it
+ * before seeding, so a throw during the seeding render is collected too.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @returns {string[]} A list that keeps growing while the page runs; empty while nothing has thrown.
+ */
+export function collectRenderErrors(page) {
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(`pageerror: ${error.stack || error.message}`));
+  page.on('console', (message) => {
+    if (message.type() === 'error' && message.text().includes('[StudioState] Listener error')) {
+      errors.push(`console: ${message.text()}`);
+    }
+  });
+  return errors;
+}
+
+/**
+ * The `StudioState` methods `installWriteRecorder` records. They only name the writer when a
+ * write is caught; the `widgetDef` snapshot in `readWriteCheck` does not depend on this list
+ * being complete.
+ * @type {string[]}
+ */
+export const STATE_WRITE_METHODS = [
+  'updateComponent',
+  'updateWidgetMeta',
+  'updateWidgetLayout',
+  'updateWidgetStyle',
+  'updateWidgetThemeConfig',
+  'setDeckEvents',
+  'updateWidgetRawField',
+  'setWidgetDef',
+  'addStateVar',
+  'ensureSyncFromVar',
+  'applyFieldToSelection',
+  'applyStyleToSelection',
+  'saveHistory',
+];
+
+/**
+ * Installs call-through recorders on `window.__studioApp.state` for every `STATE_WRITE_METHODS`
+ * entry, and a depth counter around its `notify`. Install once per page, after `openStudio` and
+ * before any seeding, so a one-shot write during the seeding render is caught.
+ *
+ * Every recorded call is logged except one made inside `runSeeding` while no notification is in
+ * progress. That skips the test's own seeding calls and the `saveHistory` each makes before it
+ * notifies. A call a listener makes during a notification, such as a render, is always logged.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @returns {Promise<void>}
+ * @throws {Error} In-page, when a listed method is missing from the state.
+ */
+export async function installWriteRecorder(page) {
+  await page.evaluate((names) => {
+    window.__inspectorHarness ??= { calls: {} };
+    const harness = window.__inspectorHarness;
+    const state = window.__studioApp.state;
+    harness.writes = [];
+    harness.seeding = false;
+    harness.notifyDepth = 0;
+    harness.runSeeding = (seed, seedArg) => {
+      harness.seeding = true;
+      try {
+        const result = seed(seedArg);
+        if (typeof result?.then === 'function') throw new Error('[inspectorHarness] a seeding function must be synchronous');
+        return result;
+      } finally {
+        harness.seeding = false;
+      }
+    };
+    const originalNotify = state.notify;
+    state.notify = function notifyWithDepth(...args) {
+      harness.notifyDepth += 1;
+      try {
+        return originalNotify.apply(this, args);
+      } finally {
+        harness.notifyDepth -= 1;
+      }
+    };
+    for (const name of names) {
+      const original = state[name];
+      if (typeof original !== 'function') throw new Error(`[inspectorHarness] state.${name} is not a function`);
+      state[name] = function recordedWrite(...args) {
+        if (!harness.seeding || harness.notifyDepth > 0) {
+          harness.writes.push({ method: name, caller: new Error().stack.split('\n')[2]?.trim() ?? '' });
+        }
+        return original.apply(this, args);
+      };
+    }
+  }, STATE_WRITE_METHODS);
+}
+
+/**
+ * Runs seeding code in the page with the write recorder's seeding flag set, and clears the flag
+ * as soon as it returns. `seed` is serialized like a `page.evaluate` callback, so it cannot close
+ * over test-side variables; pass them through `arg`. It must be synchronous: a write queued with
+ * `queueMicrotask` runs after the flag is cleared and is logged.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {(arg: any) => unknown} seed - In-page seeding function.
+ * @param {unknown} [arg] - JSON-serializable argument for `seed`.
+ * @returns {Promise<unknown>} What `seed` returned.
+ * @throws {Error} In-page, when `installWriteRecorder` has not run or `seed` returns a Promise.
+ */
+export async function runSeeding(page, seed, arg = null) {
+  return page.evaluate(`(() => {
+    const harness = window.__inspectorHarness;
+    if (!harness?.runSeeding) throw new Error('[inspectorHarness] installWriteRecorder must run before runSeeding');
+    return harness.runSeeding(${seed}, ${JSON.stringify(arg)});
+  })()`);
+}
+
+/**
+ * Waits one task, so every queued microtask has run, then stores `JSON.stringify` of the current
+ * `widgetDef` for `readWriteCheck`. Take it after the last seeding write and before the render
+ * under test.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @returns {Promise<void>}
+ */
+export async function snapshotWidgetDef(page) {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.__inspectorHarness ??= { calls: {} };
+    window.__inspectorHarness.widgetDefSnapshot = JSON.stringify(window.__studioApp.state.widgetDef);
+  });
+}
+
+/**
+ * Reports whether anything wrote the widget definition. `widgetDefChanged` compares the current
+ * `widgetDef` with the `snapshotWidgetDef` snapshot and is the authority. `writes` lists the calls
+ * `installWriteRecorder` logged, each with its method and calling frame. A render that writes
+ * nothing gives `{ widgetDefChanged: false, writes: [] }`.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @returns {Promise<{ widgetDefChanged: boolean, writes: Array<{ method: string, caller: string }> }>}
+ * @throws {Error} In-page, when no snapshot was taken or the recorder is not installed.
+ */
+export async function readWriteCheck(page) {
+  return page.evaluate(() => {
+    const harness = window.__inspectorHarness;
+    if (harness?.widgetDefSnapshot === undefined) throw new Error('[inspectorHarness] snapshotWidgetDef must run before readWriteCheck');
+    if (!harness.writes) throw new Error('[inspectorHarness] installWriteRecorder must run before readWriteCheck');
+    return {
+      widgetDefChanged: JSON.stringify(window.__studioApp.state.widgetDef) !== harness.widgetDefSnapshot,
+      writes: [...harness.writes],
+    };
+  });
+}

@@ -1,4 +1,16 @@
-import { test, expect, openStudio } from './fixtures/inspectorHarness.js';
+import {
+  test,
+  expect,
+  openStudio,
+  INJECTION_PAYLOAD as P,
+  INJECTION_PAYLOAD_2 as P2,
+  countInjectedInInspector,
+  collectRenderErrors,
+  installWriteRecorder,
+  runSeeding,
+  snapshotWidgetDef,
+  readWriteCheck,
+} from './fixtures/inspectorHarness.js';
 
 async function seed(page, type = 'core.button', binding = {}, props = {}, { blankState = false } = {}) {
   await openStudio(page);
@@ -217,4 +229,166 @@ test('raw unit, indicator Test State Var and Find-it use their existing owners',
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
   await page.locator('#c-connect-read-findit').click();
   expect(await page.evaluate(() => window.__findItCalls)).toBe(1);
+});
+
+const SWEEP_WIDGET_ID = 'com.flightdeck.bindings-sweep';
+const NO_CUSTOM_EVENTS = '(no custom Deck Events in use yet — try importing a Community Pack in the Library tab)';
+const SAVED_WRITE_OPTIONS = [['', '— select or type below —'], [P2, `${P2} (used by ${P})`]];
+const WRITE_KINDS = ['write', 'increment', 'decrement', 'fastincrement', 'fastdecrement', 'ack', 'push'];
+
+// Loads a blank widget with the given state vars and component under the write recorder, snapshots it,
+// then forces the render under test: the given tier, Advanced open, on the Data tab.
+async function openBindingsCase(page, { stateVars = [], component, savedWidgets = [], tier = 'full' }) {
+  const renderErrors = collectRenderErrors(page);
+  await openStudio(page);
+  await installWriteRecorder(page);
+  await runSeeding(page, ({ widgetId, vars, comp, saved }) => {
+    localStorage.setItem('fdws_saved_widgets', JSON.stringify(saved));
+    const { state } = window.__studioApp;
+    state.setWidgetDef({ id: widgetId, state: vars }, false, 'sweep');
+    state.addComponent(comp);
+  }, { widgetId: SWEEP_WIDGET_ID, vars: stateVars, comp: component, saved: savedWidgets });
+  await snapshotWidgetDef(page);
+  await page.evaluate((uiTier) => {
+    const { inspector } = window.__studioApp;
+    inspector.uiTier = uiTier;
+    inspector._bindingAdvancedOpen = true;
+    inspector.render();
+  }, tier);
+  await page.getByTestId('inspector-tab-data').click();
+  return renderErrors;
+}
+
+function optionsOf(page, selector) {
+  return page.locator(selector).locator('option').evaluateAll((options) => options.map((o) => [o.value, o.textContent]));
+}
+
+function dataBadge(page) {
+  return page.locator('#studio-right-sidebar .inspector-tab-section-header')
+    .filter({ has: page.locator('.group-title', { hasText: /^DATA & CONTENT$/ }) })
+    .locator('.group-badge');
+}
+
+const BINDINGS_SWEEP_CASES = [
+  {
+    id: 'B1',
+    title: 'Pulse rotary event fields with acceleration and Advanced open',
+    savedWidgets: [{ id: P, kind: 'widget', components: [{ id: 'saved-button', type: 'core.button', binding: { writeEvent: P2 } }] }],
+    component: {
+      id: 'sweep-pin',
+      type: 'core.rotary',
+      label: 'Sweep pin',
+      props: { writeMode: 'pulse', acceleration: true },
+      style: {},
+      binding: {
+        readSimVar: P,
+        writeEvent: P,
+        incrementEvent: P,
+        decrementEvent: P,
+        fastIncrementEvent: P,
+        fastDecrementEvent: P,
+        ackEvent: P,
+        pushEvent: P,
+        unit: P,
+        pollGroup: P,
+        eventCategory: P,
+        stateRef: P,
+        deadband: P,
+        transition: { durationMs: P },
+      },
+    },
+    visible: ['read', ...WRITE_KINDS].map((kind) => `#c-bind-${kind}-custom-block`),
+    selects: {
+      '#c-bind-read-custom-select': { options: [['', NO_CUSTOM_EVENTS]] },
+      ...Object.fromEntries(WRITE_KINDS.map((kind) => [`#c-bind-${kind}-custom-select`, { options: SAVED_WRITE_OPTIONS }])),
+    },
+    textValues: {
+      ...Object.fromEntries(['read', ...WRITE_KINDS].map((kind) => [`#c-bind-${kind}-custom-input`, P])),
+      '#c-bind-unit': P,
+      '#c-bind-pollgroup': P,
+      '#c-bind-eventcategory': P,
+      '#c-bind-stateref': P,
+    },
+    numberAttributes: { '#c-bind-deadband': P, '#c-bind-transition-ms': P },
+    dataBadge: `↔ ${P}`,
+  },
+  {
+    id: 'B2',
+    title: 'an undeclared state var shows Custom beside a declared payload var',
+    stateVars: [{ name: P, type: P, defaultValue: false }],
+    component: { id: 'sweep-pin', type: 'core.button', label: 'Sweep pin', props: {}, style: {}, binding: { stateVar: P2, sublabelStateRef: P } },
+    visible: ['#c-bind-state-custom-block'],
+    selects: { '#c-bind-state': { options: [['', 'None'], [P, `${P} (${P})`], ['__custom__', 'Custom…']], value: '__custom__' } },
+    textValues: { '#c-bind-state-custom-input': P2, '#c-bind-sublabelstateref': P },
+    numberAttributes: {},
+    dataBadge: `state: ${P2}`,
+  },
+  {
+    id: 'B3',
+    title: 'the indicator Test State Var selects a declared payload var',
+    stateVars: [{ name: P, type: 'boolean', defaultValue: false }],
+    component: { id: 'sweep-pin', type: 'core.indicator', label: 'Sweep pin', props: {}, style: {}, binding: { testStateVar: P } },
+    visible: [],
+    selects: {
+      '#c-bind-teststatevar': { options: [['', 'None'], [P, `${P} (boolean)`]], value: P },
+      '#c-bind-state': { options: [['', 'None'], [P, `${P} (boolean)`], ['__custom__', 'Custom…']], value: '' },
+    },
+    textValues: {},
+    numberAttributes: {},
+  },
+];
+
+for (const c of BINDINGS_SWEEP_CASES) {
+  test(`sweep ${c.id}: ${c.title} render exactly, inject nothing and write nothing`, async ({ page }) => {
+    const renderErrors = await openBindingsCase(page, c);
+    const controls = [...c.visible, ...Object.keys(c.selects), ...Object.keys(c.textValues), ...Object.keys(c.numberAttributes)];
+    for (const selector of controls) await expect(page.locator(selector), selector).toHaveCount(1);
+    for (const selector of c.visible) await expect(page.locator(selector), selector).toBeVisible();
+    expect(await countInjectedInInspector(page)).toBe(0);
+    for (const [selector, { options, value }] of Object.entries(c.selects)) {
+      expect(await optionsOf(page, selector), selector).toEqual(options);
+      if (value !== undefined) await expect(page.locator(selector), selector).toHaveValue(value);
+    }
+    for (const [selector, value] of Object.entries(c.textValues)) await expect(page.locator(selector), selector).toHaveValue(value);
+    for (const [selector, value] of Object.entries(c.numberAttributes)) await expect(page.locator(selector), selector).toHaveAttribute('value', value);
+    if (c.dataBadge) await expect(dataBadge(page)).toHaveText(c.dataBadge);
+    expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+    expect(renderErrors).toEqual([]);
+  });
+}
+
+test('state var names with quotes round-trip through both pickers and stay separate', async ({ page }) => {
+  const renderErrors = await openBindingsCase(page, {
+    stateVars: ['say "hi"', 'a"', 'a&quot;'].map((name) => ({ name, type: 'boolean', defaultValue: false })),
+    component: { id: 'sweep-pin', type: 'core.indicator', label: 'Sweep pin', props: {}, style: {}, binding: { stateVar: 'say "hi"', testStateVar: 'say "hi"' } },
+  });
+  const declared = ['', 'say "hi"', 'a"', 'a&quot;'];
+  const pickers = [['#c-bind-state', 'stateVar', [...declared, '__custom__']], ['#c-bind-teststatevar', 'testStateVar', declared]];
+  for (const [selector, , values] of pickers) {
+    await expect(page.locator(selector)).toHaveValue('say "hi"');
+    expect((await optionsOf(page, selector)).map(([value]) => value), selector).toEqual(values);
+  }
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  const stored = (key) => page.evaluate((field) => window.__studioApp.state.getComponent('sweep-pin').binding[field], key);
+  for (const [selector, key] of pickers) {
+    for (const name of ['a"', 'a&quot;']) {
+      await page.locator(selector).selectOption(name);
+      expect(await stored(key), `${selector} ${name}`).toBe(name);
+      await expect(page.locator(selector)).toHaveValue(name);
+    }
+  }
+  expect(renderErrors).toEqual([]);
+});
+
+test('a declared state var renders preselected in Build with the Custom block hidden and no write', async ({ page }) => {
+  const renderErrors = await openBindingsCase(page, {
+    tier: 'build',
+    stateVars: [{ name: 'switchOn', type: 'boolean', defaultValue: false }],
+    component: { id: 'sweep-pin', type: 'core.button', label: 'Sweep pin', props: {}, style: {}, binding: { stateVar: 'switchOn' } },
+  });
+  await expect(page.locator('#c-bind-state')).toBeVisible();
+  await expect(page.locator('#c-bind-state')).toHaveValue('switchOn');
+  await expect(page.locator('#c-bind-state-custom-block')).toHaveClass(/hidden/);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
 });

@@ -16,6 +16,7 @@
  * `host.applySubtitleVisibility`, so an instance-level override still takes effect. It uses no async
  * callbacks or modal lifecycles, and DOM errors propagate to the caller.
  */
+import { escapeHtmlAttr } from './inspectorMarkup.js';
 
 /**
  * Builds the always-visible Guided/Build/Full tier switch, independent of what is selected. A click
@@ -339,7 +340,7 @@ export function buildAccordionGroup(host, title, isOpenDefault, renderFn, badge,
     header.innerHTML = `
         <span class="group-title-cluster">
           <span class="group-title">${title}</span>
-          ${badge ? `<span class="group-badge">${badge}</span>` : ''}
+          ${badge ? `<span class="group-badge">${escapeHtmlAttr(badge)}</span>` : ''}
         </span>
       `;
     group.appendChild(header);
@@ -349,7 +350,7 @@ export function buildAccordionGroup(host, title, isOpenDefault, renderFn, badge,
     header.innerHTML = `
         <span class="group-title-cluster">
           <span class="group-title">${title}</span>
-          ${badge ? `<span class="group-badge">${badge}</span>` : ''}
+          ${badge ? `<span class="group-badge">${escapeHtmlAttr(badge)}</span>` : ''}
         </span>
         <svg class="group-chevron ${isOpen ? 'open' : ''}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
       `;

@@ -11,7 +11,7 @@ import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_N
 import { extractCustomDeckEvents } from '../../../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../../../core/deckEventPacks.js';
 import { showToast } from '../../StudioModal.js';
-import { CUSTOM_OPTION_VALUE, CATEGORY_LABELS } from '../inspectorMarkup.js';
+import { CUSTOM_OPTION_VALUE, CATEGORY_LABELS, escapeHtmlAttr } from '../inspectorMarkup.js';
 
 /**
  * Renders binding fields for the selected component in its existing Data mount.
@@ -59,7 +59,7 @@ export function renderComponentBindings(host, comp, def, body) {
         const placeholder = entries.length > 0 ? '— select or type below —' : '(no custom Deck Events in use yet — try importing a Community Pack in the Library tab)';
         return `
           <option value="">${placeholder}</option>
-          ${entries.map((e) => `<option value="${e.name}" ${isKnownCustom && currentValue === e.name ? 'selected' : ''}>${e.name}${e.source ? ` (${e.source})` : ''}</option>`).join('')}
+          ${entries.map((e) => `<option value="${escapeHtmlAttr(e.name)}" ${isKnownCustom && currentValue === e.name ? 'selected' : ''}>${escapeHtmlAttr(e.name)}${e.source ? ` (${escapeHtmlAttr(e.source)})` : ''}</option>`).join('')}
         `;
       };
 
@@ -120,7 +120,7 @@ export function renderComponentBindings(host, comp, def, body) {
           <select id="c-bind-${kind}-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding[field])}</select>
           <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
           <div class="prop-paste-row">
-            <input type="text" id="c-bind-${kind}-custom-input" class="prop-input" value="${isCustom ? (binding[field] || '') : ''}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+            <input type="text" id="c-bind-${kind}-custom-input" class="prop-input" value="${escapeHtmlAttr(isCustom ? (binding[field] || '') : '')}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
           </div>
           <div class="prop-sanitize-diff hidden" id="c-bind-${kind}-custom-diff"></div>
         </div>`;
@@ -147,7 +147,7 @@ export function renderComponentBindings(host, comp, def, body) {
           <select id="c-bind-read-custom-select" class="prop-select">${buildCustomOptions(customReads, binding.readSimVar)}</select>
           <label>Or type a new custom variable / raw SimVar (L:/A:...)</label>
           <div class="prop-paste-row">
-            <input type="text" id="c-bind-read-custom-input" class="prop-input" value="${readIsCustom ? (binding.readSimVar || '') : ''}" placeholder="e.g. myCustomVar, L:FBW_TAXI_LIGHT_INTENSITY" />
+            <input type="text" id="c-bind-read-custom-input" class="prop-input" value="${escapeHtmlAttr(readIsCustom ? (binding.readSimVar || '') : '')}" placeholder="e.g. myCustomVar, L:FBW_TAXI_LIGHT_INTENSITY" />
             <button type="button" class="btn-small" id="c-bind-read-paste">Paste</button>
           </div>
           <div class="prop-sanitize-diff hidden" id="c-bind-read-custom-diff"></div>
@@ -163,14 +163,14 @@ export function renderComponentBindings(host, comp, def, body) {
           </div>
           <div class="prop-field" data-tier="advanced">
             <label>Dead Band <span class="prop-hint" title="Minimum change in value before this binding re-renders — filters out imperceptible jitter. 0 means every update renders.">ⓘ</span></label>
-            <input type="number" step="any" min="0" id="c-bind-deadband" class="prop-input" value="${binding.deadband ?? 0}" />
+            <input type="number" step="any" min="0" id="c-bind-deadband" class="prop-input" value="${escapeHtmlAttr(binding.deadband ?? 0)}" />
           </div>
         </div>
 
         <div class="prop-row-2" data-tier="advanced">
           <div class="prop-field">
             <label>Transition (ms) <span class="prop-hint" title="How long this binding's CSS transition eases toward a new value. Keep this short (well under the gap between updates) — a long transition against Fast-tier updates makes the display feel MORE sluggish, not less, since it ends up averaging across many stale intermediate values.">ⓘ</span></label>
-            <input type="number" step="1" min="0" id="c-bind-transition-ms" class="prop-input" value="${binding.transition?.durationMs ?? ''}" placeholder="none" />
+            <input type="number" step="1" min="0" id="c-bind-transition-ms" class="prop-input" value="${escapeHtmlAttr(binding.transition?.durationMs ?? '')}" placeholder="none" />
           </div>
           <div class="prop-field">
             <label>Easing</label>
@@ -184,7 +184,7 @@ export function renderComponentBindings(host, comp, def, body) {
 
         <div class="prop-field" data-tier="advanced">
           <label>SimConnect Unit ${isRawAddress ? `<span class="prop-hint" title="Tells SimConnect what type to return the raw value as (e.g. degrees, knots, Bool, Number). Leave blank to use the host's default ('Number'). For a TEXT variable (TITLE, ATC MODEL, ATC ID) type 'string' — those have no unit at all, and reading one as a number silently returns 0.">ⓘ</span>` : `<span class="prop-hint" title="Unit is set by PC Bridge for this Deck Event.">ⓘ</span>`}</label>
-          <input type="text" id="c-bind-unit" class="prop-input" value="${binding.unit || ''}" placeholder="${isRawAddress ? 'Number' : 'Unit is set by PC Bridge for this Deck Event'}" ${isRawAddress ? '' : 'disabled'} />
+          <input type="text" id="c-bind-unit" class="prop-input" value="${escapeHtmlAttr(binding.unit || '')}" placeholder="${isRawAddress ? 'Number' : 'Unit is set by PC Bridge for this Deck Event'}" ${isRawAddress ? '' : 'disabled'} />
           <div class="prop-live-info hidden" id="c-bind-resolved-info"></div>
         </div>
 
@@ -192,7 +192,7 @@ export function renderComponentBindings(host, comp, def, body) {
 
         <div class="prop-field" data-tier="advanced">
           <label>Poll Group <span class="prop-hint" title="FDWS v1.26: which PC Bridge polling chunk this SimVar's data definition joins. Leave blank to default to this widget's own id — already groups all of this widget's own bindings together, away from unrelated widgets' vars. Only set this to deliberately merge chunks across widgets, or split an unusually noisy var out of an otherwise-quiet widget.">ⓘ</span></label>
-          <input type="text" id="c-bind-pollgroup" class="prop-input" value="${binding.pollGroup || ''}" placeholder="(defaults to this widget's id)" />
+          <input type="text" id="c-bind-pollgroup" class="prop-input" value="${escapeHtmlAttr(binding.pollGroup || '')}" placeholder="(defaults to this widget's id)" />
         </div>
 
         <div class="prop-field" data-tier="simple-only">
@@ -219,7 +219,7 @@ export function renderComponentBindings(host, comp, def, body) {
           <select id="c-bind-write-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.writeEvent)}</select>
           <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
           <div class="prop-paste-row">
-            <input type="text" id="c-bind-write-custom-input" class="prop-input" value="${writeIsCustom ? (binding.writeEvent || '') : ''}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+            <input type="text" id="c-bind-write-custom-input" class="prop-input" value="${escapeHtmlAttr(writeIsCustom ? (binding.writeEvent || '') : '')}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
             <button type="button" class="btn-small" id="c-bind-write-paste">Paste</button>
           </div>
           <div class="prop-sanitize-diff hidden" id="c-bind-write-custom-diff"></div>
@@ -246,7 +246,7 @@ export function renderComponentBindings(host, comp, def, body) {
           <select id="c-bind-increment-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.incrementEvent)}</select>
           <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
           <div class="prop-paste-row">
-            <input type="text" id="c-bind-increment-custom-input" class="prop-input" value="${incrementIsCustom ? (binding.incrementEvent || '') : ''}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+            <input type="text" id="c-bind-increment-custom-input" class="prop-input" value="${escapeHtmlAttr(incrementIsCustom ? (binding.incrementEvent || '') : '')}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
           </div>
           <div class="prop-sanitize-diff hidden" id="c-bind-increment-custom-diff"></div>
         </div>
@@ -271,7 +271,7 @@ export function renderComponentBindings(host, comp, def, body) {
           <select id="c-bind-decrement-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.decrementEvent)}</select>
           <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
           <div class="prop-paste-row">
-            <input type="text" id="c-bind-decrement-custom-input" class="prop-input" value="${decrementIsCustom ? (binding.decrementEvent || '') : ''}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+            <input type="text" id="c-bind-decrement-custom-input" class="prop-input" value="${escapeHtmlAttr(decrementIsCustom ? (binding.decrementEvent || '') : '')}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
           </div>
           <div class="prop-sanitize-diff hidden" id="c-bind-decrement-custom-diff"></div>
         </div>
@@ -283,23 +283,23 @@ export function renderComponentBindings(host, comp, def, body) {
           <label>Bound Local State Var</label>
           <select id="c-bind-state" class="prop-select">
             <option value="" ${!binding.stateVar ? 'selected' : ''}>None</option>
-            ${stateVars.map((s) => `<option value="${s.name}" ${!stateIsCustom && binding.stateVar === s.name ? 'selected' : ''}>${s.name} (${s.type})</option>`).join('')}
+            ${stateVars.map((s) => `<option value="${escapeHtmlAttr(s.name)}" ${!stateIsCustom && binding.stateVar === s.name ? 'selected' : ''}>${escapeHtmlAttr(s.name)} (${escapeHtmlAttr(s.type)})</option>`).join('')}
             <option value="${CUSTOM_OPTION_VALUE}" ${stateIsCustom ? 'selected' : ''}>Custom…</option>
           </select>
         </div>
         <div class="prop-field prop-custom-block ${stateIsCustom ? '' : 'hidden'}" id="c-bind-state-custom-block">
           <label>Custom / $context reference <span class="prop-hint" title="FDWS v1.3: for a popover widget, bind to data the host passed in via $context.&lt;key&gt;.value — the key must match one declared in the host's Open Widget Popover Context Map. Also used for any other raw stateVar string not in this widget's own state[] list.">ⓘ</span></label>
-          <input type="text" id="c-bind-state-custom-input" class="prop-input" value="${stateIsCustom ? (binding.stateVar || '') : ''}" placeholder="e.g. $context.currentFreq.value" />
+          <input type="text" id="c-bind-state-custom-input" class="prop-input" value="${escapeHtmlAttr(stateIsCustom ? (binding.stateVar || '') : '')}" placeholder="e.g. $context.currentFreq.value" />
         </div>
 
         <div class="prop-field" data-tier="advanced">
           <label>Bind to Local State Path <span class="prop-hint" title="FDWS v1.11: unlike 'Bound Local State Var' above (a whole top-level state[] var), this addresses a specific nested/indexed value inside one — e.g. presets[0].label to show one preset slot's label on a separate core.label above its button. Uses the same 'name[index].field' path grammar as popover Context Map entries. Leave blank unless you need this — it's an alternative to the field above, not used together with it. FDWS v1.14: on core.button, this drives the button's own Primary Label reactively (falling back to the static Primary Label text in Props whenever the resolved value is empty) instead of being display-only on core.label/core.display.">ⓘ</span></label>
-          <input type="text" id="c-bind-stateref" class="prop-input" value="${binding.stateRef || ''}" placeholder="e.g. presets[0].label" />
+          <input type="text" id="c-bind-stateref" class="prop-input" value="${escapeHtmlAttr(binding.stateRef || '')}" placeholder="e.g. presets[0].label" />
         </div>
         ${comp.type === 'core.button' ? `
           <div class="prop-field" data-tier="advanced">
             <label>Bind Sublabel to State Path <span class="prop-hint" title="FDWS v1.14: same 'name[index].field' grammar as the field above, but drives this button's Sublabel (Props panel) instead of its Primary Label — independent path, can point at a different state var entirely. Resolved value falls back to the static Sublabel text whenever empty.">ⓘ</span></label>
-            <input type="text" id="c-bind-sublabelstateref" class="prop-input" value="${binding.sublabelStateRef || ''}" placeholder="e.g. presets[0].freq" />
+            <input type="text" id="c-bind-sublabelstateref" class="prop-input" value="${escapeHtmlAttr(binding.sublabelStateRef || '')}" placeholder="e.g. presets[0].freq" />
           </div>
         ` : ''}
         ${comp.type === 'core.indicator' ? `
@@ -307,7 +307,7 @@ export function renderComponentBindings(host, comp, def, body) {
             <label>Test State Var <span class="prop-hint" title="FDWS v1.15: local state[] variable that, when true, forces this indicator lit regardless of its own bound value — for a 'press to test' lamp-test button. Wire the SAME state var into every indicator that should light up together, then have a button toggle that one var.">ⓘ</span></label>
             <select id="c-bind-teststatevar" class="prop-select">
               <option value="" ${!binding.testStateVar ? 'selected' : ''}>None</option>
-              ${stateVars.map((s) => `<option value="${s.name}" ${binding.testStateVar === s.name ? 'selected' : ''}>${s.name} (${s.type})</option>`).join('')}
+              ${stateVars.map((s) => `<option value="${escapeHtmlAttr(s.name)}" ${binding.testStateVar === s.name ? 'selected' : ''}>${escapeHtmlAttr(s.name)} (${escapeHtmlAttr(s.type)})</option>`).join('')}
             </select>
           </div>
         ` : ''}
@@ -322,7 +322,7 @@ export function renderComponentBindings(host, comp, def, body) {
           </div>
           <div class="prop-field prop-custom-block ${ackIsCustom ? '' : 'hidden'}" id="c-bind-ack-custom-block">
             <select id="c-bind-ack-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.ackEvent)}</select>
-            <input type="text" id="c-bind-ack-custom-input" class="prop-input" value="${ackIsCustom ? (binding.ackEvent || '') : ''}" placeholder="Custom acknowledge event" />
+            <input type="text" id="c-bind-ack-custom-input" class="prop-input" value="${escapeHtmlAttr(ackIsCustom ? (binding.ackEvent || '') : '')}" placeholder="Custom acknowledge event" />
             <div class="prop-sanitize-diff hidden" id="c-bind-ack-custom-diff"></div>
           </div>
           <div class="prop-field">
@@ -331,12 +331,12 @@ export function renderComponentBindings(host, comp, def, body) {
           </div>
           <div class="prop-field prop-custom-block ${pushIsCustom ? '' : 'hidden'}" id="c-bind-push-custom-block">
             <select id="c-bind-push-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.pushEvent)}</select>
-            <input type="text" id="c-bind-push-custom-input" class="prop-input" value="${pushIsCustom ? (binding.pushEvent || '') : ''}" placeholder="Custom push event" />
+            <input type="text" id="c-bind-push-custom-input" class="prop-input" value="${escapeHtmlAttr(pushIsCustom ? (binding.pushEvent || '') : '')}" placeholder="Custom push event" />
             <div class="prop-sanitize-diff hidden" id="c-bind-push-custom-diff"></div>
           </div>
           <div class="prop-field">
             <label>Event Category <span class="prop-hint" title="SimConnect event category for Write/Ack/Push events. K_EVENT covers almost everything — only change this if a specific SimConnect event documents a different category.">ⓘ</span></label>
-            <input type="text" id="c-bind-eventcategory" class="prop-input" value="${binding.eventCategory || 'K_EVENT'}" />
+            <input type="text" id="c-bind-eventcategory" class="prop-input" value="${escapeHtmlAttr(binding.eventCategory || 'K_EVENT')}" />
           </div>
         </div>
       `;
