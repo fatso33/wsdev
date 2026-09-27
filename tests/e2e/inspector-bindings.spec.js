@@ -326,12 +326,12 @@ const BINDINGS_SWEEP_CASES = [
   {
     id: 'B3',
     title: 'the indicator Test State Var selects a declared payload var',
-    stateVars: [{ name: P, type: 'boolean', defaultValue: false }],
+    stateVars: [{ name: P, type: P, defaultValue: false }],
     component: { id: 'sweep-pin', type: 'core.indicator', label: 'Sweep pin', props: {}, style: {}, binding: { testStateVar: P } },
     visible: [],
     selects: {
-      '#c-bind-teststatevar': { options: [['', 'None'], [P, `${P} (boolean)`]], value: P },
-      '#c-bind-state': { options: [['', 'None'], [P, `${P} (boolean)`], ['__custom__', 'Custom…']], value: '' },
+      '#c-bind-teststatevar': { options: [['', 'None'], [P, `${P} (${P})`]], value: P },
+      '#c-bind-state': { options: [['', 'None'], [P, `${P} (${P})`], ['__custom__', 'Custom…']], value: '' },
     },
     textValues: {},
     numberAttributes: {},

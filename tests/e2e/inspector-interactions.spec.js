@@ -3,6 +3,7 @@ import {
   openStudio,
   test,
   INJECTION_PAYLOAD as P,
+  INJECTION_PAYLOAD_2 as P2,
   countInjectedInInspector,
   collectRenderErrors,
   installWriteRecorder,
@@ -253,7 +254,9 @@ async function openInteractionsCase(page) {
   return renderErrors;
 }
 
-// Seeds an asset with id P (for the Feedback Sound picker) and a saved popover named P, selects
+// Seeds an asset with id P (for the Feedback Sound picker) and two saved popovers, one with a
+// valid id named P and one with id P named P2 (so both the option value and its text carry a
+// payload; seeding directly skips the save-time id check), selects
 // the sweep component carrying SWEEP_INTERACTIONS, forces the render under test at the Full
 // tier on the Events tab, then opens the edit modal for SWEEP_INTERACTIONS[idx] the same way the
 // app itself does: clicking that card's own ✎ button.
@@ -261,12 +264,12 @@ async function openI2Case(page, idx) {
   const renderErrors = collectRenderErrors(page);
   await openStudio(page);
   await installWriteRecorder(page);
-  await runSeeding(page, ({ widgetId, componentId, interactionsList, popoverId, popoverName, assetId }) => {
-    localStorage.setItem('fdws_saved_widgets', JSON.stringify([{ id: popoverId, kind: 'popover', meta: { name: popoverName } }]));
+  await runSeeding(page, ({ widgetId, componentId, interactionsList, popovers, assetId }) => {
+    localStorage.setItem('fdws_saved_widgets', JSON.stringify(popovers.map(([id, name]) => ({ id, kind: 'popover', meta: { name } }))));
     const { state } = window.__studioApp;
     state.setWidgetDef({ id: widgetId, assets: [{ id: assetId }] }, false, 'sweep');
     state.addComponent({ id: componentId, type: 'core.button', label: 'Sweep pin', props: {}, style: {}, interactions: interactionsList });
-  }, { widgetId: SWEEP_WIDGET_ID, componentId: SWEEP_COMPONENT_ID, interactionsList: SWEEP_INTERACTIONS, popoverId: SWEEP_POPOVER_ID, popoverName: P, assetId: P });
+  }, { widgetId: SWEEP_WIDGET_ID, componentId: SWEEP_COMPONENT_ID, interactionsList: SWEEP_INTERACTIONS, popovers: [[SWEEP_POPOVER_ID, P], [P, P2]], assetId: P });
   await snapshotWidgetDef(page);
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
   await page.getByTestId('inspector-tab-events').click();
@@ -324,7 +327,10 @@ for (const c of I2_CASES) {
     for (const selector of c.visible) await expect(page.locator(selector), selector).toBeVisible();
     expect(await countInjectedInInspector(page)).toBe(0);
     expect(await optionList(page, '#im-feedback-sound')).toEqual([{ value: '', text: 'None' }, { value: P, text: P }]);
-    if (c.checkPopoverOption) expect(await optionList(page, '#im-popover-id')).toEqual([{ value: SWEEP_POPOVER_ID, text: P }]);
+    if (c.checkPopoverOption) {
+      expect(await optionList(page, '#im-popover-id')).toEqual([{ value: SWEEP_POPOVER_ID, text: P }, { value: P, text: P2 }]);
+      await expect(page.locator('#im-popover-id')).toHaveValue(P);
+    }
     for (const [selector, value] of Object.entries(c.textValues)) await expect(page.locator(selector), selector).toHaveValue(value);
     await page.locator('[data-modal-cancel]').click();
     await expect(page.locator('.studio-modal-box')).toHaveCount(0);
@@ -335,10 +341,11 @@ for (const c of I2_CASES) {
 
 test('sweep I3: delete confirm shows the exact trigger and action type, injects nothing, Cancel writes nothing', async ({ page }) => {
   const renderErrors = await openInteractionsCase(page);
-  await page.locator('.btn-del-inter').first().click();
+  // The last card: its action type P has no core. prefix to strip, so both halves carry the payload.
+  await page.locator(`.btn-del-inter[data-idx="${SWEEP_INTERACTIONS.length - 1}"]`).click();
   await expect(page.locator('.modal-confirm-text')).toBeVisible();
   expect(await countInjectedInInspector(page)).toBe(0);
-  await expect(page.locator('.modal-confirm-text')).toContainText(P);
+  await expect(page.locator('.modal-confirm-text')).toHaveText(`Remove the "${P}" → ${P} interaction?`);
   await page.locator('[data-modal-cancel]').click();
   await expect(page.locator('.studio-modal-box')).toHaveCount(0);
   expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });

@@ -200,6 +200,7 @@ async function clickUnrecControl(page, rid, suffix) {
 test('sweep C1: known type with an authored id, layer group and unknown scalar render exactly, inject nothing and write nothing', async ({ page }) => {
   const renderErrors = await openComponentCase(page, {
     groupId: P,
+    groupZ: P,
     gridVal: P,
     comp: {
       id: P,
@@ -212,7 +213,7 @@ test('sweep C1: known type with an authored id, layer group and unknown scalar r
     },
   }, (arg) => {
     const { state } = window.__studioApp;
-    state.setWidgetDef({ layerGroups: [{ id: arg.groupId, z: 5 }], layout: { grid: { columns: arg.gridVal, rows: arg.gridVal } } }, false, 'sweep');
+    state.setWidgetDef({ layerGroups: [{ id: arg.groupId, z: arg.groupZ }], layout: { grid: { columns: arg.gridVal, rows: arg.gridVal } } }, false, 'sweep');
     state.addComponent(arg.comp);
   });
 
@@ -232,8 +233,8 @@ test('sweep C1: known type with an authored id, layer group and unknown scalar r
   expect(await countInjectedInInspector(page)).toBe(0);
 
   await expect(page.locator('.inspector-header .inspector-title')).toHaveText(P);
-  // groupZ 5 plus the string layer.z concatenates.
-  await expect(page.locator('.inspector-header .inspector-sub')).toHaveText(`ID: ${P} • Effective Z: 5${P}`);
+  // Effective Z is groupZ + layer.z, so the two string payloads concatenate.
+  await expect(page.locator('.inspector-header .inspector-sub')).toHaveText(`ID: ${P} • Effective Z: ${P}${P}`);
   await expect(layoutBadge).toHaveText(`${P}×${P} @ (${P},${P}) · ${P}`);
   await expect(page.locator('#c-label')).toHaveValue(P);
   await expect(page.locator('#c-id')).toHaveValue(P);
@@ -244,7 +245,7 @@ test('sweep C1: known type with an authored id, layer group and unknown scalar r
   await expect(page.locator('#c-layout-row')).toHaveAttribute('max', P);
   await expect(page.locator('#c-layout-w')).toHaveAttribute('max', P);
   await expect(page.locator('#c-layout-h')).toHaveAttribute('max', P);
-  expect(await optionsOf(page, '#c-layer-group')).toEqual([['', 'None (Ungrouped)'], [P, `${P} (Z: 5)`]]);
+  expect(await optionsOf(page, '#c-layer-group')).toEqual([['', 'None (Ungrouped)'], [P, `${P} (Z: ${P})`]]);
   await expect(page.locator('#c-layer-group')).toHaveValue(P);
 
   expect(row.displayText).toBe(JSON.stringify(P));
@@ -289,11 +290,14 @@ test('sweep C2: core.list item template JSON round-trips a nested label without 
 
 test('sweep C3: an unknown component type shows literally through the default branch', async ({ page }) => {
   const renderErrors = await openComponentCase(page, {
-    comp: { id: 'sweep-pin', type: P, props: {}, style: {} },
+    // A label on a type with no content field renders the Display Label branch of #c-label.
+    comp: { id: 'sweep-pin', type: P, label: P, props: {}, style: {} },
   }, (arg) => {
     window.__studioApp.state.addComponent(arg.comp);
   });
   await expect(page.locator('.inspector-badge.comp-type')).toHaveCount(1);
+  await expect(page.locator('#c-label')).toHaveCount(1);
+  await expect(page.locator('#c-label')).toHaveValue(P);
   await page.getByTestId('inspector-tab-data').click();
   const propsMount = page.getByTestId('inspector-panel-data').locator('.caps-empty');
   await expect(propsMount).toHaveCount(1);
