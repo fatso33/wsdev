@@ -279,6 +279,14 @@ export function renderComponentBindings(host, comp, def, body) {
         ${fastEventFields('fastdecrement', 'fastDecrementEvent', 'Fast Decrement Deck Event (Coarse Counter-Clockwise)', 'counter-clockwise')}
         ` : ''}
 
+        <div class="prop-field" data-tier="build">
+          <label>Bound Local State Var</label>
+          <select id="c-bind-state" class="prop-select">
+            <option value="" ${!binding.stateVar ? 'selected' : ''}>None</option>
+            ${stateVars.map((s) => `<option value="${s.name}" ${!stateIsCustom && binding.stateVar === s.name ? 'selected' : ''}>${s.name} (${s.type})</option>`).join('')}
+            <option value="${CUSTOM_OPTION_VALUE}" ${stateIsCustom ? 'selected' : ''}>Custom…</option>
+          </select>
+        </div>
         <div class="prop-field prop-custom-block ${stateIsCustom ? '' : 'hidden'}" id="c-bind-state-custom-block">
           <label>Custom / $context reference <span class="prop-hint" title="FDWS v1.3: for a popover widget, bind to data the host passed in via $context.&lt;key&gt;.value — the key must match one declared in the host's Open Widget Popover Context Map. Also used for any other raw stateVar string not in this widget's own state[] list.">ⓘ</span></label>
           <input type="text" id="c-bind-state-custom-input" class="prop-input" value="${stateIsCustom ? (binding.stateVar || '') : ''}" placeholder="e.g. $context.currentFreq.value" />

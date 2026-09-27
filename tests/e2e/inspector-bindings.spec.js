@@ -1,7 +1,10 @@
 import { test, expect, openStudio } from './fixtures/inspectorHarness.js';
 
-async function seed(page, type = 'core.button', binding = {}, props = {}) {
+async function seed(page, type = 'core.button', binding = {}, props = {}, { blankState = false } = {}) {
   await openStudio(page);
+  if (blankState) {
+    await page.evaluate(() => window.__studioApp.state.setWidgetDef({}, false, 'blank'));
+  }
   await page.evaluate(({ type, binding, props }) => {
     const { state } = window.__studioApp;
     state.addComponent({ id: 'binding-pin', type, label: 'Binding pin', binding, props, style: {} });
@@ -147,6 +150,55 @@ test('tester paste reports four states and writes raw units or strips K:', async
   expect((await snapshot(page)).binding.unit).toBe('string');
   expect(await paste('write', { kind: 'write', event: 'K:TEST', value: 2 })).toBe('Pasted TEST. It also sends the value 2 — a binding has no value field, so set that on this component’s interaction action.');
   expect((await snapshot(page)).binding.writeEvent).toBe('TEST');
+});
+
+test('Bound Local State Var picker is hidden in Guided and visible in Build and Full, listing declared vars', async ({ page }) => {
+  await seed(page, 'core.button', {}, {}, { blankState: true });
+  await page.evaluate(() => window.__studioApp.state.addStateVar({ name: 'switchOn', type: 'boolean', defaultValue: false }));
+  await page.locator('[data-mode="guided"]').click();
+  await page.getByTestId('inspector-tab-data').click();
+  await expect(page.locator('#c-bind-state')).toBeHidden();
+  await page.locator('[data-mode="build"]').click();
+  await page.getByTestId('inspector-tab-data').click();
+  await expect(page.locator('#c-bind-state')).toBeVisible();
+  expect(await page.locator('#c-bind-state option').allTextContents()).toEqual(['None', 'switchOn (boolean)', 'Custom…']);
+  await page.locator('[data-mode="full"]').click();
+  await page.getByTestId('inspector-tab-data').click();
+  await expect(page.locator('#c-bind-state')).toBeVisible();
+});
+
+test('Bound Local State Var picker binds a declared variable, clears it, and reveals Custom without a write', async ({ page }) => {
+  await seed(page, 'core.button', {}, {}, { blankState: true });
+  await page.evaluate(() => window.__studioApp.state.addStateVar({ name: 'switchOn', type: 'boolean', defaultValue: false }));
+  await page.locator('[data-mode="build"]').click();
+  await page.getByTestId('inspector-tab-data').click();
+  await page.locator('#c-bind-state').selectOption('switchOn');
+  expect((await snapshot(page)).binding.stateVar).toBe('switchOn');
+  await page.locator('#c-bind-state').selectOption('');
+  expect((await snapshot(page)).binding.stateVar).toBeUndefined();
+  const callsBeforeCustom = (await snapshot(page)).calls.length;
+  await page.locator('#c-bind-state').selectOption('__custom__');
+  await expect(page.locator('#c-bind-state-custom-block')).not.toHaveClass(/hidden/);
+  expect((await snapshot(page)).calls).toHaveLength(callsBeforeCustom);
+  await page.locator('#c-bind-state-custom-input').fill('$context.x.value');
+  await page.locator('#c-bind-state-custom-input').dispatchEvent('change');
+  expect((await snapshot(page)).binding.stateVar).toBe('$context.x.value');
+});
+
+test('a stored state var naming no declared variable selects Custom with no write on render; a widget with no declared vars offers only None and Custom', async ({ page }) => {
+  await seed(page, 'core.button', { stateVar: 'renamedVar' }, {}, { blankState: true });
+  await page.locator('[data-mode="build"]').click();
+  await page.getByTestId('inspector-tab-data').click();
+  expect((await snapshot(page)).calls).toHaveLength(0);
+  await expect(page.locator('#c-bind-state')).toHaveValue('__custom__');
+  await expect(page.locator('#c-bind-state-custom-input')).toHaveValue('renamedVar');
+  expect(await page.locator('#c-bind-state option').allTextContents()).toEqual(['None', 'Custom…']);
+});
+
+test('a pollFrequencyHz outside 1/100 still shows Fast (characterization)', async ({ page }) => {
+  await seed(page, 'core.button', { pollFrequencyHz: 20 });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await expect(page.locator('#c-bind-pollrate')).toHaveValue('100');
 });
 
 test('raw unit, indicator Test State Var and Find-it use their existing owners', async ({ page }) => {
