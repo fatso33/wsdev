@@ -220,8 +220,21 @@ test('sweep C1: known type with an authored id, layer group and unknown scalar r
     await expect(page.locator(selector), selector).toHaveCount(1);
   }
   await expect(page.locator('#c-layer-group')).toHaveCount(1);
+  const layoutBadge = page.locator('#studio-right-sidebar .inspector-tab-section-header')
+    .filter({ has: page.locator('.group-title', { hasText: /^LAYOUT & LAYERING$/ }) })
+    .locator('.group-badge');
+  await expect(page.locator('.inspector-header .inspector-title')).toHaveCount(1);
+  await expect(page.locator('.inspector-header .inspector-sub')).toHaveCount(1);
+  await expect(layoutBadge).toHaveCount(1);
+  const rid = `${P}-data-unrec-0`;
+  const row = await unrecRowState(page, rid);
+  expect(row.exists).toBe(true);
   expect(await countInjectedInInspector(page)).toBe(0);
 
+  await expect(page.locator('.inspector-header .inspector-title')).toHaveText(P);
+  // groupZ 5 plus the string layer.z concatenates.
+  await expect(page.locator('.inspector-header .inspector-sub')).toHaveText(`ID: ${P} • Effective Z: 5${P}`);
+  await expect(layoutBadge).toHaveText(`${P}×${P} @ (${P},${P}) · ${P}`);
   await expect(page.locator('#c-label')).toHaveValue(P);
   await expect(page.locator('#c-id')).toHaveValue(P);
   for (const selector of ['#c-layer-z', '#c-layout-col', '#c-layout-row', '#c-layout-w', '#c-layout-h']) {
@@ -234,9 +247,6 @@ test('sweep C1: known type with an authored id, layer group and unknown scalar r
   expect(await optionsOf(page, '#c-layer-group')).toEqual([['', 'None (Ungrouped)'], [P, `${P} (Z: 5)`]]);
   await expect(page.locator('#c-layer-group')).toHaveValue(P);
 
-  const rid = `${P}-data-unrec-0`;
-  const row = await unrecRowState(page, rid);
-  expect(row.exists).toBe(true);
   expect(row.displayText).toBe(JSON.stringify(P));
 
   expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
@@ -246,6 +256,7 @@ test('sweep C1: known type with an authored id, layer group and unknown scalar r
   await page.getByTestId('inspector-tab-data').click();
   await clickUnrecControl(page, rid, 'toggle');
   expect((await unrecRowState(page, rid)).panelHidden).toBe(false);
+  await page.evaluate(({ id, value }) => { document.getElementById(`${id}-input`).value = value; }, { id: rid, value: P2 });
   await clickUnrecControl(page, rid, 'cancel');
   const afterCancel = await unrecRowState(page, rid);
   expect(afterCancel.panelHidden).toBe(true);
@@ -283,10 +294,10 @@ test('sweep C3: an unknown component type shows literally through the default br
     window.__studioApp.state.addComponent(arg.comp);
   });
   await expect(page.locator('.inspector-badge.comp-type')).toHaveCount(1);
-  await expect(page.locator('.inspector-badge.comp-type')).toHaveText(P);
   await page.getByTestId('inspector-tab-data').click();
   const propsMount = page.getByTestId('inspector-panel-data').locator('.caps-empty');
   await expect(propsMount).toHaveCount(1);
+  await expect(page.locator('.inspector-badge.comp-type')).toHaveText(P);
   await expect(propsMount).toHaveText(`Standard properties active for ${P}`);
   expect(await countInjectedInInspector(page)).toBe(0);
   expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
@@ -321,10 +332,10 @@ test('sweep C4b: selector Rotary positions render exactly', async ({ page }) => 
   const mount = page.locator('#rf-props-positions');
   await expect(mount).toHaveCount(1);
   await expect(mount.locator('input.row-field[data-field="value"]')).toHaveCount(1);
-  await expect(mount.locator('input.row-field[data-field="value"]')).toHaveValue(P);
   await expect(mount.locator('input.row-field[data-field="label"]')).toHaveCount(1);
-  await expect(mount.locator('input.row-field[data-field="label"]')).toHaveValue(P);
   await expect(mount.locator('input.row-field[data-field="angle"]')).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="value"]')).toHaveValue(P);
+  await expect(mount.locator('input.row-field[data-field="label"]')).toHaveValue(P);
   await expect(mount.locator('input.row-field[data-field="angle"]')).toHaveAttribute('value', P);
   expect(await countInjectedInInspector(page)).toBe(0);
   expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
@@ -341,15 +352,15 @@ test('sweep C4c: rocker zones render exactly, including a custom write event', a
   const mount = page.locator('#rf-props-zones');
   await expect(mount).toHaveCount(1);
   await expect(mount.locator('input.row-field[data-field="id"]')).toHaveCount(1);
-  await expect(mount.locator('input.row-field[data-field="id"]')).toHaveValue(P);
   await expect(mount.locator('input.row-field[data-field="label"]')).toHaveCount(1);
-  await expect(mount.locator('input.row-field[data-field="label"]')).toHaveValue(P);
   await expect(mount.locator('select.row-field[data-field="writeEvent"]')).toHaveCount(1);
-  await expect(mount.locator('select.row-field[data-field="writeEvent"]')).toHaveValue('__custom__');
   await expect(mount.locator('.row-field-custom[data-field="writeEvent"]')).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="repeatRate"]')).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="id"]')).toHaveValue(P);
+  await expect(mount.locator('input.row-field[data-field="label"]')).toHaveValue(P);
+  await expect(mount.locator('select.row-field[data-field="writeEvent"]')).toHaveValue('__custom__');
   await expect(mount.locator('.row-field-custom[data-field="writeEvent"]')).toBeVisible();
   await expect(mount.locator('.row-field-custom[data-field="writeEvent"]')).toHaveValue(P);
-  await expect(mount.locator('input.row-field[data-field="repeatRate"]')).toHaveCount(1);
   await expect(mount.locator('input.row-field[data-field="repeatRate"]')).toHaveAttribute('value', P);
   expect(await countInjectedInInspector(page)).toBe(0);
   expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
