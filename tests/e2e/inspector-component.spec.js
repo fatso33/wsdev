@@ -1,4 +1,16 @@
-import { expect, openStudio, test } from './fixtures/inspectorHarness.js';
+import {
+  expect,
+  openStudio,
+  test,
+  INJECTION_PAYLOAD as P,
+  INJECTION_PAYLOAD_2 as P2,
+  countInjectedInInspector,
+  collectRenderErrors,
+  installWriteRecorder,
+  runSeeding,
+  snapshotWidgetDef,
+  readWriteCheck,
+} from './fixtures/inspectorHarness.js';
 
 async function selectTypeOnDataTab(page, type, id) {
   await page.evaluate(({ type, id }) => {
@@ -141,4 +153,223 @@ test('changing selected component resets appearance target fields', async ({ pag
     const host = window.__studioApp.inspector;
     return { id: host._styleTabCompId, tab: host._styleTab, rule: host._styleTabRuleIndex };
   })).toEqual({ id: 'target-b', tab: 'normal', rule: null });
+});
+
+// Loads the default widget, seeds under the write recorder, snapshots it, then forces the
+// render under test at the Full tier. Component-level seeding (addComponent/setWidgetDef)
+// runs under runSeeding's own flag; a multi-selection case also seeds its selectComponent
+// calls inside seedFn so they stay excluded too.
+async function openComponentCase(page, seedArg, seedFn) {
+  const renderErrors = collectRenderErrors(page);
+  await openStudio(page);
+  await installWriteRecorder(page);
+  await runSeeding(page, seedFn, seedArg);
+  await snapshotWidgetDef(page);
+  await page.evaluate(() => {
+    const { inspector } = window.__studioApp;
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  return renderErrors;
+}
+
+function optionsOf(page, selector) {
+  return page.locator(selector).locator('option').evaluateAll((options) => options.map((o) => [o.value, o.textContent]));
+}
+
+// Reads the unrecognised-property row identified by `rid` via getElementById, never a CSS
+// selector: `rid` embeds the authored comp.id verbatim (the DOM's actual id, once the
+// browser decodes the escaped HTML), which is not safe to splice into a selector string.
+async function unrecRowState(page, rid) {
+  return page.evaluate((id) => {
+    const $ = (suffix) => document.getElementById(`${id}-${suffix}`);
+    const nodes = ['display', 'toggle', 'panel', 'input', 'save', 'cancel'].map($);
+    return {
+      exists: nodes.every(Boolean),
+      displayText: nodes[0]?.textContent ?? null,
+      panelHidden: nodes[2]?.classList.contains('hidden') ?? null,
+      inputValue: nodes[3]?.value ?? null,
+    };
+  }, rid);
+}
+
+async function clickUnrecControl(page, rid, suffix) {
+  await page.evaluate(({ id, suffix }) => document.getElementById(`${id}-${suffix}`).click(), { id: rid, suffix });
+}
+
+test('sweep C1: known type with an authored id, layer group and unknown scalar render exactly, inject nothing and write nothing', async ({ page }) => {
+  const renderErrors = await openComponentCase(page, {
+    groupId: P,
+    gridVal: P,
+    comp: {
+      id: P,
+      type: 'core.label',
+      label: P,
+      layer: { group: P, z: P },
+      layout: { col: P, row: P, w: P, h: P },
+      props: { text: 'shown', xUnknown: P },
+      style: {},
+    },
+  }, (arg) => {
+    const { state } = window.__studioApp;
+    state.setWidgetDef({ layerGroups: [{ id: arg.groupId, z: 5 }], layout: { grid: { columns: arg.gridVal, rows: arg.gridVal } } }, false, 'sweep');
+    state.addComponent(arg.comp);
+  });
+
+  for (const selector of ['#c-label', '#c-id', '#c-layer-z', '#c-layout-col', '#c-layout-row', '#c-layout-w', '#c-layout-h']) {
+    await expect(page.locator(selector), selector).toHaveCount(1);
+  }
+  await expect(page.locator('#c-layer-group')).toHaveCount(1);
+  expect(await countInjectedInInspector(page)).toBe(0);
+
+  await expect(page.locator('#c-label')).toHaveValue(P);
+  await expect(page.locator('#c-id')).toHaveValue(P);
+  for (const selector of ['#c-layer-z', '#c-layout-col', '#c-layout-row', '#c-layout-w', '#c-layout-h']) {
+    await expect(page.locator(selector), selector).toHaveAttribute('value', P);
+  }
+  await expect(page.locator('#c-layout-col')).toHaveAttribute('max', P);
+  await expect(page.locator('#c-layout-row')).toHaveAttribute('max', P);
+  await expect(page.locator('#c-layout-w')).toHaveAttribute('max', P);
+  await expect(page.locator('#c-layout-h')).toHaveAttribute('max', P);
+  expect(await optionsOf(page, '#c-layer-group')).toEqual([['', 'None (Ungrouped)'], [P, `${P} (Z: 5)`]]);
+  await expect(page.locator('#c-layer-group')).toHaveValue(P);
+
+  const rid = `${P}-data-unrec-0`;
+  const row = await unrecRowState(page, rid);
+  expect(row.exists).toBe(true);
+  expect(row.displayText).toBe(JSON.stringify(P));
+
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+
+  // AC-5: the unknown-property block still works with this authored comp.id.
+  await page.getByTestId('inspector-tab-data').click();
+  await clickUnrecControl(page, rid, 'toggle');
+  expect((await unrecRowState(page, rid)).panelHidden).toBe(false);
+  await clickUnrecControl(page, rid, 'cancel');
+  const afterCancel = await unrecRowState(page, rid);
+  expect(afterCancel.panelHidden).toBe(true);
+  expect(afterCancel.inputValue).toBe(P);
+
+  await clickUnrecControl(page, rid, 'toggle');
+  await page.evaluate(({ id, value }) => { document.getElementById(`${id}-input`).value = value; }, { id: rid, value: P2 });
+  await snapshotWidgetDef(page);
+  await clickUnrecControl(page, rid, 'save');
+  expect(await page.evaluate((id) => window.__studioApp.state.getComponent(id).props.xUnknown, P)).toBe(P2);
+  const writeResult = await readWriteCheck(page);
+  expect(writeResult.widgetDefChanged).toBe(true);
+  expect(writeResult.writes.map((w) => w.method)).toEqual(['updateComponent', 'saveHistory']);
+});
+
+test('sweep C2: core.list item template JSON round-trips a nested label without injection', async ({ page }) => {
+  const itemTemplate = { components: [{ id: 'row', type: 'core.label', label: P, props: {}, layout: { col: 1, row: 1, w: 12, h: 1 }, style: {} }] };
+  const renderErrors = await openComponentCase(page, {
+    comp: { id: 'sweep-pin', type: 'core.list', props: { itemTemplate }, style: {} },
+  }, (arg) => {
+    window.__studioApp.state.addComponent(arg.comp);
+  });
+  await page.getByTestId('inspector-tab-data').click();
+  await expect(page.locator('#p-list-itemtemplate')).toHaveCount(1);
+  expect(await countInjectedInInspector(page)).toBe(0);
+  await expect(page.locator('#p-list-itemtemplate')).toHaveValue(JSON.stringify(itemTemplate, null, 0));
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+test('sweep C3: an unknown component type shows literally through the default branch', async ({ page }) => {
+  const renderErrors = await openComponentCase(page, {
+    comp: { id: 'sweep-pin', type: P, props: {}, style: {} },
+  }, (arg) => {
+    window.__studioApp.state.addComponent(arg.comp);
+  });
+  await expect(page.locator('.inspector-badge.comp-type')).toHaveCount(1);
+  await expect(page.locator('.inspector-badge.comp-type')).toHaveText(P);
+  await page.getByTestId('inspector-tab-data').click();
+  const propsMount = page.getByTestId('inspector-panel-data').locator('.caps-empty');
+  await expect(propsMount).toHaveCount(1);
+  await expect(propsMount).toHaveText(`Standard properties active for ${P}`);
+  expect(await countInjectedInInspector(page)).toBe(0);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+test('sweep C4a: gauge value and output range endpoints render exactly', async ({ page }) => {
+  const renderErrors = await openComponentCase(page, {
+    comp: { id: 'sweep-pin', type: 'core.gauge', props: { valueRange: [P, P], outputRange: [P, P] }, style: {} },
+  }, (arg) => {
+    window.__studioApp.state.addComponent(arg.comp);
+  });
+  await page.getByTestId('inspector-tab-data').click();
+  await expect(page.locator('.range-lo')).toHaveCount(2);
+  await expect(page.locator('.range-hi')).toHaveCount(2);
+  for (const selector of ['.range-lo', '.range-hi']) {
+    const values = await page.locator(selector).evaluateAll((els) => els.map((el) => el.getAttribute('value')));
+    expect(values, selector).toEqual([P, P]);
+  }
+  expect(await countInjectedInInspector(page)).toBe(0);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+test('sweep C4b: selector Rotary positions render exactly', async ({ page }) => {
+  const renderErrors = await openComponentCase(page, {
+    comp: { id: 'sweep-pin', type: 'core.selector', props: { positions: [{ value: P, label: P, angle: P }] }, style: {} },
+  }, (arg) => {
+    window.__studioApp.state.addComponent(arg.comp);
+  });
+  await page.getByTestId('inspector-tab-data').click();
+  const mount = page.locator('#rf-props-positions');
+  await expect(mount).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="value"]')).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="value"]')).toHaveValue(P);
+  await expect(mount.locator('input.row-field[data-field="label"]')).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="label"]')).toHaveValue(P);
+  await expect(mount.locator('input.row-field[data-field="angle"]')).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="angle"]')).toHaveAttribute('value', P);
+  expect(await countInjectedInInspector(page)).toBe(0);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+test('sweep C4c: rocker zones render exactly, including a custom write event', async ({ page }) => {
+  const renderErrors = await openComponentCase(page, {
+    comp: { id: 'sweep-pin', type: 'core.rocker', props: { zones: [{ id: P, label: P, writeEvent: P, repeatRate: P }] }, style: {} },
+  }, (arg) => {
+    window.__studioApp.state.addComponent(arg.comp);
+  });
+  await page.getByTestId('inspector-tab-data').click();
+  const mount = page.locator('#rf-props-zones');
+  await expect(mount).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="id"]')).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="id"]')).toHaveValue(P);
+  await expect(mount.locator('input.row-field[data-field="label"]')).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="label"]')).toHaveValue(P);
+  await expect(mount.locator('select.row-field[data-field="writeEvent"]')).toHaveCount(1);
+  await expect(mount.locator('select.row-field[data-field="writeEvent"]')).toHaveValue('__custom__');
+  await expect(mount.locator('.row-field-custom[data-field="writeEvent"]')).toHaveCount(1);
+  await expect(mount.locator('.row-field-custom[data-field="writeEvent"]')).toBeVisible();
+  await expect(mount.locator('.row-field-custom[data-field="writeEvent"]')).toHaveValue(P);
+  await expect(mount.locator('input.row-field[data-field="repeatRate"]')).toHaveCount(1);
+  await expect(mount.locator('input.row-field[data-field="repeatRate"]')).toHaveAttribute('value', P);
+  expect(await countInjectedInInspector(page)).toBe(0);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+test('sweep C5: a multi-selection header lists both authored ids literally', async ({ page }) => {
+  const renderErrors = await openComponentCase(page, {
+    compA: { id: P, type: 'core.button', props: {}, style: {} },
+    compB: { id: P2, type: 'core.button', props: {}, style: {} },
+  }, (arg) => {
+    const { state } = window.__studioApp;
+    const idA = state.addComponent(arg.compA).id;
+    const idB = state.addComponent(arg.compB).id;
+    state.selectComponent(idA);
+    state.selectComponent(idB, true);
+  });
+  await expect(page.locator('.inspector-sub')).toHaveCount(1);
+  await expect(page.locator('.inspector-sub')).toHaveText(`${P}, ${P2}`);
+  expect(await countInjectedInInspector(page)).toBe(0);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
 });

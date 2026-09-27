@@ -183,8 +183,8 @@ export function renderRangeEditor(
       <div class="prop-field">
         <label>${title}${hint ? `<span class="prop-hint" title="${hint}"> ⓘ</span>` : ''}</label>
         <div class="prop-row-2">
-          <input type="number" step="any" class="prop-input range-lo" value="${lo}" />
-          <input type="number" step="any" class="prop-input range-hi" value="${hi}" />
+          <input type="number" step="any" class="prop-input range-lo" value="${escapeHtmlAttr(lo)}" />
+          <input type="number" step="any" class="prop-input range-hi" value="${escapeHtmlAttr(hi)}" />
         </div>
       </div>
     `;
@@ -230,10 +230,10 @@ export function renderRowListEditor(host, mount, comp, propKey, rows, spec) {
             ${opts}
             <option value="${CUSTOM_OPTION_VALUE}" ${val && !DECK_EVENT_NAMES.includes(val) ? 'selected' : ''}>Custom…</option>
           </select>
-          <input type="text" class="row-field row-field-custom ${val && !DECK_EVENT_NAMES.includes(val) ? '' : 'hidden'}" data-field="${field.key}" value="${val && !DECK_EVENT_NAMES.includes(val) ? val : ''}" placeholder="Custom event name" />
+          <input type="text" class="row-field row-field-custom ${val && !DECK_EVENT_NAMES.includes(val) ? '' : 'hidden'}" data-field="${field.key}" value="${escapeHtmlAttr(val && !DECK_EVENT_NAMES.includes(val) ? val : '')}" placeholder="Custom event name" />
         `;
     }
-    return `<input type="${field.type}" step="any" class="row-field" data-field="${field.key}" value="${val !== undefined ? val : ''}" placeholder="${field.label}" />`;
+    return `<input type="${field.type}" step="any" class="row-field" data-field="${field.key}" value="${escapeHtmlAttr(val !== undefined ? val : '')}" placeholder="${field.label}" />`;
   };
 
   mount.innerHTML = `

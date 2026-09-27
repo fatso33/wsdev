@@ -49,11 +49,11 @@ export function renderComponentInspector(host, comp) {
   header.className = 'inspector-header';
   header.innerHTML = `
     <div class="inspector-title-row">
-      <span class="inspector-badge comp-type">${comp.type.replace('core.', '')}</span>
-      <h3 class="inspector-title">${comp.label || comp.id}</h3>
+      <span class="inspector-badge comp-type">${escapeHtmlAttr(comp.type.replace('core.', ''))}</span>
+      <h3 class="inspector-title">${escapeHtmlAttr(comp.label || comp.id)}</h3>
       <button id="btn-deselect-comp" class="btn-mini-close" title="Back to Widget Root">✕</button>
     </div>
-    <div class="inspector-sub">ID: ${comp.id} • Effective Z: ${effectiveZ}</div>
+    <div class="inspector-sub">ID: ${escapeHtmlAttr(comp.id)} • Effective Z: ${escapeHtmlAttr(effectiveZ)}</div>
   `;
   host.container.appendChild(header);
 
@@ -86,19 +86,19 @@ export function renderComponentInspector(host, comp) {
         </div>
         <div class="prop-field">
           <label>Called <span class="prop-hint" title="Studio-only authoring name — shown in the layer tree and this panel's header. Never rendered on the widget itself.">ⓘ</span></label>
-          <input type="text" id="c-label" class="prop-input" value="${comp.label || ''}" placeholder="Component label..." />
+          <input type="text" id="c-label" class="prop-input" value="${escapeHtmlAttr(comp.label || '')}" placeholder="Component label..." />
         </div>
       </div>
       ` : `
       <div class="prop-field">
         <label>Display Label</label>
-        <input type="text" id="c-label" class="prop-input" value="${comp.label || ''}" placeholder="Component label..." />
+        <input type="text" id="c-label" class="prop-input" value="${escapeHtmlAttr(comp.label || '')}" placeholder="Component label..." />
       </div>
       `}
       <div class="prop-row-2">
         <div class="prop-field" data-tier="advanced">
           <label>Component ID</label>
-          <input type="text" id="c-id" class="prop-input" value="${comp.id}" />
+          <input type="text" id="c-id" class="prop-input" value="${escapeHtmlAttr(comp.id)}" />
         </div>
         <div class="prop-field">
           <label>Type</label>
@@ -114,12 +114,12 @@ export function renderComponentInspector(host, comp) {
           <label>Layer Group <span class="prop-hint" title="Puts this component on a named z-order layer (e.g. 'background', 'controls') defined in the Layers panel's own Z field — lets a whole group of components move in front of/behind another group at once, instead of hand-tuning every component's Z individually.">ⓘ</span></label>
           <select id="c-layer-group" class="prop-select">
             <option value="" ${!layer.group ? 'selected' : ''}>None (Ungrouped)</option>
-            ${layerGroups.map((g) => `<option value="${g.id}" ${layer.group === g.id ? 'selected' : ''}>${g.id} (Z: ${g.z || 0})</option>`).join('')}
+            ${layerGroups.map((g) => `<option value="${escapeHtmlAttr(g.id)}" ${layer.group === g.id ? 'selected' : ''}>${escapeHtmlAttr(g.id)} (Z: ${escapeHtmlAttr(g.z || 0)})</option>`).join('')}
           </select>
         </div>
         <div class="prop-field">
           <label>Local Z-Offset <span class="prop-hint" title="Fine z-order adjustment on top of the Layer Group's own Z (Effective Z, shown in the header above, is the group's Z plus this offset) — use this to order two components within the SAME group, e.g. an indicator's glow behind its lens.">ⓘ</span></label>
-          <input type="number" id="c-layer-z" class="prop-input" value="${layer.z ?? 0}" min="-1000" max="1000" />
+          <input type="number" id="c-layer-z" class="prop-input" value="${escapeHtmlAttr(layer.z ?? 0)}" min="-1000" max="1000" />
         </div>
       </div>
 
@@ -188,11 +188,11 @@ export function renderComponentInspector(host, comp) {
       <div class="prop-row-2" data-tier="build">
         <div class="prop-field">
           <label>Column (X)</label>
-          <input type="number" id="c-layout-col" class="prop-input" value="${layout.col || 1}" min="1" max="${maxCols}" />
+          <input type="number" id="c-layout-col" class="prop-input" value="${escapeHtmlAttr(layout.col || 1)}" min="1" max="${escapeHtmlAttr(maxCols)}" />
         </div>
         <div class="prop-field">
           <label>Row (Y)</label>
-          <input type="number" id="c-layout-row" class="prop-input" value="${layout.row || 1}" min="1" max="${maxRows}" />
+          <input type="number" id="c-layout-row" class="prop-input" value="${escapeHtmlAttr(layout.row || 1)}" min="1" max="${escapeHtmlAttr(maxRows)}" />
         </div>
       </div>
     `;
@@ -200,10 +200,10 @@ export function renderComponentInspector(host, comp) {
     // Use the same compound-row structure as registry-driven size controls.
     const wField = document.createElement('div');
     wField.className = 'prop-field';
-    wField.innerHTML = `<label>Width (Span Columns)</label><input type="number" id="c-layout-w" class="prop-input" value="${layout.w || 1}" min="1" max="${maxCols}" />`;
+    wField.innerHTML = `<label>Width (Span Columns)</label><input type="number" id="c-layout-w" class="prop-input" value="${escapeHtmlAttr(layout.w || 1)}" min="1" max="${escapeHtmlAttr(maxCols)}" />`;
     const hField = document.createElement('div');
     hField.className = 'prop-field';
-    hField.innerHTML = `<label>Height (Span Rows)</label><input type="number" id="c-layout-h" class="prop-input" value="${layout.h || 1}" min="1" max="${maxRows}" />`;
+    hField.innerHTML = `<label>Height (Span Rows)</label><input type="number" id="c-layout-h" class="prop-input" value="${escapeHtmlAttr(layout.h || 1)}" min="1" max="${escapeHtmlAttr(maxRows)}" />`;
     const sizeRow = host.assembleCompoundRow('compound-row-size', [
       { wrap: wField, label: 'W:', tooltip: 'Width (Span Columns)' },
       { wrap: hField, label: 'H:', tooltip: 'Height (Span Rows)' }
@@ -418,7 +418,7 @@ export function renderTypeSpecificProps(host, comp, body) {
         <label>Item Template (JSON — components[] with props.textBinding: "item.field")
           <button type="button" id="p-list-template-example" class="btn-mini-inline">Insert example</button>
         </label>
-        <textarea id="p-list-itemtemplate" class="prop-input" rows="5">${JSON.stringify(props.itemTemplate || { components: [] }, null, 0)}</textarea>
+        <textarea id="p-list-itemtemplate" class="prop-input" rows="5">${escapeHtmlAttr(JSON.stringify(props.itemTemplate || { components: [] }, null, 0))}</textarea>
         <div id="p-list-itemtemplate-error" class="prop-json-error hidden"></div>
       `;
       body.appendChild(templateWrap);
@@ -489,7 +489,7 @@ export function renderTypeSpecificProps(host, comp, body) {
     }
 
     default:
-      body.innerHTML = `<div class="caps-empty">Standard properties active for ${comp.type}</div>`;
+      body.innerHTML = `<div class="caps-empty">Standard properties active for ${escapeHtmlAttr(comp.type)}</div>`;
       break;
   }
 }
@@ -512,6 +512,7 @@ export function renderUnrecognisedPropertiesBlock(host, items, fdwsVersion, idPr
 
   const rowHtml = (item, idx) => {
     const rid = `${idPrefix}-unrec-${idx}`;
+    const ridAttr = escapeHtmlAttr(rid);
     const badge = `<span class="tmpl-badge">FDWS v${escapeHtmlAttr(fdwsVersion || '?')}</span>`;
     if (!isScalar(item.value)) {
       return `
@@ -523,21 +524,21 @@ export function renderUnrecognisedPropertiesBlock(host, items, fdwsVersion, idPr
     }
     const valueType = typeof item.value;
     const inputHtml = valueType === 'boolean'
-      ? `<input type="checkbox" id="${rid}-input" ${item.value ? 'checked' : ''} />`
-      : `<input type="${valueType === 'number' ? 'number' : 'text'}" id="${rid}-input" class="prop-input" value="${escapeHtmlAttr(item.value)}" />`;
+      ? `<input type="checkbox" id="${ridAttr}-input" ${item.value ? 'checked' : ''} />`
+      : `<input type="${valueType === 'number' ? 'number' : 'text'}" id="${ridAttr}-input" class="prop-input" value="${escapeHtmlAttr(item.value)}" />`;
     return `
       <div class="unrec-props-row">
         <div class="unrec-props-path">${escapeHtmlAttr(item.path)} ${badge}</div>
         <div class="unrec-props-value-line">
-          <span class="unrec-props-value" id="${rid}-display">${escapeHtmlAttr(JSON.stringify(item.value))}</span>
-          <button type="button" class="bar-btn" id="${rid}-toggle">✎ Edit (unvalidated)</button>
+          <span class="unrec-props-value" id="${ridAttr}-display">${escapeHtmlAttr(JSON.stringify(item.value))}</span>
+          <button type="button" class="bar-btn" id="${ridAttr}-toggle">✎ Edit (unvalidated)</button>
         </div>
-        <div class="unrec-props-edit hidden" id="${rid}-panel">
+        <div class="unrec-props-edit hidden" id="${ridAttr}-panel">
           <div class="text-amber unrec-props-warning">⚠ Unrecognised field — this build doesn't know what this value means. Editing it is not validated against any schema.</div>
           ${inputHtml}
           <div class="saved-card-btns">
-            <button type="button" class="bar-btn primary" id="${rid}-save">Save</button>
-            <button type="button" class="bar-btn" id="${rid}-cancel">Cancel</button>
+            <button type="button" class="bar-btn primary" id="${ridAttr}-save">Save</button>
+            <button type="button" class="bar-btn" id="${ridAttr}-cancel">Cancel</button>
           </div>
         </div>
       </div>
@@ -554,11 +555,12 @@ export function renderUnrecognisedPropertiesBlock(host, items, fdwsVersion, idPr
   items.forEach((item, idx) => {
     if (!isScalar(item.value)) return;
     const rid = `${idPrefix}-unrec-${idx}`;
-    const toggleBtn = wrap.querySelector(`#${rid}-toggle`);
-    const panel = wrap.querySelector(`#${rid}-panel`);
-    const cancelBtn = wrap.querySelector(`#${rid}-cancel`);
-    const saveBtn = wrap.querySelector(`#${rid}-save`);
-    const inputEl = wrap.querySelector(`#${rid}-input`);
+    const ridSel = CSS.escape(rid);
+    const toggleBtn = wrap.querySelector(`#${ridSel}-toggle`);
+    const panel = wrap.querySelector(`#${ridSel}-panel`);
+    const cancelBtn = wrap.querySelector(`#${ridSel}-cancel`);
+    const saveBtn = wrap.querySelector(`#${ridSel}-save`);
+    const inputEl = wrap.querySelector(`#${ridSel}-input`);
 
     toggleBtn?.addEventListener('click', () => panel.classList.toggle('hidden'));
     cancelBtn?.addEventListener('click', () => {

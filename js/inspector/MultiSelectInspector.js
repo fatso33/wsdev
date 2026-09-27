@@ -27,6 +27,7 @@
 import { getMultiSelectAvailability } from '../InspectorLogic.js';
 import { showToast } from '../StudioModal.js';
 import { STYLE_PRESETS } from '../StudioStylePresets.js';
+import { escapeHtmlAttr } from './inspectorMarkup.js';
 
 /**
  * Builds a synthetic component whose nested style contains only values shared
@@ -124,7 +125,7 @@ export function renderMultiSelectInspector(host) {
         <span class="inspector-badge">${comps.length} SELECTED</span>
         <h3 class="inspector-title">Multiple Components</h3>
       </div>
-      <div class="inspector-sub">${comps.map((comp) => comp.id).join(', ')}</div>
+      <div class="inspector-sub">${comps.map((comp) => escapeHtmlAttr(comp.id)).join(', ')}</div>
     `;
   host.container.appendChild(header);
 
