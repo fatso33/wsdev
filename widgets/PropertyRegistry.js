@@ -342,9 +342,9 @@ export const COMMON_FIELDS = [
   { path: 'binding.pollFrequencyHz', control: 'select', options: [{ value: 1, label: 'Normal (1Hz)' }, { value: 100, label: 'Fast (~100Hz cadence)' }], tier: 'simple', group: 'Bindings', default: 1, tooltip: 'How often the sim pushes this SimVar. Fast is for anything that needs to look smooth in motion (an attitude indicator); Normal is enough for slow-changing values (fuel qty). Since FDWS v1.26, PC Bridge only sends a SimVar when its value actually changes, so Normal already reacts within a frame of a real change — Fast is now only about getting a value that’s always fluctuating (motion), not about lag.' },
   { path: 'binding.pollGroup', control: 'text', tier: 'advanced', group: 'Bindings', fdwsMin: '1.26', default: undefined, tooltip: 'Which PC Bridge polling chunk this SimVar joins. Leave blank to default to this widget’s own id, which already groups all of this widget’s own bindings together and away from unrelated widgets’ vars. Only set this to deliberately merge chunks across widgets (e.g. two widgets that share a bus and should always update in lockstep), or to split one unusually noisy var out of an otherwise-quiet widget.' },
   { path: 'binding.deadband', control: 'number', tier: 'advanced', group: 'Bindings', default: 0, tooltip: 'Ignore changes smaller than this, so a jittery sensor doesn’t spam re-renders.' },
-  // Wave: registered as `bespoke` (PropertyRegistry.js's own generic engine has no
-  // renderer for it; Widget Studio's Bindings panel writes this object shape by
-  // hand). Object shape and `fields` order mirror ACTIONS[].params (`:127` above).
+  // `bespoke`: Widget Studio's Bindings panel hand-writes this {durationMs, easing}
+  // object outside the generic field engine. `fields` mirrors ACTIONS[].params'
+  // shape (`:127` above).
   { path: 'binding.transition', control: 'bespoke', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Animates value changes instead of snapping instantly.', fields: [
     { key: 'durationMs', control: 'number', default: undefined, tooltip: 'Animation length in milliseconds. Leave blank for none.' },
     { key: 'easing', control: 'select', options: ['linear', 'ease-out', 'ease-in-out'], default: 'linear', tooltip: 'Animation curve.' }
