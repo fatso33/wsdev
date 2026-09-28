@@ -9,14 +9,16 @@
  * of editor ids; a row missing from the table falls back to `host.fieldDomId(path)`.
  * Renderers hold no state; their listeners live with the mount the engine discards on re-render.
  * The Deck Event picker also reads the widget's saved-widget and Community Pack events, through
- * `host.state`, for its Custom block's suggestions.
+ * `host.state`, for its Custom block's suggestions. A `guided` row adds the Guided category picker,
+ * and a few rows carry extras keyed by path (Paste, the Pulse note, the Guided picker's text).
  */
 
 import { SecurityValidator } from '../../../core/SecurityValidator.js';
-import { getDeckEventsByKind, DECK_EVENT_NAMES } from '../../../core/deckEvents.js';
+import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENT_NAMES } from '../../../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../../../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../../../core/deckEventPacks.js';
-import { CUSTOM_OPTION_VALUE, escapeHtmlAttr } from '../inspectorMarkup.js';
+import { showToast } from '../../StudioModal.js';
+import { CUSTOM_OPTION_VALUE, CATEGORY_LABELS, escapeHtmlAttr } from '../inspectorMarkup.js';
 
 /** Each binding path's DOM id, or the stem its sub-controls' ids extend. */
 const BINDING_DOM_IDS = {
@@ -272,6 +274,83 @@ function suggestionOptions(entries, current) {
 }
 
 /**
+ * Text of a Guided picker by row: the label, and the hint on its ⓘ. A guided row missing here uses its
+ * own label and `GUIDED_HINT`.
+ */
+const GUIDED_TEXT = {
+  'binding.writeEvent': {
+    label: 'Connect to Simulator — Value to Send',
+    hint: 'Pick a category, then the specific command this component should send. Fills in the same field Advanced mode\'s Write Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.',
+  },
+  'binding.incrementEvent': {
+    label: 'Connect to Simulator — Increment Event (Pulse Clockwise)',
+    hint: 'Pick a category, then the specific command dispatched once per step turned clockwise. Fills in the same field Advanced mode\'s Increment Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.',
+  },
+  'binding.decrementEvent': {
+    label: 'Connect to Simulator — Decrement Event (Pulse Counter-Clockwise)',
+    hint: 'Pick a category, then the specific command dispatched once per step turned counter-clockwise. Fills in the same field Advanced mode\'s Decrement Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.',
+  },
+};
+
+const GUIDED_HINT = 'Pick a category, then the specific command. Fills in the same field Full mode\'s Deck Event dropdown uses — switch to Full any time to see the raw name or type a custom one.';
+
+/** Paths whose Custom block also has Paste, which takes the SimVar Tester's parsed write event. */
+const PASTE_PATHS = new Set(['binding.writeEvent']);
+
+/** Paths that say they are unused while a Rotary is in Pulse mode (its Increment and Decrement send instead). */
+const PULSE_NOTE_PATHS = new Set(['binding.writeEvent']);
+
+/**
+ * The id stem of a guided row's picker: the row's own id with `c-connect-` in place of `c-bind-`, or
+ * the row's fallback id when the table has no entry.
+ */
+function guidedDomId(host, path) {
+  return Object.hasOwn(BINDING_DOM_IDS, path) ? BINDING_DOM_IDS[path].replace(/^c-bind-/, 'c-connect-') : host.fieldDomId(path);
+}
+
+/** A category `<option>` list, with the current category selected. */
+function categoryOptions(current) {
+  const categories = [...new Set(getDeckEventsByKind('write').map((e) => e.category))];
+  return `
+        <option value="">— choose a category —</option>
+        ${categories.map((c) => `<option value="${escapeHtmlAttr(c)}" ${current === c ? 'selected' : ''}>${escapeHtmlAttr(CATEGORY_LABELS[c] || c)}</option>`).join('')}`;
+}
+
+/** The write events of one category as `<option>`s, with the current value selected. */
+function categoryValueOptions(category, current) {
+  return getDeckEventsByCategory(category)
+    .filter((e) => e.kind === 'write')
+    .map((e) => `<option value="${escapeHtmlAttr(e.name)}" ${current === e.name ? 'selected' : ''}>${escapeHtmlAttr(e.label)}</option>`)
+    .join('');
+}
+
+/**
+ * Takes the SimVar Tester's parsed write event into a Deck Event row: it opens the Custom block on the
+ * value, strips a leading `K:` and writes it, telling the Author what was pasted. Anything else that
+ * was parsed, or nothing, only gets a toast.
+ * @param {object} host Inspector facade providing `state.testerParsed` and commitField.
+ * @param {object} comp Component captured for this render.
+ * @param {object} field Binding registry row.
+ * @param {{select: HTMLSelectElement, block: HTMLElement, input: HTMLInputElement}} controls The row's Deck Event dropdown, Custom block and Custom input.
+ * @returns {void}
+ */
+function pasteParsedWriteEvent(host, comp, field, { select, block, input }) {
+  const parsed = host.state.testerParsed;
+  if (!parsed) { showToast('Nothing parsed yet — use the SimVar Tester in the bottom bar first.'); return; }
+  if (parsed.kind === 'complex') { showToast('That one is test-only — conditionals and multi-token RPN can’t be stored in a binding.'); return; }
+  if (parsed.kind === 'read') { showToast('That’s a read expression — paste it into the Read Deck Event field instead.'); return; }
+  select.value = CUSTOM_OPTION_VALUE;
+  block.classList.remove('hidden');
+  const event = parsed.kind === 'write' ? parsed.event.replace(/^K:/i, '') : parsed.event;
+  input.value = event;
+  // Bindings cannot store a write value, so report it to the author.
+  showToast(parsed.value !== null && parsed.value !== undefined
+    ? `Pasted ${event}. It also sends the value ${parsed.value} — a binding has no value field, so set that on this component’s interaction action.`
+    : `Pasted ${event}.`);
+  host.commitField(comp, field.path, event);
+}
+
+/**
  * A Deck Event (a write event) as a dropdown of None, the catalogue's write events and Custom…, plus
  * Connect…. Custom… reveals a block without writing: a suggestion select (events other saved widgets
  * use, and Community Pack events), a free-text input and a hint showing the characters sanitizing
@@ -279,6 +358,14 @@ function suggestionOptions(entries, current) {
  * result removes the key. A stored name outside the catalogue selects Custom… with the block open
  * and the name in the input. Connect… opens the Connect dialog for this row's own key. Sub-ids extend
  * the row's id: `-connect`, `-custom-block`, `-custom-select`, `-custom-input` and `-custom-diff`.
+ *
+ * A `guided` row also gets a Guided part, shown in Guided and Build in place of the dropdown, which
+ * Full shows: a category select, then a value select that writes only once a value is chosen, and
+ * "Find it by moving it" and "switch to Full mode" (which sets the Inspector's tier and
+ * `fdws_studio_uiMode`). Its ids are `c-connect-<stem>-category`, `-variable`, `-findit` and `-full`,
+ * with `<row id>-simple-field`, `-simple-hint` and, for the Full part, `-field`. The custom block
+ * carries no `data-tier`, so a stored custom name shows at every tier. A path in `PASTE_PATHS` adds
+ * Paste to the block, and one in `PULSE_NOTE_PATHS` adds the Pulse note between the two parts.
  * @param {object} host Inspector facade providing commitField, openConnectDialog and state.
  * @param {object} comp Component captured for this render.
  * @param {object} field Binding registry row.
@@ -286,30 +373,65 @@ function suggestionOptions(entries, current) {
  * @returns {void}
  */
 function renderEventPicker(host, comp, field, mount) {
-  const id = escapeHtmlAttr(bindingDomId(host, field.path));
+  const rawId = bindingDomId(host, field.path);
+  const id = escapeHtmlAttr(rawId);
   const key = field.path.slice('binding.'.length);
   const stored = shownValue(host, comp, field);
   const isCustom = !!stored && !getDeckEventsByKind('write').some((e) => e.name === stored);
-  mount.innerHTML = `
+  const hasPaste = PASTE_PATHS.has(field.path);
+
+  const fullPart = `
       <label>${labelMarkup(host, field)}</label>
       <div class="prop-row-2">
         <select id="${id}" class="prop-select">${deckEventOptions(stored)}</select>
         <button type="button" class="btn-small" id="${id}-connect" style="flex:0 0 auto;">Connect…</button>
+      </div>`;
+  const guidedRaw = field.guided ? guidedDomId(host, field.path) : '';
+  const guidedId = escapeHtmlAttr(guidedRaw);
+  let guidedPart = '';
+  if (field.guided) {
+    const text = GUIDED_TEXT[field.path] || { label: field.label || host.humanizeFieldLabel(field.path), hint: GUIDED_HINT };
+    const currentCategory = getDeckEventsByKind('write').find((e) => e.name === stored)?.category || '';
+    const pulseNote = PULSE_NOTE_PATHS.has(field.path) && comp.type === 'core.rotary' && comp.props?.writeMode === 'pulse'
+      ? `
+      <div class="prop-hint-block" id="${id}-pulse-note" style="font-size:11px;opacity:0.75;margin:0 0 8px;">
+        Write Deck Event is not used in Pulse mode: this Rotary sends the Increment and Decrement events below instead. ${stored ? 'The value here is kept, so switching back to Absolute finds it, but it is not declared to PC Bridge.' : ''}
+      </div>`
+      : '';
+    guidedPart = `
+      <div class="prop-field" data-tier="simple-only" id="${id}-simple-field">
+        <label>${escapeHtmlAttr(text.label)} <span class="prop-hint" title="${escapeHtmlAttr(text.hint)}">ⓘ</span></label>
+        <div class="connect-sim-picker">
+          <select id="${guidedId}-category" class="prop-select">${categoryOptions(currentCategory)}</select>
+          <select id="${guidedId}-variable" class="prop-select" ${currentCategory ? '' : 'disabled'}>
+            <option value="">${currentCategory ? '— choose a value —' : '— choose a category first —'}</option>
+            ${currentCategory ? categoryValueOptions(currentCategory, stored) : ''}
+          </select>
+        </div>
       </div>
+      <div class="prop-hint-block" data-tier="simple-only" id="${id}-simple-hint" style="font-size:11px;opacity:0.75;margin:-4px 0 8px;">
+        Don't see it? <button type="button" class="btn-mini-inline" id="${guidedId}-findit">Find it by moving it →</button>
+        or <button type="button" class="btn-mini-inline" id="${guidedId}-full">switch to Full mode</button> for Raw Address / Custom.
+      </div>${pulseNote}`;
+  }
+  mount.innerHTML = `${guidedPart}${field.guided ? `<div class="prop-field" data-tier="advanced" id="${id}-field">${fullPart}</div>` : fullPart}
       <div class="prop-field prop-custom-block ${isCustom ? '' : 'hidden'}" id="${id}-custom-block">
         <label>Custom Deck Event (used by another saved widget)</label>
         <select id="${id}-custom-select" class="prop-select">${suggestionOptions(suggestedWriteEvents(host), stored)}</select>
         <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
         <div class="prop-paste-row">
-          <input type="text" id="${id}-custom-input" class="prop-input" value="${escapeHtmlAttr(isCustom ? stored : '')}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+          <input type="text" id="${id}-custom-input" class="prop-input" value="${escapeHtmlAttr(isCustom ? stored : '')}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />${hasPaste ? `
+          <button type="button" class="btn-small" id="${id}-paste">Paste</button>` : ''}
         </div>
         <div class="prop-sanitize-diff hidden" id="${id}-custom-diff"></div>
       </div>
     `;
-  const [defaultSelect, customSelect] = mount.querySelectorAll('select');
-  const customBlock = mount.querySelector('.prop-custom-block');
-  const customInput = mount.querySelector('.prop-custom-block input');
-  const diff = mount.querySelector('.prop-sanitize-diff');
+  const part = (suffix) => [...mount.querySelectorAll('[id]')].find((el) => el.id === `${rawId}${suffix}`);
+  const defaultSelect = part('');
+  const customSelect = part('-custom-select');
+  const customBlock = part('-custom-block');
+  const customInput = part('-custom-input');
+  const diff = part('-custom-diff');
   const commit = (value) => host.commitField(comp, field.path, value || undefined);
 
   // Shows the stripped characters before commit, without changing the draft.
@@ -346,7 +468,32 @@ function renderEventPicker(host, comp, field, mount) {
   customInput.addEventListener('change', () => {
     commit(SecurityValidator.sanitizeWithReport('event', customInput.value).cleaned);
   });
-  mount.querySelector('.btn-small').addEventListener('click', () => host.openConnectDialog(comp, host.state.widgetDef, 'write', key));
+  part('-connect').addEventListener('click', () => host.openConnectDialog(comp, host.state.widgetDef, 'write', key));
+  part('-paste')?.addEventListener('click', () => pasteParsedWriteEvent(host, comp, field, { select: defaultSelect, block: customBlock, input: customInput }));
+
+  if (!field.guided) return;
+  const guidedPartAt = (suffix) => [...mount.querySelectorAll('[id]')].find((el) => el.id === `${guidedRaw}${suffix}`);
+  const categorySelect = guidedPartAt('-category');
+  const variableSelect = guidedPartAt('-variable');
+  categorySelect.addEventListener('change', () => {
+    // Choosing a category only fills the value select; nothing is written until a value is chosen.
+    if (!categorySelect.value) {
+      variableSelect.innerHTML = '<option value="">— choose a category first —</option>';
+      variableSelect.disabled = true;
+      return;
+    }
+    variableSelect.innerHTML = `<option value="">— choose a value —</option>${categoryValueOptions(categorySelect.value, undefined)}`;
+    variableSelect.disabled = false;
+  });
+  variableSelect.addEventListener('change', () => {
+    if (variableSelect.value) commit(variableSelect.value);
+  });
+  guidedPartAt('-findit').addEventListener('click', () => host.simVarTester?.open());
+  guidedPartAt('-full').addEventListener('click', () => {
+    host.uiTier = 'full';
+    localStorage.setItem('fdws_studio_uiMode', 'full');
+    host.render();
+  });
 }
 
 /** Binding renderers, keyed by registry control. */
@@ -362,7 +509,7 @@ const BINDING_RENDERERS = {
 
 /**
  * Renders one binding row with the binding renderer for its control.
- * @param {object} host Inspector facade providing getFieldValue, commitField, humanizeFieldLabel, fieldDomId, openConnectDialog, state.loadSavedWidgets and state.widgetDef.
+ * @param {object} host Inspector facade providing getFieldValue, commitField, humanizeFieldLabel, fieldDomId, openConnectDialog, state.loadSavedWidgets, state.widgetDef and state.testerParsed, plus uiTier, render and simVarTester for a guided row's Guided picker.
  * @param {object} comp Component captured for this render.
  * @param {object} field Binding registry row.
  * @param {HTMLElement} mount Element whose contents are replaced.

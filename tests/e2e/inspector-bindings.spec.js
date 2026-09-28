@@ -71,14 +71,14 @@ test('Simple category selection waits for a value; Full switch persists', async 
   expect(await page.evaluate(() => [window.__studioApp.inspector.uiTier, localStorage.getItem('fdws_studio_uiMode')])).toEqual(['full', 'full']);
 });
 
-test('Pulse fields use inline gates, the fast fields render only once Pulse and Acceleration are on, and the write Pulse note appears',async ({ page }) => {
+test('the Pulse fields render only once Pulse is on, the fast fields once Pulse and Acceleration are on, and the write Pulse note appears', async ({ page }) => {
   await seed(page, 'core.rotary');
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
-  await expect(page.locator('#c-bind-increment-field')).toHaveAttribute('style', /display:none/);
+  await expect(page.locator('#c-bind-increment-field')).toHaveCount(0);
   await expect(page.locator('#c-bind-fastincrement')).toHaveCount(0);
   await expect(page.locator('#c-bind-write-pulse-note')).toHaveCount(0);
   await page.locator('#rf-props-writeMode').selectOption('pulse');
-  await expect(page.locator('#c-bind-increment-field')).not.toHaveAttribute('style', /display:none/);
+  await expect(page.locator('#c-bind-increment-field')).toBeVisible();
   await expect(page.locator('#c-bind-fastincrement')).toHaveCount(0);
   await expect(page.locator('#c-bind-write-pulse-note')).toBeVisible();
   await page.locator('#rf-props-acceleration').check();
@@ -535,7 +535,8 @@ test('Acknowledge and Push are Full-only while unauthored; a stored value shows 
   for (const tier of ['guided', 'build']) {
     await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
     for (const id of ['#c-bind-ack', '#c-bind-push']) await expect(page.locator(id), `${tier} ${id}`).toBeHidden();
-    await expect(subtitle(page, 'Send to Simulator'), tier).toBeHidden();
+    // Write's Guided picker sits under this heading, so it shows while Acknowledge and Push do not.
+    await expect(subtitle(page, 'Send to Simulator'), tier).toBeVisible();
   }
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
   for (const id of ['#c-bind-ack', '#c-bind-push']) await expect(page.locator(id), id).toBeVisible();
@@ -650,6 +651,138 @@ test('a supplied eventPicker row renders in Full with Custom… and Connect…, 
   await page.locator('#rf-binding-fooEvent').selectOption('apHdgSet');
   expect((await snapshot(page)).binding.fooEvent).toBe('apHdgSet');
   await page.evaluate(() => Reflect.deleteProperty(window.__studioApp.inspector, 'getFieldsForType'));
+});
+
+const GUIDED_ROWS = [
+  { path: 'binding.writeEvent', stem: 'write', label: 'Connect to Simulator — Value to Send' },
+  { path: 'binding.incrementEvent', stem: 'increment', label: 'Connect to Simulator — Increment Event (Pulse Clockwise)' },
+  { path: 'binding.decrementEvent', stem: 'decrement', label: 'Connect to Simulator — Decrement Event (Pulse Counter-Clockwise)' },
+];
+
+test('Write, Increment and Decrement render from the registry: the Guided picker in Guided and Build, the Deck Event dropdown in Full, with the row text and today\'s ids', async ({ page }) => {
+  await seed(page, 'core.rotary', {}, { writeMode: 'pulse' });
+  const rows = await page.evaluate(async () => (await import('/widgets/PropertyRegistry.js'))
+    .getFieldsForType('core.rotary').filter((f) => ['binding.writeEvent', 'binding.incrementEvent', 'binding.decrementEvent'].includes(f.path))
+    .map(({ path, label, tooltip }) => ({ path, label, tooltip })));
+  expect(rows).toHaveLength(3);
+  for (const tier of ['guided', 'build']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    for (const { stem, label } of GUIDED_ROWS) {
+      const id = `${tier} ${stem}`;
+      await expect(page.locator(`#c-connect-${stem}-category`), id).toBeVisible();
+      await expect(page.locator(`#c-connect-${stem}-variable`), id).toBeDisabled();
+      await expect(page.locator(`#c-bind-${stem}-simple-field label`), id).toHaveText(`${label} ⓘ`);
+      await expect(page.locator(`#c-bind-${stem}-simple-field label .prop-hint`), id).toHaveAttribute('title', /^Pick a category, then the specific command/);
+      await expect(page.locator(`#c-bind-${stem}-simple-hint`), id).toBeVisible();
+      await expect(page.locator(`#c-connect-${stem}-findit`), id).toBeVisible();
+      await expect(page.locator(`#c-connect-${stem}-full`), id).toBeVisible();
+      await expect(page.locator(`#c-bind-${stem}`), id).toBeHidden();
+    }
+  }
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  const send = subtitle(page, 'Send to Simulator').locator('xpath=following-sibling::div[1]');
+  for (const { path, stem } of GUIDED_ROWS) {
+    const row = rows.find((r) => r.path === path);
+    const field = send.locator(`#c-bind-${stem}-field`);
+    await expect(page.locator(`#c-bind-${stem}`), stem).toBeVisible();
+    await expect(field.locator('label').first(), stem).toHaveText(`${row.label} ⓘ`);
+    await expect(field.locator('label .prop-hint').first(), stem).toHaveAttribute('title', row.tooltip);
+    await expect(page.locator(`#c-bind-${stem}-connect`), stem).toBeVisible();
+    await expect(page.locator(`#c-bind-${stem}-custom-block`), stem).toHaveClass(/hidden/);
+    await expect(page.locator(`#c-connect-${stem}-category`), stem).toBeHidden();
+    await expect(page.locator(`#c-connect-${stem}-findit`), stem).toBeHidden();
+    const options = await optionsOf(page, `#c-bind-${stem}`);
+    expect(options[0], stem).toEqual(['', '— none —']);
+    expect(options.at(-1), stem).toEqual(['__custom__', 'Custom…']);
+  }
+  expect((await snapshot(page)).calls).toHaveLength(0);
+});
+
+test('the Write Guided picker writes only when a value is chosen, in one merged update; Find it opens the Tester and switch to Full persists the tier', async ({ page }) => {
+  await seed(page, 'core.button', { readSimVar: 'apHdgBugValue' });
+  await page.evaluate(() => {
+    const { inspector } = window.__studioApp;
+    inspector.simVarTester = { open() { window.__findItCalls = (window.__findItCalls || 0) + 1; } };
+    inspector.uiTier = 'guided';
+    inspector.render();
+  });
+  const category = page.locator('#c-connect-write-category');
+  const value = page.locator('#c-connect-write-variable');
+  await expect(value).toBeDisabled();
+  await category.selectOption('ap');
+  await expect(value).toBeEnabled();
+  expect((await snapshot(page)).calls).toHaveLength(0);
+  const chosen = await value.locator('option[value]:not([value=""])').first().getAttribute('value');
+  await value.selectOption(chosen);
+  const { calls, binding } = await snapshot(page);
+  expect(calls).toEqual([['binding-pin', { binding: { readSimVar: 'apHdgBugValue', writeEvent: chosen } }]]);
+  expect(binding.writeEvent).toBe(chosen);
+  await expect(page.locator('#c-connect-write-category')).toHaveValue('ap');
+  await expect(page.locator('#c-connect-write-variable')).toHaveValue(chosen);
+  await page.locator('#c-connect-write-findit').click();
+  expect(await page.evaluate(() => window.__findItCalls)).toBe(1);
+  await page.locator('#c-connect-write-full').click();
+  expect(await page.evaluate(() => [window.__studioApp.inspector.uiTier, localStorage.getItem('fdws_studio_uiMode')])).toEqual(['full', 'full']);
+  await expect(page.locator('#c-bind-write')).toHaveValue(chosen);
+});
+
+test('a stored catalogue Write event preselects its category and value in Guided; a stored custom one shows its block and value at every tier', async ({ page }) => {
+  await seed(page, 'core.button', { writeEvent: 'apHdgSet' });
+  const category = await page.evaluate(async () => (await import('/core/deckEvents.js')).DECK_EVENTS.find((e) => e.kind === 'write' && e.name === 'apHdgSet').category);
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
+  await expect(page.locator('#c-connect-write-category')).toHaveValue(category);
+  await expect(page.locator('#c-connect-write-variable')).toHaveValue('apHdgSet');
+  await expect(page.locator('#c-connect-write-variable')).toBeEnabled();
+  expect((await snapshot(page)).calls).toHaveLength(0);
+
+  await seed(page, 'core.button', { writeEvent: 'H:FOO_EVENT' });
+  for (const tier of ['guided', 'build', 'full']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    await expect(page.locator('#c-bind-write-custom-block'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-write-custom-input'), tier).toHaveValue('H:FOO_EVENT');
+  }
+  await expect(page.locator('#c-bind-write')).toHaveValue('__custom__');
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
+  await expect(page.locator('#c-connect-write-category')).toHaveValue('');
+  expect((await snapshot(page)).calls).toHaveLength(0);
+});
+
+test('Write on a Pulse Rotary keeps its note at every tier and stays editable with no Write Mode gate; only Write carries Paste', async ({ page }) => {
+  await seed(page, 'core.rotary', { writeEvent: 'apHdgSet' }, { writeMode: 'pulse' });
+  for (const tier of ['guided', 'build', 'full']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    await expect(page.locator('#c-bind-write-pulse-note'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-write-pulse-note'), tier).toContainText('Write Deck Event is not used in Pulse mode');
+    await expect(page.locator('#c-bind-write-pulse-note'), tier).toContainText('The value here is kept');
+  }
+  const write = page.locator('.prop-field', { has: page.locator('#c-bind-write') }).first();
+  await expect(write.locator('.prop-showwhen-note')).toHaveCount(0);
+  await expect(page.locator('#c-bind-write')).toBeEnabled();
+  await page.locator('#c-bind-write').selectOption('com1Swap');
+  expect((await snapshot(page)).binding.writeEvent).toBe('com1Swap');
+  await expect(page.locator('#c-bind-write-paste')).toHaveCount(1);
+  await expect(page.locator('#c-bind-increment-paste')).toHaveCount(0);
+  await expect(page.locator('#c-bind-decrement-paste')).toHaveCount(0);
+  await page.locator('#c-bind-write').selectOption('');
+  await expect(page.locator('#c-bind-write-pulse-note')).toBeVisible();
+  await expect(page.locator('#c-bind-write-pulse-note')).not.toContainText('The value here is kept');
+});
+
+test('Connect… on Write, Increment and Decrement passes each row\'s own key to the dialog', async ({ page }) => {
+  await seed(page, 'core.rotary', {}, { writeMode: 'pulse' });
+  await page.evaluate(() => {
+    const { inspector } = window.__studioApp;
+    window.__connectArgs = [];
+    inspector.openConnectDialog = (comp, def, kind, field) => { window.__connectArgs.push([comp.id, def === window.__studioApp.state.widgetDef, kind, field]); };
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  for (const { stem } of GUIDED_ROWS) await page.locator(`#c-bind-${stem}-connect`).click();
+  expect(await page.evaluate(() => window.__connectArgs)).toEqual([
+    ['binding-pin', true, 'write', 'writeEvent'],
+    ['binding-pin', true, 'write', 'incrementEvent'],
+    ['binding-pin', true, 'write', 'decrementEvent'],
+  ]);
 });
 
 const SWEEP_WIDGET_ID = 'com.flightdeck.bindings-sweep';

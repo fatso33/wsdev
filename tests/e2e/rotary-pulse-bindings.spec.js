@@ -5,13 +5,15 @@ import { StudioValidator } from '../../js/StudioValidator.js';
  * Ticket 18: "An Author can set a Pulse Rotary's Increment and Decrement Deck
  * Events from the Widget Studio Inspector, without hand-editing exported JSON."
  *
- * PropertyRegistry.js already declares binding.incrementEvent/decrementEvent
- * (see shared/rotaryRegistry.test.js) but the Bindings panel is hand-built and
- * never calls getFieldsForType() for Bindings rows, so the registry entry alone
- * proved nothing about what an Author can actually do — this file drives the
- * real Inspector DOM instead (per this repo's routing/CLAUDE.md convention),
- * measuring visibility via offsetParent rather than `.hidden` (the tier
- * attribute sits on a wrapper, not the field).
+ * PropertyRegistry.js declares binding.incrementEvent/decrementEvent (see
+ * shared/rotaryRegistry.test.js) with a Write Mode gate, and the Bindings panel
+ * renders them through the field engine like any other row. A registry entry
+ * alone proves nothing about what an Author can actually do, so this file
+ * drives the real Inspector DOM (per this repo's routing/CLAUDE.md
+ * convention), measuring visibility via offsetParent rather than `.hidden`
+ * (the tier attribute sits on a wrapper, not the field). While Write Mode is
+ * Absolute an unset field is not rendered at all ('missing'); one that holds a
+ * value stays visible, dimmed under a note and Clear ('select').
  */
 
 const CUSTOM_OPTION_VALUE = '__custom__';
@@ -59,16 +61,16 @@ async function getBinding(page) {
   return page.evaluate(() => window.__studioApp.state.widgetDef.components.find((c) => c.id === 'seed-rot')?.binding || {});
 }
 
-test('Increment/Decrement Deck Event fields are hidden while Write Mode is Absolute (the default)', async ({ page }) => {
+test('Increment/Decrement Deck Event fields are not rendered while Write Mode is Absolute (the default)', async ({ page }) => {
   await seedRotary(page);
   await expect(page.locator('#rf-props-writeMode')).toHaveValue('absolute');
-  expect(await isUsable(page, '#c-bind-increment')).toBe('hidden');
-  expect(await isUsable(page, '#c-bind-decrement')).toBe('hidden');
+  expect(await isUsable(page, '#c-bind-increment')).toBe('missing');
+  expect(await isUsable(page, '#c-bind-decrement')).toBe('missing');
 });
 
 test('switching Write Mode to Pulse reveals both fields live, without a reselect', async ({ page }) => {
   await seedRotary(page);
-  expect(await isUsable(page, '#c-bind-increment')).toBe('hidden');
+  expect(await isUsable(page, '#c-bind-increment')).toBe('missing');
 
   await page.locator('#rf-props-writeMode').selectOption('pulse');
 
@@ -138,7 +140,7 @@ test('the custom/saved-event picker can also select an existing saved custom eve
   expect(binding.incrementEvent).toBe('myBoostEvent');
 });
 
-test('setting Write Mode back to Absolute hides both fields but does not discard already-set values', async ({ page }) => {
+test('setting Write Mode back to Absolute shows both fields dimmed but does not discard already-set values', async ({ page }) => {
   await seedRotary(page);
   await page.locator('#rf-props-writeMode').selectOption('pulse');
   await page.locator('#c-bind-increment').selectOption('apHdgSet');
@@ -146,8 +148,8 @@ test('setting Write Mode back to Absolute hides both fields but does not discard
 
   await page.locator('#rf-props-writeMode').selectOption('absolute');
 
-  expect(await isUsable(page, '#c-bind-increment')).toBe('hidden');
-  expect(await isUsable(page, '#c-bind-decrement')).toBe('hidden');
+  expect(await isUsable(page, '#c-bind-increment')).toBe('select');
+  expect(await isUsable(page, '#c-bind-decrement')).toBe('select');
 
   const binding = await getBinding(page);
   expect(binding.incrementEvent).toBe('apHdgSet');
@@ -168,8 +170,8 @@ test('the Simple/Guided-tier Connect to Simulator picker reaches Increment/Decre
   await seedRotary(page, { tier: null }); // stays on the default (Guided) tier
 
   await expect(page.locator('#rf-props-writeMode')).toBeVisible();
-  expect(await isUsable(page, '#c-connect-increment-category')).toBe('hidden'); // still Absolute mode
-  expect(await isUsable(page, '#c-bind-increment')).toBe('hidden'); // the Full-only dropdown, doubly hidden here
+  expect(await isUsable(page, '#c-connect-increment-category')).toBe('missing'); // still Absolute mode
+  expect(await isUsable(page, '#c-bind-increment')).toBe('missing'); // the Full-only dropdown, not rendered either
 
   await page.locator('#rf-props-writeMode').selectOption('pulse');
 
@@ -187,10 +189,10 @@ test('the Simple/Guided-tier Connect to Simulator picker reaches Increment/Decre
   expect(binding.incrementEvent).toBe('apHdgBugInc');
   expect(binding.decrementEvent).toBe('apHdgBugDec');
 
-  // Switching Write Mode back to Absolute hides this picker too, same
-  // value-preservation guarantee as the Full-tier dropdown.
+  // Switching Write Mode back to Absolute dims this picker (it holds a value, so it stays
+  // visible), same value-preservation guarantee as the Full-tier dropdown.
   await page.locator('#rf-props-writeMode').selectOption('absolute');
-  expect(await isUsable(page, '#c-connect-increment-category')).toBe('hidden');
+  expect(await isUsable(page, '#c-connect-increment-category')).toBe('select');
   const bindingAfter = await getBinding(page);
   expect(bindingAfter.incrementEvent).toBe('apHdgBugInc');
   expect(bindingAfter.decrementEvent).toBe('apHdgBugDec');
@@ -233,4 +235,42 @@ test('a Pulse Rotary authored entirely through the UI exports a definition that 
   await page.evaluate(() => window.__studioApp.state.setViewportMode('device'));
   await expect(page.locator('.fd-rotary-face')).toBeVisible();
   expect(pageErrors).toEqual([]);
+});
+
+test('an Increment set on a Pulse Rotary and then switched to Absolute is dimmed under a Write Mode note; Clear removes only that key and the field goes', async ({ page }) => {
+  await seedRotary(page);
+  await page.locator('#rf-props-writeMode').selectOption('pulse');
+  await page.locator('#c-bind-increment').selectOption('apHdgSet');
+  await page.locator('#c-bind-decrement').selectOption('com1Swap');
+  await page.locator('#rf-props-writeMode').selectOption('absolute');
+
+  const field = page.locator('.prop-field', { has: page.locator('#c-bind-increment') }).first();
+  await expect(field.locator('.prop-showwhen-note')).toContainText('Write Mode');
+  await expect(field.locator('.prop-showwhen-note')).toContainText('still set to "apHdgSet"');
+  expect(await getBinding(page)).toMatchObject({ incrementEvent: 'apHdgSet', decrementEvent: 'com1Swap' });
+
+  await field.locator('.prop-showwhen-clear').click();
+  const binding = await getBinding(page);
+  expect(binding.incrementEvent).toBeUndefined();
+  expect(binding.decrementEvent).toBe('com1Swap');
+  expect(await isUsable(page, '#c-bind-increment')).toBe('missing');
+  expect(await isUsable(page, '#c-bind-decrement')).toBe('select');
+});
+
+test('in Guided the dimmed Increment is its Guided picker, with the note and Clear', async ({ page }) => {
+  await seedRotary(page, { tier: null });
+  await page.locator('#rf-props-writeMode').selectOption('pulse');
+  await page.locator('#c-connect-increment-category').selectOption('ap');
+  await page.locator('#c-connect-increment-variable').selectOption('apHdgBugInc');
+  await page.locator('#rf-props-writeMode').selectOption('absolute');
+
+  const field = page.locator('.prop-field', { has: page.locator('#c-connect-increment-category') }).first();
+  await expect(page.locator('#c-connect-increment-category')).toBeVisible();
+  await expect(page.locator('#c-connect-increment-variable')).toHaveValue('apHdgBugInc');
+  await expect(field.locator('.prop-showwhen-note')).toContainText('Write Mode');
+  expect(await isUsable(page, '#c-bind-increment')).toBe('hidden');
+
+  await field.locator('.prop-showwhen-clear').click();
+  expect((await getBinding(page)).incrementEvent).toBeUndefined();
+  expect(await isUsable(page, '#c-connect-increment-category')).toBe('missing');
 });
