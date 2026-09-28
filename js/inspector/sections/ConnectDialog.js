@@ -15,9 +15,10 @@ import { escapeHtmlAttr, CATEGORY_LABELS } from '../inspectorMarkup.js';
 
 /**
  * Opens a Connect dialog for a component binding and resolves after Cancel or
- * one state update. `kind` is read or write; `bindingField` can target rotary
- * increment/decrement events. Catalogue reads clear raw units. Write pairing
- * appends proposed interactions in the same update. Probe errors stay in the
+ * one state update. `kind` is read or write; `bindingField` can target any
+ * other write event. Catalogue reads clear raw units. Only `writeEvent` gets
+ * pairing: its hints, its checkbox, and proposed interactions appended in the
+ * same update. Any other field is written alone. Probe errors stay in the
  * dialog and busy state clears after completion; Bridge calls may reject.
  * @param {object} host Live Inspector with state, optional simBridge and simVarTester.
  * @param {object} comp Component captured at opening for binding and pairing.
@@ -28,6 +29,9 @@ import { escapeHtmlAttr, CATEGORY_LABELS } from '../inspectorMarkup.js';
  */
 export async function openConnectDialog(host, comp, def, kind, bindingField = (kind === 'write' ? 'writeEvent' : 'readSimVar')) {
     const isWrite = kind === 'write';
+    // A proposed Dispatch Sim Event row has no event of its own and falls back to
+    // binding.writeEvent, so pairing any other field would wire nothing to it.
+    const pairsWriteEvent = isWrite && bindingField === 'writeEvent';
     const sanitizeKind = isWrite ? 'event' : 'simvar';
     const current = comp.binding?.[bindingField] || '';
 
@@ -51,7 +55,7 @@ export async function openConnectDialog(host, comp, def, kind, bindingField = (k
     let testResult = '';
     let testBusy = false;
 
-    const proposedRows = isWrite ? proposeWireUp(comp) : null;
+    const proposedRows = pairsWriteEvent ? proposeWireUp(comp) : null;
 
     const catalogueRowsHtml = () => {
       const q = searchQuery.trim().toLowerCase();
@@ -94,7 +98,7 @@ export async function openConnectDialog(host, comp, def, kind, bindingField = (k
     `;
 
     const pairingHtml = () => {
-      if (!isWrite || !selectedName) return '';
+      if (!pairsWriteEvent || !selectedName) return '';
       // Matches StudioValidator's own exemptions exactly (comp.type dictates
       // this, never the chosen event) — these types dispatch binding.writeEvent
       // themselves at runtime, so no interaction is needed or meaningful.
@@ -270,7 +274,7 @@ export async function openConnectDialog(host, comp, def, kind, bindingField = (k
     const updates = { [bindingField]: result.name };
     if (!isWrite) updates.unit = result.unit || undefined;
 
-    if (isWrite && result.pair) {
+    if (pairsWriteEvent && result.pair) {
       const withNewEvent = { ...comp, binding: { ...comp.binding, writeEvent: result.name } };
       if (!isWriteEventConsumed(withNewEvent)) {
         const rows = proposeWireUp(comp);

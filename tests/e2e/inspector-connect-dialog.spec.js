@@ -86,6 +86,26 @@ test('write pairing distinguishes auto-wire, unchecked, already wired, self-disp
   }
 });
 
+test('a write field other than Write gets no pairing and is written alone', async ({ page }) => {
+  await openDialog(page, { kind: 'write', bindingField: 'ackEvent' });
+  const name = await page.locator('#cn-catalogue-rows .cn-pick').first().getAttribute('data-name');
+  await page.locator('#cn-catalogue-rows .cn-pick').first().click();
+  await expect(page.locator('#cn-pairing')).toBeEmpty();
+  await expect(page.locator('#cn-pair-checkbox')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect.poll(() => updates(page)).toHaveLength(1);
+  expect((await updates(page))[0][1]).toEqual({ binding: { ackEvent: name } });
+
+  await page.evaluate(() => {
+    const comp = { ...window.__connectPin.comp, type: 'core.rotary' };
+    window.__studioApp.inspector.openConnectDialog(comp, window.__studioApp.state.widgetDef, 'write', 'incrementEvent');
+  });
+  await page.locator('#cn-catalogue-rows .cn-pick').first().click();
+  await expect(page.locator('#cn-pairing')).toBeEmpty();
+  await expect(page.locator('#cn-pairing')).not.toContainText('sends this value automatically');
+  await page.locator('[data-modal-cancel]').click();
+});
+
 test('read Test tab covers offline, raw probe, resolved Deck Event, unmapped and error results', async ({ page }) => {
   await openDialog(page, { binding: { readSimVar: 'L:TEST', unit: 'string' } });
   await page.evaluate(() => {
