@@ -18,6 +18,7 @@ const DISPATCH = [
   ['stateRefPicker', 'renderBindingField'],
   ['transitionEditor', 'renderBindingField'],
   ['eventPicker', 'renderBindingField'],
+  ['simVarPicker', 'renderBindingField'],
 ];
 
 test('factory creation touches no host property', () => {

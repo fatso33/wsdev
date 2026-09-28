@@ -254,7 +254,8 @@ test('Poll Rate is hidden in Guided while unauthored, and Event Category is Full
   await seed(page);
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
   for (const id of ['#c-bind-pollrate', '#c-bind-deadband', '#c-bind-pollgroup', '#c-bind-eventcategory']) await expect(page.locator(id), id).toBeHidden();
-  await expect(subtitle(page, 'Read from Simulator')).toBeHidden();
+  // Read's Guided picker sits under this heading, so it shows while Poll Rate and the other rows stay hidden.
+  await expect(subtitle(page, 'Read from Simulator')).toBeVisible();
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'build'; window.__studioApp.inspector.render(); });
   await expect(page.locator('#c-bind-pollrate')).toBeVisible();
   await expect(page.locator('#c-bind-eventcategory')).toBeHidden();
@@ -783,6 +784,210 @@ test('Connect… on Write, Increment and Decrement passes each row\'s own key to
     ['binding-pin', true, 'write', 'incrementEvent'],
     ['binding-pin', true, 'write', 'decrementEvent'],
   ]);
+});
+
+test('the rows render under the three headings in the registry\'s order, each after its heading', async ({ page }) => {
+  await seed(page, 'core.rotary', {}, { writeMode: 'pulse', acceleration: true });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  const ids = ['c-bind-read', 'c-bind-unit', 'c-bind-pollrate', 'c-bind-pollgroup', 'c-bind-deadband', 'c-bind-transition-ms',
+    'c-bind-write', 'c-bind-increment', 'c-bind-decrement', 'c-bind-fastincrement', 'c-bind-fastdecrement', 'c-bind-ack', 'c-bind-push', 'c-bind-eventcategory',
+    'c-bind-state', 'c-bind-stateref'];
+  const sequence = await page.evaluate((idList) => [...document.querySelectorAll(['#studio-right-sidebar .prop-section-subtitle', ...idList.map((id) => `#${id}`)].join(', '))]
+    .map((el) => (el.classList.contains('prop-section-subtitle') ? el.textContent : el.id)), ids);
+  expect(sequence.slice(sequence.indexOf('Read from Simulator'), sequence.indexOf('c-bind-stateref') + 1)).toEqual([
+    'Read from Simulator', 'c-bind-read', 'c-bind-unit', 'c-bind-pollrate', 'c-bind-pollgroup', 'c-bind-deadband', 'c-bind-transition-ms',
+    'Send to Simulator', 'c-bind-write', 'c-bind-increment', 'c-bind-decrement', 'c-bind-fastincrement', 'c-bind-fastdecrement', 'c-bind-ack', 'c-bind-push', 'c-bind-eventcategory',
+    'Local State', 'c-bind-state', 'c-bind-stateref',
+  ]);
+});
+
+test('a new core.label in Guided shows Read from Simulator and Send to Simulator with their Guided pickers, and no Local State heading', async ({ page }) => {
+  await seed(page, 'core.label');
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
+  await expect(subtitle(page, 'Read from Simulator')).toBeVisible();
+  await expect(subtitle(page, 'Send to Simulator')).toBeVisible();
+  await expect(page.locator('#c-connect-read-category')).toBeVisible();
+  await expect(page.locator('#c-connect-write-category')).toBeVisible();
+  await expect(subtitle(page, 'Local State')).toBeHidden();
+  expect((await snapshot(page)).calls).toHaveLength(0);
+});
+
+test('Read renders from the registry: the Guided picker in Guided and Build, the Deck Event dropdown in Full, with the row text and today\'s ids', async ({ page }) => {
+  await seed(page, 'core.display');
+  const row = await page.evaluate(async () => {
+    const { tooltip, label } = (await import('/widgets/PropertyRegistry.js')).getFieldsForType('core.display').find((f) => f.path === 'binding.readSimVar');
+    return { tooltip, label };
+  });
+  for (const tier of ['guided', 'build']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    await expect(page.locator('#c-connect-read-category'), tier).toBeVisible();
+    await expect(page.locator('#c-connect-read-variable'), tier).toBeDisabled();
+    await expect(page.locator('#c-bind-read-simple-field label'), tier).toHaveText('Connect to Simulator — Value to Show ⓘ');
+    await expect(page.locator('#c-bind-read-simple-field label .prop-hint'), tier).toHaveAttribute('title', /^Pick a category, then the specific value this component should read/);
+    await expect(page.locator('#c-bind-read-simple-hint'), tier).toBeVisible();
+    await expect(page.locator('#c-connect-read-findit'), tier).toBeVisible();
+    await expect(page.locator('#c-connect-read-full'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-read'), tier).toBeHidden();
+  }
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  const read = subtitle(page, 'Read from Simulator').locator('xpath=following-sibling::div[1]');
+  const field = read.locator('#c-bind-read-field');
+  await expect(page.locator('#c-bind-read')).toBeVisible();
+  await expect(field.locator('label').first()).toHaveText(`${row.label} ⓘ`);
+  await expect(field.locator('label .prop-hint').first()).toHaveAttribute('title', row.tooltip);
+  await expect(page.locator('#c-bind-read-connect')).toBeVisible();
+  await expect(page.locator('#c-bind-read-custom-block')).toHaveClass(/hidden/);
+  await expect(page.locator('#c-connect-read-category')).toBeHidden();
+  const options = await optionsOf(page, '#c-bind-read');
+  expect(options[0]).toEqual(['', '— none —']);
+  expect(options.at(-1)).toEqual(['__custom__', 'Custom…']);
+  expect(options.map(([value]) => value)).toContain('apHdgBugValue');
+  expect(options.map(([value]) => value)).not.toContain('apHdgSet');
+  expect((await snapshot(page)).calls).toHaveLength(0);
+});
+
+test('a stored catalogue Read preselects its category and value in Guided; a stored raw one shows its block and value at every tier', async ({ page }) => {
+  await seed(page, 'core.display', { readSimVar: 'apHdgBugValue' });
+  const category = await page.evaluate(async () => (await import('/core/deckEvents.js')).DECK_EVENTS.find((e) => e.kind === 'read' && e.name === 'apHdgBugValue').category);
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
+  await expect(page.locator('#c-connect-read-category')).toHaveValue(category);
+  await expect(page.locator('#c-connect-read-variable')).toHaveValue('apHdgBugValue');
+  await expect(page.locator('#c-connect-read-variable')).toBeEnabled();
+  expect((await snapshot(page)).calls).toHaveLength(0);
+
+  await seed(page, 'core.display', { readSimVar: 'L:FOO' });
+  for (const tier of ['guided', 'build', 'full']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    await expect(page.locator('#c-bind-read-custom-block'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-read-custom-input'), tier).toHaveValue('L:FOO');
+  }
+  await expect(page.locator('#c-bind-read')).toHaveValue('__custom__');
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
+  await expect(page.locator('#c-connect-read-category')).toHaveValue('');
+  expect((await snapshot(page)).calls).toHaveLength(0);
+});
+
+test('Read\'s Custom block takes a saved widget\'s read, sanitizes free text, and writes one merged update each', async ({ page }) => {
+  const renderErrors = await openBindingsCase(page, {
+    savedWidgets: [{ id: 'saved.one', kind: 'widget', components: [{ id: 'saved-display', type: 'core.display', binding: { readSimVar: 'MY_SAVED_READ' } }] }],
+    component: { id: 'sweep-pin', type: 'core.display', label: 'Sweep pin', props: {}, style: {}, binding: {} },
+  });
+  await page.locator('#c-bind-read').selectOption('__custom__');
+  expect(await optionsOf(page, '#c-bind-read-custom-select')).toEqual([['', '— select or type below —'], ['MY_SAVED_READ', 'MY_SAVED_READ (used by saved.one)']]);
+  await expect(page.locator('#c-bind-read-custom-input')).toHaveAttribute('placeholder', 'e.g. myCustomVar, L:FBW_TAXI_LIGHT_INTENSITY');
+  await page.locator('#c-bind-read-custom-select').selectOption('MY_SAVED_READ');
+  expect(await page.evaluate(() => window.__studioApp.state.getComponent('sweep-pin').binding)).toEqual({ readSimVar: 'MY_SAVED_READ' });
+  await page.locator('#c-bind-read-custom-input').fill('(L:OTHER_VAR)');
+  await expect(page.locator('#c-bind-read-custom-diff')).toContainText('Removed');
+  await page.locator('#c-bind-read-custom-input').dispatchEvent('change');
+  expect(await page.evaluate(() => window.__studioApp.state.getComponent('sweep-pin').binding)).toEqual({ readSimVar: 'L:OTHER_VAR' });
+  expect(renderErrors).toEqual([]);
+});
+
+test('Paste on Read writes readSimVar and unit together in one update; Paste stays on Read and Write only', async ({ page }) => {
+  await seed(page);
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await page.locator('#c-bind-read').selectOption('__custom__');
+  await page.evaluate(() => { window.__studioApp.state.testerParsed = { kind: 'read', name: 'L:TEST', unit: 'string' }; });
+  await page.locator('#c-bind-read-paste').click();
+  expect((await snapshot(page)).calls).toEqual([['binding-pin', { binding: { readSimVar: 'L:TEST', unit: 'string' } }]]);
+  await expect(page.locator('#c-bind-read-custom-input')).toHaveValue('L:TEST');
+  await expect(page.locator('#c-bind-read-paste')).toHaveCount(1);
+  await expect(page.locator('#c-bind-ack-paste')).toHaveCount(0);
+  await expect(page.locator('#c-bind-push-paste')).toHaveCount(0);
+});
+
+test('Connect… on Read passes the read kind and readSimVar; the real dialog writes readSimVar and unit in one update', async ({ page }) => {
+  await seed(page, 'core.display');
+  await page.evaluate(() => {
+    const { inspector } = window.__studioApp;
+    window.__connectArgs = [];
+    const real = inspector.openConnectDialog.bind(inspector);
+    inspector.openConnectDialog = (comp, def, kind, field) => {
+      window.__connectArgs.push([comp.id, def === window.__studioApp.state.widgetDef, kind, field]);
+      return real(comp, def, kind, field);
+    };
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  await page.locator('#c-bind-read-connect').click();
+  expect(await page.evaluate(() => window.__connectArgs)).toEqual([['binding-pin', true, 'read', 'readSimVar']]);
+  await expect(page.locator('.studio-modal-overlay:not(.hidden)')).toBeVisible();
+  await page.locator('#cn-tab-raw').click();
+  await page.locator('#cn-raw-input').fill('L:NEW_VALUE');
+  await page.locator('#cn-raw-unit').fill('string');
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect.poll(async () => (await snapshot(page)).calls).toHaveLength(1);
+  expect((await snapshot(page)).calls[0]).toEqual(['binding-pin', { binding: { readSimVar: 'L:NEW_VALUE', unit: 'string' } }]);
+});
+
+test('Unit is disabled with the PC Bridge hint for a Deck Event read, and enabled for a raw address (Full)', async ({ page }) => {
+  await seed(page, 'core.display', { readSimVar: 'apHdgBugValue' });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  const row = await page.evaluate(async () => {
+    const { tooltip, placeholder } = (await import('/widgets/PropertyRegistry.js')).getFieldsForType('core.display').find((f) => f.path === 'binding.unit');
+    return { tooltip, placeholder };
+  });
+  await expect(page.locator('#c-bind-unit')).toBeDisabled();
+  await expect(page.locator('#c-bind-unit')).toHaveAttribute('placeholder', 'Unit is set by PC Bridge for this Deck Event');
+  const field = page.locator('.prop-field', { has: page.locator('#c-bind-unit') }).first();
+  await expect(field.locator('label').first()).toHaveText('SimConnect Unit ⓘ');
+  await expect(field.locator('label .prop-hint').first()).toHaveAttribute('title', 'Unit is set by PC Bridge for this Deck Event.');
+  await expect(field.locator('.prop-showwhen-note')).toHaveCount(0);
+
+  await seed(page, 'core.display', { readSimVar: 'A:INDICATED ALTITUDE' });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await expect(page.locator('#c-bind-unit')).toBeEnabled();
+  await expect(page.locator('#c-bind-unit')).toHaveAttribute('placeholder', row.placeholder);
+  await expect(page.locator('.prop-field', { has: page.locator('#c-bind-unit') }).first().locator('label .prop-hint').first()).toHaveAttribute('title', row.tooltip);
+  await page.locator('#c-bind-unit').fill('  feet  ');
+  await page.locator('#c-bind-unit').dispatchEvent('change');
+  expect((await snapshot(page)).binding).toEqual({ readSimVar: 'A:INDICATED ALTITUDE', unit: 'feet' });
+  await page.locator('#c-bind-unit').fill('   ');
+  await page.locator('#c-bind-unit').dispatchEvent('change');
+  expect((await snapshot(page)).binding.unit).toBeUndefined();
+});
+
+test('a stored Unit under a Deck Event read shows disabled with its value at every tier, under a note naming Read and a Clear that removes only unit', async ({ page }) => {
+  await seed(page, 'core.display', { readSimVar: 'apHdgBugValue', unit: 'knots' });
+  for (const tier of ['guided', 'build', 'full']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    await expect(page.locator('#c-bind-unit'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-unit'), tier).toBeDisabled();
+    await expect(page.locator('#c-bind-unit'), tier).toHaveValue('knots');
+  }
+  const field = page.locator('.prop-field', { has: page.locator('#c-bind-unit') }).first();
+  await expect(field.locator('.prop-showwhen-note span')).toHaveText('Read Deck Event is not a raw A:/L:/H:/K: address — still set to "knots"');
+  expect((await snapshot(page)).calls).toHaveLength(0);
+  await field.locator('.prop-showwhen-clear').click();
+  const { binding, calls } = await snapshot(page);
+  expect(calls).toHaveLength(1);
+  expect(binding).toEqual({ readSimVar: 'apHdgBugValue' });
+  await expect(page.locator('#c-bind-unit')).toBeDisabled();
+  await expect(page.locator('.prop-field', { has: page.locator('#c-bind-unit') }).first().locator('.prop-showwhen-note')).toHaveCount(0);
+});
+
+test('the resolved-unit line follows Read\'s dropdown and custom block, shows in Full only, and needs a connected Bridge and a bare Deck Event', async ({ page }) => {
+  await seed(page, 'core.display', { readSimVar: 'apHdgBugValue' });
+  const connect = (connected) => page.evaluate((isConnected) => {
+    const inspector = window.__studioApp.inspector;
+    inspector.simBridge = { connected: isConnected, resolveDeckEvent: () => Promise.resolve({ unit: 'degrees', profileName: 'Test Profile' }) };
+    inspector.uiTier = 'full';
+    inspector.render();
+  }, connected);
+  await connect(true);
+  await expect(page.locator('#c-bind-read-custom-block + #c-bind-resolved-info')).toHaveText('Unit: degrees — from profile "Test Profile"');
+  await expect(page.locator('.prop-field', { has: page.locator('#c-bind-unit') }).first().locator('#c-bind-resolved-info')).toHaveCount(0);
+  for (const tier of ['guided', 'build']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    await expect(page.locator('#c-bind-resolved-info'), tier).toBeHidden();
+  }
+  await connect(false);
+  await expect(page.locator('#c-bind-resolved-info')).toBeHidden();
+
+  await seed(page, 'core.display', { readSimVar: 'A:INDICATED ALTITUDE' });
+  await connect(true);
+  await expect(page.locator('#c-bind-resolved-info')).toBeHidden();
 });
 
 const SWEEP_WIDGET_ID = 'com.flightdeck.bindings-sweep';

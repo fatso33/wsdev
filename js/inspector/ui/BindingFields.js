@@ -8,15 +8,18 @@
  * from a Studio-side table keyed by path, so existing ids stay stable while the registry stays free
  * of editor ids; a row missing from the table falls back to `host.fieldDomId(path)`.
  * Renderers hold no state; their listeners live with the mount the engine discards on re-render.
- * The Deck Event picker also reads the widget's saved-widget and Community Pack events, through
- * `host.state`, for its Custom block's suggestions. A `guided` row adds the Guided category picker,
- * and a few rows carry extras keyed by path (Paste, the Pulse note, the Guided picker's text).
+ * The Deck Event pickers (`eventPicker` for a write event, `simVarPicker` for a read) also read the
+ * widget's saved-widget and Community Pack events, through `host.state`, for their Custom block's
+ * suggestions, and the Read picker adds the resolved-unit line. A `guided` row adds the Guided
+ * category picker, and a few rows carry extras keyed by path (Paste, the Pulse note, the Guided
+ * picker's text, the text a gated row shows while its gate fails).
  */
 
 import { SecurityValidator } from '../../../core/SecurityValidator.js';
 import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENT_NAMES } from '../../../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../../../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../../../core/deckEventPacks.js';
+import { getFieldsForType } from '../../../widgets/PropertyRegistry.js';
 import { showToast } from '../../StudioModal.js';
 import { CUSTOM_OPTION_VALUE, CATEGORY_LABELS, escapeHtmlAttr } from '../inspectorMarkup.js';
 
@@ -52,10 +55,10 @@ function bindingDomId(host, path) {
   return Object.hasOwn(BINDING_DOM_IDS, path) ? BINDING_DOM_IDS[path] : host.fieldDomId(path);
 }
 
-/** Label text plus the row's tooltip on an ⓘ span, both escaped. */
-function labelMarkup(host, field) {
+/** Label text plus a tooltip (the row's, unless another is given) on an ⓘ span, both escaped. */
+function labelMarkup(host, field, tooltip = field.tooltip) {
   const text = escapeHtmlAttr(field.label || host.humanizeFieldLabel(field.path));
-  return field.tooltip ? `${text} <span class="prop-hint" title="${escapeHtmlAttr(field.tooltip)}">ⓘ</span>` : text;
+  return tooltip ? `${text} <span class="prop-hint" title="${escapeHtmlAttr(tooltip)}">ⓘ</span>` : text;
 }
 
 /** The stored value, else the row's default; never written back. */
@@ -64,8 +67,25 @@ function shownValue(host, comp, field) {
 }
 
 /**
- * Free text, such as a state path (`presets[0].label`), a Poll Group or an Event Category. The trimmed
- * text is written; blank removes the key.
+ * The placeholder and hint a row shows in place of its own while its `enabledWhen` gate fails. Unit
+ * belongs to PC Bridge when Read is a bare Deck Event, and a typed value would be ignored at runtime.
+ */
+const GATED_TEXT = {
+  'binding.unit': {
+    placeholder: 'Unit is set by PC Bridge for this Deck Event',
+    hint: 'Unit is set by PC Bridge for this Deck Event.',
+  },
+};
+
+/** The type's full row list, from the host's row source when it has one, else the registry. */
+function rowsOf(host, comp) {
+  return host.getFieldsForType ? host.getFieldsForType(comp.type) : getFieldsForType(comp.type);
+}
+
+/**
+ * Free text, such as a state path (`presets[0].label`), a Poll Group, an Event Category or Unit. The
+ * trimmed text is written; blank removes the key. A row in `GATED_TEXT` whose `enabledWhen` gate fails
+ * shows that text as its placeholder and hint; the engine disables the input itself.
  * @param {object} host Inspector facade.
  * @param {object} comp Component captured for this render.
  * @param {object} field Binding registry row.
@@ -74,9 +94,12 @@ function shownValue(host, comp, field) {
  */
 function renderTextField(host, comp, field, mount) {
   const id = bindingDomId(host, field.path);
+  const gated = field.enabledWhen && Object.hasOwn(GATED_TEXT, field.path) && !host.evaluateShowWhen(comp, field.enabledWhen, rowsOf(host, comp))
+    ? GATED_TEXT[field.path]
+    : null;
   mount.innerHTML = `
-      <label>${labelMarkup(host, field)}</label>
-      <input type="text" id="${escapeHtmlAttr(id)}" class="prop-input" value="${escapeHtmlAttr(shownValue(host, comp, field) ?? '')}" placeholder="${escapeHtmlAttr(field.placeholder || '')}" />
+      <label>${labelMarkup(host, field, gated ? gated.hint : field.tooltip)}</label>
+      <input type="text" id="${escapeHtmlAttr(id)}" class="prop-input" value="${escapeHtmlAttr(shownValue(host, comp, field) ?? '')}" placeholder="${escapeHtmlAttr(gated ? gated.placeholder : field.placeholder || '')}" />
     `;
   mount.querySelector('input')?.addEventListener('change', (e) => {
     host.commitField(comp, field.path, e.target.value.trim() || undefined);
@@ -237,12 +260,31 @@ function renderTransitionField(host, comp, field, mount) {
 }
 
 /**
- * The write events other saved widgets use, then those Community Packs suggest, as Custom block
+ * What differs between the two Deck Event pickers. A write picker (`eventPicker`) offers the
+ * catalogue's write events and sanitizes what is typed as an event name; a read picker
+ * (`simVarPicker`) offers its read events and sanitizes as a SimVar.
+ */
+const PICKER_KINDS = {
+  write: {
+    sanitize: 'event',
+    rawLabel: 'Or type a new custom event / raw SimConnect event (H:/K:...)',
+    rawPlaceholder: 'e.g. myCustomEvent, H:GTN750_DirectToPush',
+  },
+  read: {
+    sanitize: 'simvar',
+    rawLabel: 'Or type a new custom variable / raw SimVar (L:/A:...)',
+    rawPlaceholder: 'e.g. myCustomVar, L:FBW_TAXI_LIGHT_INTENSITY',
+  },
+};
+
+/**
+ * The events of one kind other saved widgets use, then those Community Packs suggest, as Custom block
  * suggestions. The widget being edited is left out of the saved ones.
  * @param {object} host Inspector facade with `state.loadSavedWidgets` and `state.widgetDef`.
+ * @param {'read'|'write'} kind Which kind of event to suggest.
  * @returns {Array<{name: string, source: string}>} Each event once, saved widgets first.
  */
-function suggestedWriteEvents(host) {
+function suggestedEvents(host, kind) {
   const savedWidgets = host.state.loadSavedWidgets().filter((w) => w.id !== host.state.widgetDef.id);
   const saved = extractCustomDeckEvents(savedWidgets, DECK_EVENT_NAMES).map((e) => ({
     name: e.name,
@@ -252,12 +294,12 @@ function suggestedWriteEvents(host) {
   const packs = getPackSuggestedEvents()
     .filter((e) => !saved.some((c) => c.name === e.name))
     .map((e) => ({ name: e.name, kind: e.kind, source: `from pack: ${e.fromPack}` }));
-  return [...saved, ...packs].filter((e) => e.kind === 'write');
+  return [...saved, ...packs].filter((e) => e.kind === kind);
 }
 
-/** The Deck Event dropdown's options: None, the catalogue's write events, and Custom…. */
-function deckEventOptions(current) {
-  const items = getDeckEventsByKind('write');
+/** The Deck Event dropdown's options: None, the catalogue's events of this kind, and Custom…. */
+function deckEventOptions(kind, current) {
+  const items = getDeckEventsByKind(kind);
   const isKnown = items.some((e) => e.name === current);
   return `
       <option value="" ${!current && !isKnown ? 'selected' : ''}>— none —</option>
@@ -278,6 +320,10 @@ function suggestionOptions(entries, current) {
  * own label and `GUIDED_HINT`.
  */
 const GUIDED_TEXT = {
+  'binding.readSimVar': {
+    label: 'Connect to Simulator — Value to Show',
+    hint: 'Pick a category, then the specific value this component should read. Fills in the same field Advanced mode\'s Read Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.',
+  },
   'binding.writeEvent': {
     label: 'Connect to Simulator — Value to Send',
     hint: 'Pick a category, then the specific command this component should send. Fills in the same field Advanced mode\'s Write Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.',
@@ -308,18 +354,18 @@ function guidedDomId(host, path) {
   return Object.hasOwn(BINDING_DOM_IDS, path) ? BINDING_DOM_IDS[path].replace(/^c-bind-/, 'c-connect-') : host.fieldDomId(path);
 }
 
-/** A category `<option>` list, with the current category selected. */
-function categoryOptions(current) {
-  const categories = [...new Set(getDeckEventsByKind('write').map((e) => e.category))];
+/** A category `<option>` list for the events of one kind, with the current category selected. */
+function categoryOptions(kind, current) {
+  const categories = [...new Set(getDeckEventsByKind(kind).map((e) => e.category))];
   return `
         <option value="">— choose a category —</option>
         ${categories.map((c) => `<option value="${escapeHtmlAttr(c)}" ${current === c ? 'selected' : ''}>${escapeHtmlAttr(CATEGORY_LABELS[c] || c)}</option>`).join('')}`;
 }
 
-/** The write events of one category as `<option>`s, with the current value selected. */
-function categoryValueOptions(category, current) {
+/** The events of one kind in one category as `<option>`s, with the current value selected. */
+function categoryValueOptions(kind, category, current) {
   return getDeckEventsByCategory(category)
-    .filter((e) => e.kind === 'write')
+    .filter((e) => e.kind === kind)
     .map((e) => `<option value="${escapeHtmlAttr(e.name)}" ${current === e.name ? 'selected' : ''}>${escapeHtmlAttr(e.label)}</option>`)
     .join('');
 }
@@ -351,40 +397,80 @@ function pasteParsedWriteEvent(host, comp, field, { select, block, input }) {
   host.commitField(comp, field.path, event);
 }
 
+/** A raw SimVar or event address: an `A:`, `L:`, `H:` or `K:` prefix, any case. */
+const RAW_ADDRESS = /^(A|L|H|K):/i;
+
 /**
- * A Deck Event (a write event) as a dropdown of None, the catalogue's write events and Custom…, plus
- * Connect…. Custom… reveals a block without writing: a suggestion select (events other saved widgets
- * use, and Community Pack events), a free-text input and a hint showing the characters sanitizing
- * would strip. A suggestion or the input's text is written sanitized as an event name, and an empty
- * result removes the key. A stored name outside the catalogue selects Custom… with the block open
- * and the name in the input. Connect… opens the Connect dialog for this row's own key. Sub-ids extend
- * the row's id: `-connect`, `-custom-block`, `-custom-select`, `-custom-input` and `-custom-diff`.
+ * Takes the SimVar Tester's parsed read into a read row: it opens the Custom block on the value and
+ * writes the name, together with the parsed unit when the name is a raw A:/L:/H:/K: address (a bare
+ * Deck Event's unit is PC Bridge's, so a previous unit is left as it was), in one update. The Author is
+ * told what was pasted. A write event, a test-only (complex) parse, or nothing, only gets a toast.
+ * @param {object} host Inspector facade providing `state.testerParsed` and `state.updateComponent`.
+ * @param {object} comp Component captured for this render.
+ * @param {object} field Binding registry row.
+ * @param {{select: HTMLSelectElement, block: HTMLElement, input: HTMLInputElement}} controls The row's Deck Event dropdown, Custom block and Custom input.
+ * @returns {void}
+ */
+function pasteParsedReadValue(host, comp, field, { select, block, input }) {
+  const parsed = host.state.testerParsed;
+  if (!parsed) { showToast('Nothing parsed yet — use the SimVar Tester in the bottom bar first.'); return; }
+  if (parsed.kind === 'complex') { showToast('That one is test-only — conditionals and multi-token RPN can’t be stored in a binding.'); return; }
+  if (parsed.kind !== 'read') { showToast('That’s a write event — paste it into the Write Deck Event field instead.'); return; }
+  select.value = CUSTOM_OPTION_VALUE;
+  block.classList.remove('hidden');
+  input.value = parsed.name;
+  const updates = { [field.path.slice('binding.'.length)]: parsed.name };
+  if (parsed.unit && RAW_ADDRESS.test(parsed.name)) updates.unit = parsed.unit;
+  showToast(`Pasted ${parsed.name}${updates.unit ? ` (unit ${updates.unit})` : ''}.`);
+  host.state.updateComponent(comp.id, { binding: { ...(comp.binding || {}), ...updates } });
+}
+
+/** Paths whose Custom block is followed by the resolved-unit line, and the line's DOM id. */
+const RESOLVED_UNIT_PATHS = new Set(['binding.readSimVar']);
+const RESOLVED_UNIT_ID = 'c-bind-resolved-info';
+
+/**
+ * A Deck Event as a dropdown of None, the catalogue's events of the row's kind and Custom…, plus
+ * Connect…. A write row (`eventPicker`) offers write events; a read row (`simVarPicker`) offers read
+ * events. Custom… reveals a block without writing: a suggestion select (events of that kind other saved
+ * widgets use, and Community Pack events), a free-text input and a hint showing the characters
+ * sanitizing would strip. A suggestion or the input's text is written sanitized (as an event name for
+ * a write row, as a SimVar for a read row), and an empty result removes the key. A stored name outside
+ * the catalogue selects Custom… with the block open and the name in the input. Connect… opens the
+ * Connect dialog for this row's own key and kind. Sub-ids extend the row's id: `-connect`,
+ * `-custom-block`, `-custom-select`, `-custom-input` and `-custom-diff`.
  *
  * A `guided` row also gets a Guided part, shown in Guided and Build in place of the dropdown, which
  * Full shows: a category select, then a value select that writes only once a value is chosen, and
  * "Find it by moving it" and "switch to Full mode" (which sets the Inspector's tier and
  * `fdws_studio_uiMode`). Its ids are `c-connect-<stem>-category`, `-variable`, `-findit` and `-full`,
  * with `<row id>-simple-field`, `-simple-hint` and, for the Full part, `-field`. The custom block
- * carries no `data-tier`, so a stored custom name shows at every tier. A path in `PASTE_PATHS` adds
- * Paste to the block, and one in `PULSE_NOTE_PATHS` adds the Pulse note between the two parts.
- * @param {object} host Inspector facade providing commitField, openConnectDialog and state.
+ * carries no `data-tier`, so a stored custom name shows at every tier. A read row always has Paste in
+ * the block, and a write row does when its path is in `PASTE_PATHS`. A path in `PULSE_NOTE_PATHS` adds
+ * the Pulse note between the two parts. A path in `RESOLVED_UNIT_PATHS` whose value is a bare Deck
+ * Event, with a connected PC Bridge, gets the resolved-unit line after the block, shown in Full only
+ * and filled once the Bridge answers, unless the panel has been re-rendered by then.
+ * @param {object} host Inspector facade providing commitField, openConnectDialog, state and simBridge.
  * @param {object} comp Component captured for this render.
- * @param {object} field Binding registry row.
+ * @param {object} field Binding registry row; its `control` (`simVarPicker`, else `eventPicker`) picks the kind.
  * @param {HTMLElement} mount Element whose contents are replaced.
  * @returns {void}
  */
-function renderEventPicker(host, comp, field, mount) {
+function renderDeckEventPicker(host, comp, field, mount) {
+  const kind = field.control === 'simVarPicker' ? 'read' : 'write';
+  const kindText = PICKER_KINDS[kind];
   const rawId = bindingDomId(host, field.path);
   const id = escapeHtmlAttr(rawId);
   const key = field.path.slice('binding.'.length);
   const stored = shownValue(host, comp, field);
-  const isCustom = !!stored && !getDeckEventsByKind('write').some((e) => e.name === stored);
-  const hasPaste = PASTE_PATHS.has(field.path);
+  const isCustom = !!stored && !getDeckEventsByKind(kind).some((e) => e.name === stored);
+  const hasPaste = kind === 'read' || PASTE_PATHS.has(field.path);
+  const showsResolvedUnit = RESOLVED_UNIT_PATHS.has(field.path) && !!stored && !RAW_ADDRESS.test(stored) && !!host.simBridge?.connected;
 
   const fullPart = `
       <label>${labelMarkup(host, field)}</label>
       <div class="prop-row-2">
-        <select id="${id}" class="prop-select">${deckEventOptions(stored)}</select>
+        <select id="${id}" class="prop-select">${deckEventOptions(kind, stored)}</select>
         <button type="button" class="btn-small" id="${id}-connect" style="flex:0 0 auto;">Connect…</button>
       </div>`;
   const guidedRaw = field.guided ? guidedDomId(host, field.path) : '';
@@ -392,7 +478,7 @@ function renderEventPicker(host, comp, field, mount) {
   let guidedPart = '';
   if (field.guided) {
     const text = GUIDED_TEXT[field.path] || { label: field.label || host.humanizeFieldLabel(field.path), hint: GUIDED_HINT };
-    const currentCategory = getDeckEventsByKind('write').find((e) => e.name === stored)?.category || '';
+    const currentCategory = getDeckEventsByKind(kind).find((e) => e.name === stored)?.category || '';
     const pulseNote = PULSE_NOTE_PATHS.has(field.path) && comp.type === 'core.rotary' && comp.props?.writeMode === 'pulse'
       ? `
       <div class="prop-hint-block" id="${id}-pulse-note" style="font-size:11px;opacity:0.75;margin:0 0 8px;">
@@ -403,10 +489,10 @@ function renderEventPicker(host, comp, field, mount) {
       <div class="prop-field" data-tier="simple-only" id="${id}-simple-field">
         <label>${escapeHtmlAttr(text.label)} <span class="prop-hint" title="${escapeHtmlAttr(text.hint)}">ⓘ</span></label>
         <div class="connect-sim-picker">
-          <select id="${guidedId}-category" class="prop-select">${categoryOptions(currentCategory)}</select>
+          <select id="${guidedId}-category" class="prop-select">${categoryOptions(kind, currentCategory)}</select>
           <select id="${guidedId}-variable" class="prop-select" ${currentCategory ? '' : 'disabled'}>
             <option value="">${currentCategory ? '— choose a value —' : '— choose a category first —'}</option>
-            ${currentCategory ? categoryValueOptions(currentCategory, stored) : ''}
+            ${currentCategory ? categoryValueOptions(kind, currentCategory, stored) : ''}
           </select>
         </div>
       </div>
@@ -418,14 +504,15 @@ function renderEventPicker(host, comp, field, mount) {
   mount.innerHTML = `${guidedPart}${field.guided ? `<div class="prop-field" data-tier="advanced" id="${id}-field">${fullPart}</div>` : fullPart}
       <div class="prop-field prop-custom-block ${isCustom ? '' : 'hidden'}" id="${id}-custom-block">
         <label>Custom Deck Event (used by another saved widget)</label>
-        <select id="${id}-custom-select" class="prop-select">${suggestionOptions(suggestedWriteEvents(host), stored)}</select>
-        <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
+        <select id="${id}-custom-select" class="prop-select">${suggestionOptions(suggestedEvents(host, kind), stored)}</select>
+        <label>${kindText.rawLabel}</label>
         <div class="prop-paste-row">
-          <input type="text" id="${id}-custom-input" class="prop-input" value="${escapeHtmlAttr(isCustom ? stored : '')}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />${hasPaste ? `
+          <input type="text" id="${id}-custom-input" class="prop-input" value="${escapeHtmlAttr(isCustom ? stored : '')}" placeholder="${escapeHtmlAttr(kindText.rawPlaceholder)}" />${hasPaste ? `
           <button type="button" class="btn-small" id="${id}-paste">Paste</button>` : ''}
         </div>
         <div class="prop-sanitize-diff hidden" id="${id}-custom-diff"></div>
-      </div>
+      </div>${showsResolvedUnit ? `
+      <div class="prop-live-info" id="${RESOLVED_UNIT_ID}" data-tier="advanced">Resolving…</div>` : ''}
     `;
   const part = (suffix) => [...mount.querySelectorAll('[id]')].find((el) => el.id === `${rawId}${suffix}`);
   const defaultSelect = part('');
@@ -437,7 +524,7 @@ function renderEventPicker(host, comp, field, mount) {
 
   // Shows the stripped characters before commit, without changing the draft.
   const updateDiffHint = () => {
-    const { removed } = SecurityValidator.sanitizeWithReport('event', customInput.value);
+    const { removed } = SecurityValidator.sanitizeWithReport(kindText.sanitize, customInput.value);
     if (removed.length > 0) {
       diff.textContent = `Removed ${removed.map((c) => `"${c}"`).join(' ')} — did you mean to paste forum syntax like "(A:TRANSPONDER IDENT:1, Bool)"? Only the cleaned text will be saved.`;
       diff.classList.remove('hidden');
@@ -464,13 +551,27 @@ function renderEventPicker(host, comp, field, mount) {
   customSelect.addEventListener('change', () => {
     if (customSelect.value) customInput.value = customSelect.value;
     updateDiffHint();
-    commit(SecurityValidator.sanitizeWithReport('event', customInput.value).cleaned);
+    commit(SecurityValidator.sanitizeWithReport(kindText.sanitize, customInput.value).cleaned);
   });
   customInput.addEventListener('change', () => {
-    commit(SecurityValidator.sanitizeWithReport('event', customInput.value).cleaned);
+    commit(SecurityValidator.sanitizeWithReport(kindText.sanitize, customInput.value).cleaned);
   });
-  part('-connect').addEventListener('click', () => host.openConnectDialog(comp, host.state.widgetDef, 'write', key));
-  part('-paste')?.addEventListener('click', () => pasteParsedWriteEvent(host, comp, field, { select: defaultSelect, block: customBlock, input: customInput }));
+  part('-connect').addEventListener('click', () => host.openConnectDialog(comp, host.state.widgetDef, kind, key));
+  const paste = kind === 'read' ? pasteParsedReadValue : pasteParsedWriteEvent;
+  part('-paste')?.addEventListener('click', () => paste(host, comp, field, { select: defaultSelect, block: customBlock, input: customInput }));
+
+  if (showsResolvedUnit) {
+    // A bare Deck Event's unit comes from the active Bridge profile.
+    const resolvedInfo = mount.querySelector(`#${RESOLVED_UNIT_ID}`);
+    host.simBridge.resolveDeckEvent(stored).then((resolved) => {
+      // The panel may have re-rendered (another component, or a binding edit) by the time this
+      // resolves; only touch the DOM if this exact element is still live.
+      if (!resolvedInfo.isConnected) return;
+      resolvedInfo.textContent = resolved
+        ? `Unit: ${resolved.unit} — from profile "${resolved.profileName}"`
+        : `"${stored}" has no mapping in the active profile.`;
+    });
+  }
 
   if (!field.guided) return;
   const guidedPartAt = (suffix) => [...mount.querySelectorAll('[id]')].find((el) => el.id === `${guidedRaw}${suffix}`);
@@ -483,7 +584,7 @@ function renderEventPicker(host, comp, field, mount) {
       variableSelect.disabled = true;
       return;
     }
-    variableSelect.innerHTML = `<option value="">— choose a value —</option>${categoryValueOptions(categorySelect.value, undefined)}`;
+    variableSelect.innerHTML = `<option value="">— choose a value —</option>${categoryValueOptions(kind, categorySelect.value, undefined)}`;
     variableSelect.disabled = false;
   });
   variableSelect.addEventListener('change', () => {
@@ -505,12 +606,13 @@ const BINDING_RENDERERS = {
   stateRefPicker: renderTextField,
   stateVarPicker: renderStateVarPicker,
   transitionEditor: renderTransitionField,
-  eventPicker: renderEventPicker,
+  eventPicker: renderDeckEventPicker,
+  simVarPicker: renderDeckEventPicker,
 };
 
 /**
  * Renders one binding row with the binding renderer for its control.
- * @param {object} host Inspector facade providing getFieldValue, commitField, humanizeFieldLabel, fieldDomId, openConnectDialog, state.loadSavedWidgets, state.widgetDef and state.testerParsed, plus uiTier, render and simVarTester for a guided row's Guided picker.
+ * @param {object} host Inspector facade providing getFieldValue, commitField, evaluateShowWhen, humanizeFieldLabel, fieldDomId, openConnectDialog, state.loadSavedWidgets, state.widgetDef, state.testerParsed and state.updateComponent, plus uiTier, render and simVarTester for a guided row's Guided picker, and simBridge for Read's resolved-unit line. It may also provide getFieldsForType, the row source.
  * @param {object} comp Component captured for this render.
  * @param {object} field Binding registry row.
  * @param {HTMLElement} mount Element whose contents are replaced.

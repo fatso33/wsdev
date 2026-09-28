@@ -37,6 +37,7 @@ export function createFieldRenderers(host) {
     pivotEditor: (comp, field, mount) => host.renderPivotField(comp, field, mount),
     stateRefPicker: (comp, field, mount) => host.renderBindingField(comp, field, mount),
     transitionEditor: (comp, field, mount) => host.renderBindingField(comp, field, mount),
-    eventPicker: (comp, field, mount) => host.renderBindingField(comp, field, mount)
+    eventPicker: (comp, field, mount) => host.renderBindingField(comp, field, mount),
+    simVarPicker: (comp, field, mount) => host.renderBindingField(comp, field, mount)
   };
 }
