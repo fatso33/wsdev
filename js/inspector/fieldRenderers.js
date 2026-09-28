@@ -36,6 +36,7 @@ export function createFieldRenderers(host) {
     rangeEditor: (comp, field, mount) => host.renderRangeField(comp, field, mount),
     pivotEditor: (comp, field, mount) => host.renderPivotField(comp, field, mount),
     stateRefPicker: (comp, field, mount) => host.renderBindingField(comp, field, mount),
-    transitionEditor: (comp, field, mount) => host.renderBindingField(comp, field, mount)
+    transitionEditor: (comp, field, mount) => host.renderBindingField(comp, field, mount),
+    eventPicker: (comp, field, mount) => host.renderBindingField(comp, field, mount)
   };
 }

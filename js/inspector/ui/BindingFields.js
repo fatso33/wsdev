@@ -8,8 +8,14 @@
  * from a Studio-side table keyed by path, so existing ids stay stable while the registry stays free
  * of editor ids; a row missing from the table falls back to `host.fieldDomId(path)`.
  * Renderers hold no state; their listeners live with the mount the engine discards on re-render.
+ * The Deck Event picker also reads the widget's saved-widget and Community Pack events, through
+ * `host.state`, for its Custom block's suggestions.
  */
 
+import { SecurityValidator } from '../../../core/SecurityValidator.js';
+import { getDeckEventsByKind, DECK_EVENT_NAMES } from '../../../core/deckEvents.js';
+import { extractCustomDeckEvents } from '../../../core/widgetVarExtractor.js';
+import { getPackSuggestedEvents } from '../../../core/deckEventPacks.js';
 import { CUSTOM_OPTION_VALUE, escapeHtmlAttr } from '../inspectorMarkup.js';
 
 /** Each binding path's DOM id, or the stem its sub-controls' ids extend. */
@@ -228,6 +234,121 @@ function renderTransitionField(host, comp, field, mount) {
   easingSelect?.addEventListener('change', commit);
 }
 
+/**
+ * The write events other saved widgets use, then those Community Packs suggest, as Custom block
+ * suggestions. The widget being edited is left out of the saved ones.
+ * @param {object} host Inspector facade with `state.loadSavedWidgets` and `state.widgetDef`.
+ * @returns {Array<{name: string, source: string}>} Each event once, saved widgets first.
+ */
+function suggestedWriteEvents(host) {
+  const savedWidgets = host.state.loadSavedWidgets().filter((w) => w.id !== host.state.widgetDef.id);
+  const saved = extractCustomDeckEvents(savedWidgets, DECK_EVENT_NAMES).map((e) => ({
+    name: e.name,
+    kind: e.kind,
+    source: e.widgetIds.length ? `used by ${e.widgetIds.join(', ')}` : '',
+  }));
+  const packs = getPackSuggestedEvents()
+    .filter((e) => !saved.some((c) => c.name === e.name))
+    .map((e) => ({ name: e.name, kind: e.kind, source: `from pack: ${e.fromPack}` }));
+  return [...saved, ...packs].filter((e) => e.kind === 'write');
+}
+
+/** The Deck Event dropdown's options: None, the catalogue's write events, and Custom…. */
+function deckEventOptions(current) {
+  const items = getDeckEventsByKind('write');
+  const isKnown = items.some((e) => e.name === current);
+  return `
+      <option value="" ${!current && !isKnown ? 'selected' : ''}>— none —</option>
+      ${items.map((e) => `<option value="${escapeHtmlAttr(e.name)}" ${current === e.name ? 'selected' : ''}>${escapeHtmlAttr(e.label)}</option>`).join('')}
+      <option value="${CUSTOM_OPTION_VALUE}" ${current && !isKnown ? 'selected' : ''}>Custom…</option>`;
+}
+
+/** The Custom block's suggestion options; one is selected only when it is the stored value. */
+function suggestionOptions(entries, current) {
+  const placeholder = entries.length > 0 ? '— select or type below —' : '(no custom Deck Events in use yet — try importing a Community Pack in the Library tab)';
+  return `
+      <option value="">${placeholder}</option>
+      ${entries.map((e) => `<option value="${escapeHtmlAttr(e.name)}" ${current === e.name ? 'selected' : ''}>${escapeHtmlAttr(e.name)}${e.source ? ` (${escapeHtmlAttr(e.source)})` : ''}</option>`).join('')}`;
+}
+
+/**
+ * A Deck Event (a write event) as a dropdown of None, the catalogue's write events and Custom…, plus
+ * Connect…. Custom… reveals a block without writing: a suggestion select (events other saved widgets
+ * use, and Community Pack events), a free-text input and a hint showing the characters sanitizing
+ * would strip. A suggestion or the input's text is written sanitized as an event name, and an empty
+ * result removes the key. A stored name outside the catalogue selects Custom… with the block open
+ * and the name in the input. Connect… opens the Connect dialog for this row's own key. Sub-ids extend
+ * the row's id: `-connect`, `-custom-block`, `-custom-select`, `-custom-input` and `-custom-diff`.
+ * @param {object} host Inspector facade providing commitField, openConnectDialog and state.
+ * @param {object} comp Component captured for this render.
+ * @param {object} field Binding registry row.
+ * @param {HTMLElement} mount Element whose contents are replaced.
+ * @returns {void}
+ */
+function renderEventPicker(host, comp, field, mount) {
+  const id = escapeHtmlAttr(bindingDomId(host, field.path));
+  const key = field.path.slice('binding.'.length);
+  const stored = shownValue(host, comp, field);
+  const isCustom = !!stored && !getDeckEventsByKind('write').some((e) => e.name === stored);
+  mount.innerHTML = `
+      <label>${labelMarkup(host, field)}</label>
+      <div class="prop-row-2">
+        <select id="${id}" class="prop-select">${deckEventOptions(stored)}</select>
+        <button type="button" class="btn-small" id="${id}-connect" style="flex:0 0 auto;">Connect…</button>
+      </div>
+      <div class="prop-field prop-custom-block ${isCustom ? '' : 'hidden'}" id="${id}-custom-block">
+        <label>Custom Deck Event (used by another saved widget)</label>
+        <select id="${id}-custom-select" class="prop-select">${suggestionOptions(suggestedWriteEvents(host), stored)}</select>
+        <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
+        <div class="prop-paste-row">
+          <input type="text" id="${id}-custom-input" class="prop-input" value="${escapeHtmlAttr(isCustom ? stored : '')}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
+        </div>
+        <div class="prop-sanitize-diff hidden" id="${id}-custom-diff"></div>
+      </div>
+    `;
+  const [defaultSelect, customSelect] = mount.querySelectorAll('select');
+  const customBlock = mount.querySelector('.prop-custom-block');
+  const customInput = mount.querySelector('.prop-custom-block input');
+  const diff = mount.querySelector('.prop-sanitize-diff');
+  const commit = (value) => host.commitField(comp, field.path, value || undefined);
+
+  // Shows the stripped characters before commit, without changing the draft.
+  const updateDiffHint = () => {
+    const { removed } = SecurityValidator.sanitizeWithReport('event', customInput.value);
+    if (removed.length > 0) {
+      diff.textContent = `Removed ${removed.map((c) => `"${c}"`).join(' ')} — did you mean to paste forum syntax like "(A:TRANSPONDER IDENT:1, Bool)"? Only the cleaned text will be saved.`;
+      diff.classList.remove('hidden');
+    } else {
+      diff.textContent = '';
+      diff.classList.add('hidden');
+    }
+  };
+  customInput.addEventListener('input', updateDiffHint);
+
+  defaultSelect.addEventListener('change', () => {
+    // Custom… only reveals: a write here would re-render the panel from the still-empty input and
+    // snap the select back before anything could be typed or picked.
+    if (defaultSelect.value === CUSTOM_OPTION_VALUE) {
+      customBlock.classList.remove('hidden');
+      return;
+    }
+    customBlock.classList.add('hidden');
+    customSelect.value = '';
+    customInput.value = '';
+    updateDiffHint();
+    commit(defaultSelect.value);
+  });
+  customSelect.addEventListener('change', () => {
+    if (customSelect.value) customInput.value = customSelect.value;
+    updateDiffHint();
+    commit(SecurityValidator.sanitizeWithReport('event', customInput.value).cleaned);
+  });
+  customInput.addEventListener('change', () => {
+    commit(SecurityValidator.sanitizeWithReport('event', customInput.value).cleaned);
+  });
+  mount.querySelector('.btn-small').addEventListener('click', () => host.openConnectDialog(comp, host.state.widgetDef, 'write', key));
+}
+
 /** Binding renderers, keyed by registry control. */
 const BINDING_RENDERERS = {
   text: renderTextField,
@@ -236,6 +357,7 @@ const BINDING_RENDERERS = {
   stateRefPicker: renderTextField,
   stateVarPicker: renderStateVarPicker,
   transitionEditor: renderTransitionField,
+  eventPicker: renderEventPicker,
 };
 
 /**

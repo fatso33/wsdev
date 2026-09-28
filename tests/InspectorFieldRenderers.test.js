@@ -17,6 +17,7 @@ const DISPATCH = [
   ['pivotEditor', 'renderPivotField'],
   ['stateRefPicker', 'renderBindingField'],
   ['transitionEditor', 'renderBindingField'],
+  ['eventPicker', 'renderBindingField'],
 ];
 
 test('factory creation touches no host property', () => {

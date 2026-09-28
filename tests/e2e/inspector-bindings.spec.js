@@ -75,13 +75,14 @@ test('Pulse and fast fields use inline gates, and the write Pulse note appears',
   await seed(page, 'core.rotary');
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
   await expect(page.locator('#c-bind-increment-field')).toHaveAttribute('style', /display:none/);
-  await expect(page.locator('#c-bind-fastincrement-field')).toHaveAttribute('style', /display:none/);
+  await expect(page.locator('#c-bind-fastincrement')).toHaveCount(0);
   await expect(page.locator('#c-bind-write-pulse-note')).toHaveCount(0);
   await page.locator('#rf-props-writeMode').selectOption('pulse');
   await expect(page.locator('#c-bind-increment-field')).not.toHaveAttribute('style', /display:none/);
+  await expect(page.locator('#c-bind-fastincrement')).toHaveCount(0);
   await expect(page.locator('#c-bind-write-pulse-note')).toBeVisible();
   await page.locator('#rf-props-acceleration').check();
-  await expect(page.locator('#c-bind-fastincrement-field')).not.toHaveAttribute('style', /display:none/);
+  await expect(page.locator('#c-bind-fastincrement')).toBeVisible();
 });
 
 test('resolved unit reports profile or no mapping and ignores a detached node', async ({ page }) => {
@@ -115,7 +116,6 @@ test('transition and advanced state survive renders; binding fields keep their s
   await page.locator('#c-bind-state-custom-input').fill('  $context.new.value  ');
   await page.locator('#c-bind-state-custom-input').dispatchEvent('change');
   expect((await snapshot(page)).binding.stateVar).toBe('$context.new.value');
-  await page.locator('#c-bind-advanced-toggle').click();
   for (const [id, value, key] of [
     ['#c-bind-stateref', '  presets[0].label  ', 'stateRef'],
     ['#c-bind-sublabelstateref', '  presets[0].freq  ', 'sublabelStateRef'],
@@ -135,8 +135,6 @@ test('transition and advanced state survive renders; binding fields keep their s
   await page.locator('#c-bind-transition-ms').fill('');
   await page.locator('#c-bind-transition-ms').dispatchEvent('change');
   expect((await snapshot(page)).binding.transition).toBeUndefined();
-  await page.evaluate(() => window.__studioApp.inspector.render());
-  await expect(page.locator('#c-bind-advanced-fields')).not.toHaveClass(/hidden/);
 });
 
 function subtitle(page, text) {
@@ -506,13 +504,161 @@ test('raw unit, indicator Test State Var and Find-it use their existing owners',
   expect(await page.evaluate(() => window.__findItCalls)).toBe(1);
 });
 
+test('Acknowledge and Push render from the registry in Full with no Advanced toggle, under Send to Simulator with the row text', async ({ page }) => {
+  await seed(page, 'core.indicator');
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await expect(page.locator('#c-bind-advanced-toggle')).toHaveCount(0);
+  await expect(page.locator('#c-bind-advanced-fields')).toHaveCount(0);
+  const send = subtitle(page, 'Send to Simulator').locator('xpath=following-sibling::div[1]');
+  const rows = await page.evaluate(async () => (await import('/widgets/PropertyRegistry.js'))
+    .getFieldsForType('core.indicator').filter((f) => ['binding.ackEvent', 'binding.pushEvent'].includes(f.path))
+    .map(({ path, label, tooltip }) => ({ path, label, tooltip })));
+  expect(rows).toHaveLength(2);
+  const idOf = { 'binding.ackEvent': '#c-bind-ack', 'binding.pushEvent': '#c-bind-push' };
+  for (const row of rows) {
+    const field = send.locator('.prop-field', { has: page.locator(idOf[row.path]) }).first();
+    await expect(page.locator(idOf[row.path]), row.path).toBeVisible();
+    await expect(field.locator('label').first(), row.path).toHaveText(`${row.label} ⓘ`);
+    await expect(field.locator('label .prop-hint').first(), row.path).toHaveAttribute('title', row.tooltip);
+    const options = await optionsOf(page, idOf[row.path]);
+    expect(options[0], row.path).toEqual(['', '— none —']);
+    expect(options.at(-1), row.path).toEqual(['__custom__', 'Custom…']);
+    expect(options.map(([value]) => value), row.path).toContain('apHdgSet');
+    await expect(page.locator(`${idOf[row.path]}-connect`), row.path).toBeVisible();
+    await expect(page.locator(`${idOf[row.path]}-custom-block`), row.path).toHaveClass(/hidden/);
+  }
+  expect((await snapshot(page)).calls).toHaveLength(0);
+});
+
+test('Acknowledge and Push are Full-only while unauthored; a stored value shows at every tier, a custom one with its block', async ({ page }) => {
+  await seed(page, 'core.indicator');
+  for (const tier of ['guided', 'build']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    for (const id of ['#c-bind-ack', '#c-bind-push']) await expect(page.locator(id), `${tier} ${id}`).toBeHidden();
+    await expect(subtitle(page, 'Send to Simulator'), tier).toBeHidden();
+  }
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  for (const id of ['#c-bind-ack', '#c-bind-push']) await expect(page.locator(id), id).toBeVisible();
+
+  await seed(page, 'core.indicator', { ackEvent: 'apHdgSet', pushEvent: 'H:MY_PUSH' });
+  for (const tier of ['guided', 'build', 'full']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    await expect(subtitle(page, 'Send to Simulator'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-ack'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-ack'), tier).toHaveValue('apHdgSet');
+    await expect(page.locator('#c-bind-push'), tier).toHaveValue('__custom__');
+    await expect(page.locator('#c-bind-push-custom-block'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-push-custom-input'), tier).toHaveValue('H:MY_PUSH');
+    await expect(page.locator('#c-bind-ack-custom-block'), tier).toHaveClass(/hidden/);
+  }
+  expect((await snapshot(page)).calls).toHaveLength(0);
+});
+
+test('Push: Custom reveals without a write, free text is sanitized on change, a catalogue pick and None write one merged update each', async ({ page }) => {
+  await seed(page, 'core.indicator', { readSimVar: 'apHdgBugValue' });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await page.locator('#c-bind-push').selectOption('__custom__');
+  await expect(page.locator('#c-bind-push-custom-block')).not.toHaveClass(/hidden/);
+  expect((await snapshot(page)).calls).toHaveLength(0);
+  await page.locator('#c-bind-push-custom-input').fill('(H:MY_PUSH)');
+  await expect(page.locator('#c-bind-push-custom-diff')).toContainText('Removed');
+  expect((await snapshot(page)).calls).toHaveLength(0);
+  await page.locator('#c-bind-push-custom-input').dispatchEvent('change');
+  expect((await snapshot(page)).calls.at(-1)).toEqual(['binding-pin', { binding: { readSimVar: 'apHdgBugValue', pushEvent: 'H:MY_PUSH' } }]);
+  await page.locator('#c-bind-push').selectOption('apHdgSet');
+  expect((await snapshot(page)).binding.pushEvent).toBe('apHdgSet');
+  await expect(page.locator('#c-bind-push-custom-block')).toHaveClass(/hidden/);
+  await page.locator('#c-bind-push').selectOption('__custom__');
+  await page.locator('#c-bind-push-custom-input').fill('H:AGAIN');
+  await page.locator('#c-bind-push-custom-input').dispatchEvent('change');
+  expect((await snapshot(page)).binding.pushEvent).toBe('H:AGAIN');
+  await page.locator('#c-bind-push').selectOption('');
+  expect((await snapshot(page)).binding).toEqual({ readSimVar: 'apHdgBugValue' });
+  await expect(page.locator('#c-bind-push-custom-input')).toHaveValue('');
+});
+
+test('Acknowledge takes an event another saved widget uses from its Custom block', async ({ page }) => {
+  const renderErrors = await openBindingsCase(page, {
+    savedWidgets: [{ id: 'saved.one', kind: 'widget', components: [{ id: 'saved-button', type: 'core.button', binding: { writeEvent: 'MY_SAVED_EVENT' } }] }],
+    component: { id: 'sweep-pin', type: 'core.indicator', label: 'Sweep pin', props: {}, style: {}, binding: {} },
+  });
+  await page.locator('#c-bind-ack').selectOption('__custom__');
+  expect(await optionsOf(page, '#c-bind-ack-custom-select')).toEqual([['', '— select or type below —'], ['MY_SAVED_EVENT', 'MY_SAVED_EVENT (used by saved.one)']]);
+  await page.locator('#c-bind-ack-custom-select').selectOption('MY_SAVED_EVENT');
+  expect(await page.evaluate(() => window.__studioApp.state.getComponent('sweep-pin').binding)).toEqual({ ackEvent: 'MY_SAVED_EVENT' });
+  expect(renderErrors).toEqual([]);
+});
+
+test('Connect… on Acknowledge opens the dialog for ackEvent alone: no wire-up is offered and only that key is written', async ({ page }) => {
+  await seed(page, 'core.indicator');
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await page.locator('#c-bind-ack-connect').click();
+  await expect(page.locator('.studio-modal-overlay:not(.hidden)')).toBeVisible();
+  const name = await page.locator('#cn-catalogue-rows .cn-pick').first().getAttribute('data-name');
+  await page.locator('#cn-catalogue-rows .cn-pick').first().click();
+  await expect(page.locator('#cn-pairing')).toBeEmpty();
+  await expect(page.locator('#cn-pair-checkbox')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect.poll(async () => (await snapshot(page)).calls).toHaveLength(1);
+  expect((await snapshot(page)).calls[0]).toEqual(['binding-pin', { binding: { ackEvent: name } }]);
+});
+
+test('Connect… on Acknowledge, Push and the fast events passes each row\'s own key to the dialog', async ({ page }) => {
+  await seed(page, 'core.rotary', {}, { writeMode: 'pulse', acceleration: true });
+  await page.evaluate(() => {
+    const { inspector } = window.__studioApp;
+    window.__connectArgs = [];
+    inspector.openConnectDialog = (comp, def, kind, field) => { window.__connectArgs.push([comp.id, def === window.__studioApp.state.widgetDef, kind, field]); };
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  for (const stem of ['ack', 'push', 'fastincrement', 'fastdecrement']) await page.locator(`#c-bind-${stem}-connect`).click();
+  expect(await page.evaluate(() => window.__connectArgs)).toEqual([
+    ['binding-pin', true, 'write', 'ackEvent'],
+    ['binding-pin', true, 'write', 'pushEvent'],
+    ['binding-pin', true, 'write', 'fastIncrementEvent'],
+    ['binding-pin', true, 'write', 'fastDecrementEvent'],
+  ]);
+});
+
+test('a supplied eventPicker row renders in Full with Custom… and Connect…, and writes its own path, with no module naming it', async ({ page }) => {
+  await seed(page);
+  await page.evaluate(async () => {
+    const { getFieldsForType } = await import('/widgets/PropertyRegistry.js');
+    const { inspector } = window.__studioApp;
+    inspector.getFieldsForType = (t) => [...getFieldsForType(t), { path: 'binding.fooEvent', control: 'eventPicker', tier: 'advanced', group: 'Send to Simulator', label: 'Foo Event' }];
+    window.__connectArgs = [];
+    inspector.openConnectDialog = (comp, def, kind, field) => { window.__connectArgs.push([kind, field]); };
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  const field = page.locator('.prop-field', { has: page.locator('#rf-binding-fooEvent') }).first();
+  await expect(field.locator('label').first()).toHaveText('Foo Event');
+  await expect(field.locator('label .prop-hint')).toHaveCount(0);
+  const options = await optionsOf(page, '#rf-binding-fooEvent');
+  expect(options[0]).toEqual(['', '— none —']);
+  expect(options.at(-1)).toEqual(['__custom__', 'Custom…']);
+  await page.locator('#rf-binding-fooEvent-connect').click();
+  expect(await page.evaluate(() => window.__connectArgs)).toEqual([['write', 'fooEvent']]);
+  await page.locator('#rf-binding-fooEvent').selectOption('__custom__');
+  await expect(page.locator('#rf-binding-fooEvent-custom-block')).not.toHaveClass(/hidden/);
+  expect((await snapshot(page)).calls).toHaveLength(0);
+  await page.locator('#rf-binding-fooEvent-custom-input').fill('(H:FOO_EVENT)');
+  await expect(page.locator('#rf-binding-fooEvent-custom-diff')).toContainText('Removed');
+  await page.locator('#rf-binding-fooEvent-custom-input').dispatchEvent('change');
+  expect((await snapshot(page)).binding.fooEvent).toBe('H:FOO_EVENT');
+  await page.locator('#rf-binding-fooEvent').selectOption('apHdgSet');
+  expect((await snapshot(page)).binding.fooEvent).toBe('apHdgSet');
+  await page.evaluate(() => Reflect.deleteProperty(window.__studioApp.inspector, 'getFieldsForType'));
+});
+
 const SWEEP_WIDGET_ID = 'com.flightdeck.bindings-sweep';
 const NO_CUSTOM_EVENTS = '(no custom Deck Events in use yet — try importing a Community Pack in the Library tab)';
 const SAVED_WRITE_OPTIONS = [['', '— select or type below —'], [P2, `${P2} (used by ${P})`]];
 const WRITE_KINDS = ['write', 'increment', 'decrement', 'fastincrement', 'fastdecrement', 'ack', 'push'];
 
 // Loads a blank widget with the given state vars and component under the write recorder, snapshots it,
-// then forces the render under test: the given tier, Advanced open, on the Data tab.
+// then forces the render under test: the given tier, on the Data tab.
 async function openBindingsCase(page, { stateVars = [], component, savedWidgets = [], tier = 'full' }) {
   const renderErrors = collectRenderErrors(page);
   await openStudio(page);
@@ -527,7 +673,6 @@ async function openBindingsCase(page, { stateVars = [], component, savedWidgets 
   await page.evaluate((uiTier) => {
     const { inspector } = window.__studioApp;
     inspector.uiTier = uiTier;
-    inspector._bindingAdvancedOpen = true;
     inspector.render();
   }, tier);
   await page.getByTestId('inspector-tab-data').click();
@@ -547,7 +692,7 @@ function dataBadge(page) {
 const BINDINGS_SWEEP_CASES = [
   {
     id: 'B1',
-    title: 'Pulse rotary event fields with acceleration and Advanced open',
+    title: 'Pulse rotary event fields with acceleration',
     savedWidgets: [{ id: P, kind: 'widget', components: [{ id: 'saved-button', type: 'core.button', binding: { writeEvent: P2 } }] }],
     component: {
       id: 'sweep-pin',

@@ -73,7 +73,7 @@ test('the harness keeps the page off the bridge port and the wider network', asy
   expect(status).toEqual({ connected: false, label: 'Offline', serviceWorkers: 0 });
 });
 
-test('fresh construction creates exactly the twelve own fields, in constructor order', async ({ page }) => {
+test('fresh construction creates exactly the eleven own fields, in constructor order', async ({ page }) => {
   await openStudio(page);
   await constructFreshInspector(page);
 
@@ -86,7 +86,6 @@ test('fresh construction creates exactly the twelve own fields, in constructor o
       simBridgeIsFake: inspector.simBridge === window.__inspectorHarness.fakeSimBridge,
       expandedGroups: inspector.expandedGroups instanceof Set ? [...inspector.expandedGroups] : null,
       knownGroupTitles: inspector.knownGroupTitles instanceof Set ? [...inspector.knownGroupTitles] : null,
-      bindingAdvancedOpen: inspector._bindingAdvancedOpen,
       uiTier: inspector.uiTier,
       tierOverrideGroups: inspector.tierOverrideGroups instanceof Set ? [...inspector.tierOverrideGroups] : null,
       jsonViewOpenTitles: inspector.jsonViewOpenTitles instanceof Set ? [...inspector.jsonViewOpenTitles] : null,
@@ -103,8 +102,7 @@ test('fresh construction creates exactly the twelve own fields, in constructor o
   expect(fields).toEqual({
     keys: [
       'FIELD_RENDERERS', 'container', 'state', 'simBridge', 'expandedGroups', 'knownGroupTitles',
-      '_bindingAdvancedOpen', 'uiTier', 'tierOverrideGroups', 'jsonViewOpenTitles',
-      'activeInspectorTab', '_sectionJsonData',
+      'uiTier', 'tierOverrideGroups', 'jsonViewOpenTitles', 'activeInspectorTab', '_sectionJsonData',
     ],
     containerDetached: true,
     stateIsAppState: true,
@@ -112,7 +110,6 @@ test('fresh construction creates exactly the twelve own fields, in constructor o
     // Only the default-open group is seeded as expanded on first sight.
     expandedGroups: ['METADATA & SPECIFICATION'],
     knownGroupTitles: WIDGET_ROOT_GROUPS,
-    bindingAdvancedOpen: false,
     uiTier: 'guided',
     tierOverrideGroups: [],
     jsonViewOpenTitles: [],
@@ -121,7 +118,7 @@ test('fresh construction creates exactly the twelve own fields, in constructor o
     fieldRendererKeys: [
       'text', 'iconPicker', 'number', 'checkbox', 'select', 'color', 'rowListEditor',
       'detentEditor', 'arcBandsEditor', 'stateVarPicker', 'assetPicker', 'rangeEditor', 'pivotEditor',
-      'stateRefPicker', 'transitionEditor',
+      'stateRefPicker', 'transitionEditor', 'eventPicker',
     ],
     rootClasses: ['studio-inspector-root'],
     firstChildClass: 'inspector-mode-toggle',

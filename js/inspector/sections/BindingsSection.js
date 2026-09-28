@@ -1,10 +1,10 @@
 /**
  * @module BindingsSection
  * Renders a component's simulator and local-state binding controls into a fresh
- * Data tab mount. StudioInspector owns UI tier, the Advanced toggle state,
- * Bridge/Tester collaborators and render lifecycle; StudioState owns binding
- * writes and history. Local DOM listeners live with the discarded mount.
- * The only asynchronous callback updates a resolved-unit node while connected.
+ * Data tab mount. StudioInspector owns UI tier, Bridge/Tester collaborators
+ * and render lifecycle; StudioState owns binding writes and history. Local DOM
+ * listeners live with the discarded mount. The only asynchronous callback
+ * updates a resolved-unit node while connected.
  */
 import { SecurityValidator } from '../../../core/SecurityValidator.js';
 import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_NAMES } from '../../../core/deckEvents.js';
@@ -17,9 +17,7 @@ import { CUSTOM_OPTION_VALUE, CATEGORY_LABELS, escapeHtmlAttr } from '../inspect
 // Binding paths the panel still builds by hand, ahead of the registry-rendered rows. Every other
 // binding row the type claims, a new one included, renders through the field engine.
 const HAND_BUILT_BINDING_PATHS = new Set([
-  'binding.readSimVar', 'binding.unit', 'binding.writeEvent', 'binding.incrementEvent',
-  'binding.decrementEvent', 'binding.fastIncrementEvent', 'binding.fastDecrementEvent', 'binding.ackEvent',
-  'binding.pushEvent',
+  'binding.readSimVar', 'binding.unit', 'binding.writeEvent', 'binding.incrementEvent', 'binding.decrementEvent',
 ]);
 
 /**
@@ -104,39 +102,12 @@ export function renderComponentBindings(host, comp, def, body) {
       const isRawAddress = /^(A|L|H|K):/i.test(binding.readSimVar || '');
       const writeIsCustom = !!binding.writeEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.writeEvent);
 
-      const ackIsCustom = !!binding.ackEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.ackEvent);
-      const pushIsCustom = !!binding.pushEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.pushEvent);
-
       // Pulse gates use inline display because applyUiMode toggles .hidden on
       // data-tier fields after render. Inline display and the tier gate both
       // apply, while stored events survive switching back to Absolute.
       const isPulseRotary = comp.type === 'core.rotary' && comp.props?.writeMode === 'pulse';
       const incrementIsCustom = !!binding.incrementEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.incrementEvent);
       const decrementIsCustom = !!binding.decrementEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.decrementEvent);
-
-      // Acceleration's fast step events: only a Pulse Rotary with Acceleration enabled ever
-      // sends them. Gated like Increment/Decrement above (inline display, so the tier pass
-      // cannot undo it) and, like them, never cleared when hidden, so switching Acceleration
-      // off and on again finds the events still set. Advanced tier only: they are for
-      // aircraft that expose a dedicated fast step event, which is the uncommon case.
-      const isFastEventRotary = isPulseRotary && comp.props?.acceleration === true;
-      const fastEventFields = (kind, field, label, direction) => {
-        const isCustom = !!binding[field] && !getDeckEventsByKind('write').some((e) => e.name === binding[field]);
-        return `
-        <div class="prop-field" data-tier="advanced" id="c-bind-${kind}-field" style="${isFastEventRotary ? '' : 'display:none;'}">
-          <label>${label} <span class="prop-hint" title="FDWS v1.30: dispatched once per step turned ${direction} in the coarse Acceleration tier, in place of the ordinary event above, when Write Mode is Pulse and Acceleration is on. Bind both fast events or neither: a single one is ignored.">ⓘ</span></label>
-          <select id="c-bind-${kind}" class="prop-select">${buildDefaultOptions('write', binding[field])}</select>
-        </div>
-        <div class="prop-field prop-custom-block ${(isFastEventRotary && isCustom) ? '' : 'hidden'}" id="c-bind-${kind}-custom-block">
-          <label>Custom Deck Event (used by another saved widget)</label>
-          <select id="c-bind-${kind}-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding[field])}</select>
-          <label>Or type a new custom event / raw SimConnect event (H:/K:...)</label>
-          <div class="prop-paste-row">
-            <input type="text" id="c-bind-${kind}-custom-input" class="prop-input" value="${escapeHtmlAttr(isCustom ? (binding[field] || '') : '')}" placeholder="e.g. myCustomEvent, H:GTN750_DirectToPush" />
-          </div>
-          <div class="prop-sanitize-diff hidden" id="c-bind-${kind}-custom-diff"></div>
-        </div>`;
-      };
 
       body.innerHTML = `
         <div class="prop-field" data-tier="simple-only">
@@ -253,33 +224,8 @@ export function renderComponentBindings(host, comp, def, body) {
           </div>
           <div class="prop-sanitize-diff hidden" id="c-bind-decrement-custom-diff"></div>
         </div>
-        ${fastEventFields('fastincrement', 'fastIncrementEvent', 'Fast Increment Deck Event (Coarse Clockwise)', 'clockwise')}
-        ${fastEventFields('fastdecrement', 'fastDecrementEvent', 'Fast Decrement Deck Event (Coarse Counter-Clockwise)', 'counter-clockwise')}
         ` : ''}
 
-        <button type="button" id="c-bind-advanced-toggle" class="panel-full-btn" style="margin-top:4px;">
-          ${host._bindingAdvancedOpen ? '▾' : '▸'} Advanced (Acknowledge / Push Events)
-        </button>
-        <div id="c-bind-advanced-fields" class="${host._bindingAdvancedOpen ? '' : 'hidden'}">
-          <div class="prop-field">
-            <label>Acknowledge Event <span class="prop-hint" title="Fired when this component's built-in acknowledge/silence action is used (e.g. core.indicator annunciator ack). Rarely needed outside annunciator-style components.">ⓘ</span></label>
-            <select id="c-bind-ack" class="prop-select">${buildDefaultOptions('write', binding.ackEvent)}</select>
-          </div>
-          <div class="prop-field prop-custom-block ${ackIsCustom ? '' : 'hidden'}" id="c-bind-ack-custom-block">
-            <select id="c-bind-ack-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.ackEvent)}</select>
-            <input type="text" id="c-bind-ack-custom-input" class="prop-input" value="${escapeHtmlAttr(ackIsCustom ? (binding.ackEvent || '') : '')}" placeholder="Custom acknowledge event" />
-            <div class="prop-sanitize-diff hidden" id="c-bind-ack-custom-diff"></div>
-          </div>
-          <div class="prop-field">
-            <label>Push Event <span class="prop-hint" title="Optional second write event for a component that has a separate press action alongside its main write — dispatched on press-and-hold, for spring-loaded/momentary controls. No core component dispatches it today (core.rotary's centre push was removed in FDWS v1.30), so leave it as None unless the component you are configuring documents one.">ⓘ</span></label>
-            <select id="c-bind-push" class="prop-select">${buildDefaultOptions('write', binding.pushEvent)}</select>
-          </div>
-          <div class="prop-field prop-custom-block ${pushIsCustom ? '' : 'hidden'}" id="c-bind-push-custom-block">
-            <select id="c-bind-push-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.pushEvent)}</select>
-            <input type="text" id="c-bind-push-custom-input" class="prop-input" value="${escapeHtmlAttr(pushIsCustom ? (binding.pushEvent || '') : '')}" placeholder="Custom push event" />
-            <div class="prop-sanitize-diff hidden" id="c-bind-push-custom-diff"></div>
-          </div>
-        </div>
       `;
 
       const registryRows = rows.filter((row) => row.path.startsWith('binding.') && !HAND_BUILT_BINDING_PATHS.has(row.path));
@@ -290,7 +236,7 @@ export function renderComponentBindings(host, comp, def, body) {
       };
 
       // Wires one default-select + custom-block pair (kind: 'read'/'write'/
-      // 'ack'/'push'). readSimVar uses the SimVar character class, the
+      // 'increment'/'decrement'). readSimVar uses the SimVar character class, the
       // other three are all SimConnect event names.
       const wireBindingKind = (kind, bindingField) => {
         const defaultSelect = body.querySelector(`#c-bind-${kind}`);
@@ -347,13 +293,9 @@ export function renderComponentBindings(host, comp, def, body) {
 
       wireBindingKind('read', 'readSimVar');
       wireBindingKind('write', 'writeEvent');
-      wireBindingKind('ack', 'ackEvent');
-      wireBindingKind('push', 'pushEvent');
       if (comp.type === 'core.rotary') {
         wireBindingKind('increment', 'incrementEvent');
         wireBindingKind('decrement', 'decrementEvent');
-        wireBindingKind('fastincrement', 'fastIncrementEvent');
-        wireBindingKind('fastdecrement', 'fastDecrementEvent');
       }
 
       // Connect and direct binding fields write through the same state path.
@@ -467,12 +409,5 @@ export function renderComponentBindings(host, comp, def, body) {
           });
         }
       }
-
-      body.querySelector('#c-bind-advanced-toggle')?.addEventListener('click', () => {
-        host._bindingAdvancedOpen = !host._bindingAdvancedOpen;
-        body.querySelector('#c-bind-advanced-fields')?.classList.toggle('hidden');
-        const toggleBtn = body.querySelector('#c-bind-advanced-toggle');
-        if (toggleBtn) toggleBtn.textContent = `${host._bindingAdvancedOpen ? '▾' : '▸'} Advanced (Acknowledge / Push Events)`;
-      });
 
 }

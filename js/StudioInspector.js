@@ -40,10 +40,6 @@ export class StudioInspector {
     // different components) so the panel's expand/collapse state survives edits.
     this.expandedGroups = new Set();
     this.knownGroupTitles = new Set();
-    // UI-only (not persisted to the widget def) open/closed state for the
-    // binding editor's "Advanced" sub-section — survives re-renders the same
-    // way expandedGroups does, for the same reason.
-    this._bindingAdvancedOpen = false;
 
     // The tier is a browser preference, not widget data. Apply its visibility
     // after each render so one markup tree serves all tiers. Legacy binary

@@ -32,7 +32,7 @@ test('all thirteen own renderers dispatch real registry fields through the Inspe
   }, CASES);
   expect(results.map(({ control, own, declaredControl, rendered }) => ({ control, own, declaredControl, rendered })))
     .toEqual(CASES.map(([control]) => ({ control, own: true, declaredControl: control, rendered: true })));
-  expect(results[0].keys).toEqual([...CASES.map(([control]) => control), 'stateRefPicker', 'transitionEditor']);
+  expect(results[0].keys).toEqual([...CASES.map(([control]) => control), 'stateRefPicker', 'transitionEditor', 'eventPicker']);
 });
 
 test('renderer closures look up the host method at call time', async ({ page }) => {
