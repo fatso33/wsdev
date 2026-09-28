@@ -151,6 +151,9 @@ test('the State Path rows render under the Local State heading in Full, write tr
   await expect(localState.locator('#c-bind-stateref')).toHaveValue('presets[0].label');
   await expect(localState.locator('#c-bind-sublabelstateref')).toHaveAttribute('placeholder', 'e.g. presets[0].freq');
   await expect(localState.locator('.prop-field', { has: page.locator('#c-bind-stateref') }).locator('label')).toHaveText('Bind to Local State Path ⓘ');
+  const stateRefTooltip = await page.evaluate(async () => (await import('/widgets/PropertyRegistry.js'))
+    .getFieldsForType('core.button').find((f) => f.path === 'binding.stateRef').tooltip);
+  await expect(localState.locator('.prop-field', { has: page.locator('#c-bind-stateref') }).locator('label .prop-hint')).toHaveAttribute('title', stateRefTooltip);
   await page.locator('#c-bind-sublabelstateref').fill('  presets[1].freq  ');
   await page.locator('#c-bind-sublabelstateref').dispatchEvent('change');
   // A synthetic change leaves the input dirty, so the re-render that replaces the focused input
@@ -165,6 +168,22 @@ test('the State Path rows render under the Local State heading in Full, write tr
   const { binding } = await snapshot(page);
   expect(binding.stateRef).toBeUndefined();
   expect(binding.sublabelStateRef).toBe('presets[1].freq');
+});
+
+test('a supplied State Path row with no label shows its humanized path and no ⓘ', async ({ page }) => {
+  await seed(page);
+  await page.evaluate(async () => {
+    const { getFieldsForType } = await import('/widgets/PropertyRegistry.js');
+    const { inspector } = window.__studioApp;
+    inspector.getFieldsForType = (t) => [...getFieldsForType(t), { path: 'binding.probeRef', control: 'stateRefPicker', tier: 'advanced', group: 'Local State' }];
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  await expect(page.locator('#rf-binding-probeRef')).toBeVisible();
+  const label = page.locator('.prop-field', { has: page.locator('#rf-binding-probeRef') }).locator('label');
+  await expect(label).toHaveText('Probe Ref');
+  await expect(label.locator('.prop-hint')).toHaveCount(0);
+  await page.evaluate(() => Reflect.deleteProperty(window.__studioApp.inspector, 'getFieldsForType'));
 });
 
 test('a stored Sublabel State Path shows in Guided; unauthored State Path rows and their heading do not', async ({ page }) => {
