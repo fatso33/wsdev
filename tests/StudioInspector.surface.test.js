@@ -30,7 +30,7 @@ const PROTOTYPE_METHODS = [
   'buildFieldWrap', 'formatShowWhenReason', 'resolveEffectiveValue',
   'resolveFeelFloorHint', 'resolvePulseFeelDescription',
   'renderPlainField', 'renderCheckboxField', 'renderSelectField', 'renderColorField',
-  'renderRowListField', 'renderStateVarField', 'renderAssetField', 'renderRangeField', 'renderPivotField',
+  'renderRowListField', 'renderStateVarField', 'renderBindingField', 'renderAssetField', 'renderRangeField', 'renderPivotField',
   'updateCompProp',
   'openAddInteractionModal',
   'openConnectDialog',
@@ -46,10 +46,10 @@ describe('StudioInspector facade surface', () => {
     expect(typeof inspectorModule.StudioInspector).toBe('function');
   });
 
-  it('keeps exactly the 68 prototype methods', () => {
+  it('keeps exactly the 69 prototype methods', () => {
     const proto = inspectorModule.StudioInspector.prototype;
     const names = Object.getOwnPropertyNames(proto).filter((name) => name !== 'constructor');
-    expect(PROTOTYPE_METHODS).toHaveLength(68);
+    expect(PROTOTYPE_METHODS).toHaveLength(69);
     expect([...names].sort()).toEqual([...PROTOTYPE_METHODS].sort());
     for (const name of names) {
       expect(typeof Object.getOwnPropertyDescriptor(proto, name).value, name).toBe('function');

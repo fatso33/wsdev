@@ -139,6 +139,48 @@ test('transition and advanced state survive renders; binding fields keep their s
   await expect(page.locator('#c-bind-advanced-fields')).not.toHaveClass(/hidden/);
 });
 
+function subtitle(page, text) {
+  return page.locator('#studio-right-sidebar .prop-section-subtitle').filter({ hasText: new RegExp(`^${text}$`) });
+}
+
+test('the State Path rows render under the Local State heading in Full, write trimmed text in one update, and blank removes the key', async ({ page }) => {
+  await seed(page, 'core.button', { stateRef: 'presets[0].label' });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  await expect(subtitle(page, 'Local State')).toBeVisible();
+  const localState = subtitle(page, 'Local State').locator('xpath=following-sibling::div[1]');
+  await expect(localState.locator('#c-bind-stateref')).toHaveValue('presets[0].label');
+  await expect(localState.locator('#c-bind-sublabelstateref')).toHaveAttribute('placeholder', 'e.g. presets[0].freq');
+  await expect(localState.locator('.prop-field', { has: page.locator('#c-bind-stateref') }).locator('label')).toHaveText('Bind to Local State Path ⓘ');
+  await page.locator('#c-bind-sublabelstateref').fill('  presets[1].freq  ');
+  await page.locator('#c-bind-sublabelstateref').dispatchEvent('change');
+  // A synthetic change leaves the input dirty, so the re-render that replaces the focused input
+  // fires one more, identical, change; every update must still be the one merged binding.
+  const { calls: firstCalls } = await snapshot(page);
+  expect(firstCalls.length).toBeGreaterThan(0);
+  for (const call of firstCalls) {
+    expect(call).toEqual(['binding-pin', { binding: { stateRef: 'presets[0].label', sublabelStateRef: 'presets[1].freq' } }]);
+  }
+  await page.locator('#c-bind-stateref').fill('   ');
+  await page.locator('#c-bind-stateref').dispatchEvent('change');
+  const { binding } = await snapshot(page);
+  expect(binding.stateRef).toBeUndefined();
+  expect(binding.sublabelStateRef).toBe('presets[1].freq');
+});
+
+test('a stored Sublabel State Path shows in Guided; unauthored State Path rows and their heading do not', async ({ page }) => {
+  await seed(page, 'core.button', { sublabelStateRef: 'presets[0].freq' });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
+  await expect(page.locator('#c-bind-sublabelstateref')).toBeVisible();
+  await expect(page.locator('#c-bind-sublabelstateref')).toHaveValue('presets[0].freq');
+  await expect(page.locator('#c-bind-stateref')).toBeHidden();
+  await expect(subtitle(page, 'Local State')).toBeVisible();
+  await page.locator('#c-bind-sublabelstateref').fill('');
+  await page.locator('#c-bind-sublabelstateref').dispatchEvent('change');
+  expect((await snapshot(page)).binding.sublabelStateRef).toBeUndefined();
+  await expect(page.locator('#c-bind-sublabelstateref')).toBeHidden();
+  await expect(subtitle(page, 'Local State')).toBeHidden();
+});
+
 test('tester paste reports four states and writes raw units or strips K:', async ({ page }) => {
   await seed(page);
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });

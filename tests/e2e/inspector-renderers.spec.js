@@ -16,7 +16,7 @@ const CASES = [
   ['pivotEditor', 'core.gauge', 'props.pivot', 'input'],
 ];
 
-test('all thirteen own renderers dispatch real registry fields through the Inspector', async ({ page }) => {
+test('all thirteen own renderers dispatch real registry fields through the Inspector, beside the binding renderers', async ({ page }) => {
   await openStudio(page);
   const results = await page.evaluate(async (cases) => {
     const { TYPE_FIELDS } = await import('/widgets/PropertyRegistry.js');
@@ -32,7 +32,7 @@ test('all thirteen own renderers dispatch real registry fields through the Inspe
   }, CASES);
   expect(results.map(({ control, own, declaredControl, rendered }) => ({ control, own, declaredControl, rendered })))
     .toEqual(CASES.map(([control]) => ({ control, own: true, declaredControl: control, rendered: true })));
-  expect(results[0].keys).toEqual(CASES.map(([control]) => control));
+  expect(results[0].keys).toEqual([...CASES.map(([control]) => control), 'stateRefPicker']);
 });
 
 test('renderer closures look up the host method at call time', async ({ page }) => {

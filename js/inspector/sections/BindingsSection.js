@@ -10,23 +10,39 @@ import { SecurityValidator } from '../../../core/SecurityValidator.js';
 import { getDeckEventsByKind, getDeckEventsByCategory, DECK_EVENTS, DECK_EVENT_NAMES } from '../../../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../../../core/widgetVarExtractor.js';
 import { getPackSuggestedEvents } from '../../../core/deckEventPacks.js';
+import { getFieldsForType } from '../../../widgets/PropertyRegistry.js';
 import { showToast } from '../../StudioModal.js';
 import { CUSTOM_OPTION_VALUE, CATEGORY_LABELS, escapeHtmlAttr } from '../inspectorMarkup.js';
+
+// Binding paths the panel still builds by hand, ahead of the registry-rendered rows. Every other
+// binding row the type claims, a new one included, renders through the field engine.
+const HAND_BUILT_BINDING_PATHS = new Set([
+  'binding.readSimVar', 'binding.unit', 'binding.pollFrequencyHz', 'binding.pollGroup', 'binding.deadband',
+  'binding.transition', 'binding.writeEvent', 'binding.incrementEvent', 'binding.decrementEvent',
+  'binding.fastIncrementEvent', 'binding.fastDecrementEvent', 'binding.ackEvent', 'binding.pushEvent',
+  'binding.eventCategory', 'binding.stateVar', 'binding.testStateVar',
+]);
 
 /**
  * Renders binding fields for the selected component in its existing Data mount.
  * Reads current component/definition values, saved widgets and pack suggestions.
+ * The type's rows come from `host.getFieldsForType(type)` when the host has it (the drift check
+ * supplies its own rows this way), else from Studio's registry. The binding rows outside the
+ * hand-built set render through `host.renderRegistryFieldGroups` after the hand-built controls,
+ * one heading per registry group, with the whole row list as the gates' default lookup.
  * Writes only through the host's StudioState or existing host delegates; Custom
  * selection merely reveals inputs until a value is chosen. The resolved-unit
  * Promise leaves a detached node untouched; Bridge resolution may reject as it
  * did in the original panel.
- * @param {object} host Live Inspector with state, tier, Bridge and Tester.
+ * @param {object} host Live Inspector with state, tier, Bridge, Tester and the field engine.
  * @param {object} comp Selected component captured for binding updates.
  * @param {object} def Current widget definition and state-variable list.
  * @param {HTMLElement} body Fresh mount receiving markup and DOM listeners.
  * @returns {void} Mutates the mount and registers its listeners.
+ * @throws {Error} When a registry-rendered row's control has no renderer, naming the control and path.
  */
 export function renderComponentBindings(host, comp, def, body) {
+      const rows = host.getFieldsForType ? host.getFieldsForType(comp.type) : getFieldsForType(comp.type);
       const binding = comp.binding || {};
       const stateVars = def.state || [];
 
@@ -292,16 +308,6 @@ export function renderComponentBindings(host, comp, def, body) {
           <input type="text" id="c-bind-state-custom-input" class="prop-input" value="${escapeHtmlAttr(stateIsCustom ? (binding.stateVar || '') : '')}" placeholder="e.g. $context.currentFreq.value" />
         </div>
 
-        <div class="prop-field" data-tier="advanced">
-          <label>Bind to Local State Path <span class="prop-hint" title="FDWS v1.11: unlike 'Bound Local State Var' above (a whole top-level state[] var), this addresses a specific nested/indexed value inside one — e.g. presets[0].label to show one preset slot's label on a separate core.label above its button. Uses the same 'name[index].field' path grammar as popover Context Map entries. Leave blank unless you need this — it's an alternative to the field above, not used together with it. FDWS v1.14: on core.button, this drives the button's own Primary Label reactively (falling back to the static Primary Label text in Props whenever the resolved value is empty) instead of being display-only on core.label/core.display.">ⓘ</span></label>
-          <input type="text" id="c-bind-stateref" class="prop-input" value="${escapeHtmlAttr(binding.stateRef || '')}" placeholder="e.g. presets[0].label" />
-        </div>
-        ${comp.type === 'core.button' ? `
-          <div class="prop-field" data-tier="advanced">
-            <label>Bind Sublabel to State Path <span class="prop-hint" title="FDWS v1.14: same 'name[index].field' grammar as the field above, but drives this button's Sublabel (Props panel) instead of its Primary Label — independent path, can point at a different state var entirely. Resolved value falls back to the static Sublabel text whenever empty.">ⓘ</span></label>
-            <input type="text" id="c-bind-sublabelstateref" class="prop-input" value="${escapeHtmlAttr(binding.sublabelStateRef || '')}" placeholder="e.g. presets[0].freq" />
-          </div>
-        ` : ''}
         ${comp.type === 'core.indicator' ? `
           <div class="prop-field" data-tier="advanced">
             <label>Test State Var <span class="prop-hint" title="FDWS v1.15: local state[] variable that, when true, forces this indicator lit regardless of its own bound value — for a 'press to test' lamp-test button. Wire the SAME state var into every indicator that should light up together, then have a button toggle that one var.">ⓘ</span></label>
@@ -340,6 +346,9 @@ export function renderComponentBindings(host, comp, def, body) {
           </div>
         </div>
       `;
+
+      const registryRows = rows.filter((row) => row.path.startsWith('binding.') && !HAND_BUILT_BINDING_PATHS.has(row.path));
+      host.renderRegistryFieldGroups(comp, body, registryRows, rows);
 
       const updateBinding = (updates) => {
         host.state.updateComponent(comp.id, { binding: { ...(comp.binding || {}), ...updates } });
@@ -483,8 +492,6 @@ export function renderComponentBindings(host, comp, def, body) {
       stateCustomInput?.addEventListener('change', () => {
         updateBinding({ stateVar: stateCustomInput.value.trim() || undefined });
       });
-      body.querySelector('#c-bind-stateref')?.addEventListener('change', (e) => updateBinding({ stateRef: e.target.value.trim() || undefined }));
-      body.querySelector('#c-bind-sublabelstateref')?.addEventListener('change', (e) => updateBinding({ sublabelStateRef: e.target.value.trim() || undefined }));
       body.querySelector('#c-bind-teststatevar')?.addEventListener('change', (e) => updateBinding({ testStateVar: e.target.value || undefined }));
       body.querySelector('#c-bind-pollrate')?.addEventListener('change', (e) => updateBinding({ pollFrequencyHz: Number(e.target.value) }));
       body.querySelector('#c-bind-pollgroup')?.addEventListener('change', (e) => updateBinding({ pollGroup: e.target.value.trim() || undefined }));

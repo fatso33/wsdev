@@ -10,7 +10,8 @@
  * callbacks accept a component, its registry field and a DOM mount. Aliased
  * controls deliberately share a host method while retaining their registry
  * names. Row-list controls use the field's rowSpec through renderRowListField;
- * condition and binding builders remain bespoke. The host is read only when
+ * condition builders remain bespoke. Binding-only controls go to
+ * renderBindingField, the Bindings panel's own renderers. The host is read only when
  * a callback runs, so a missing method then raises the normal JavaScript call
  * error rather than failing construction.
  * @param {object} host Inspector instance with render*Field methods.
@@ -30,6 +31,7 @@ export function createFieldRenderers(host) {
     stateVarPicker: (comp, field, mount) => host.renderStateVarField(comp, field, mount),
     assetPicker: (comp, field, mount) => host.renderAssetField(comp, field, mount),
     rangeEditor: (comp, field, mount) => host.renderRangeField(comp, field, mount),
-    pivotEditor: (comp, field, mount) => host.renderPivotField(comp, field, mount)
+    pivotEditor: (comp, field, mount) => host.renderPivotField(comp, field, mount),
+    stateRefPicker: (comp, field, mount) => host.renderBindingField(comp, field, mount)
   };
 }

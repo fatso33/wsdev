@@ -11,6 +11,7 @@ import { renderWidgetInspector, openFullJsonPanel } from './inspector/sections/W
 import { getFieldValue, commitRotaryFeelContext, commitRotaryFeelEntry, commitField, updateCompProp, updateCompJsonProp } from './inspector/InspectorEdits.js';
 import { enhanceNumberInputs, getNumberStep, decimalPlaces, roundToDecimals, renderRangeEditor, renderRowListEditor, toHexColor, wireColorPair, humanizeFieldLabel, fieldDomId, resolveFeelFloorHint, resolvePulseFeelDescription, renderPlainField, renderCheckboxField, renderSelectField, renderColorField, renderRowListField, renderStateVarField, renderAssetField, renderRangeField, renderPivotField } from './inspector/ui/FieldFactory.js';
 import { renderRegistryFieldGroups, renderRegistryFields, renderCompoundGroup, assembleCompoundRow, buildFieldWrap, formatShowWhenReason, evaluateShowWhen, resolveEffectiveValue } from './inspector/ui/FieldGroups.js';
+import { renderBindingField } from './inspector/ui/BindingFields.js';
 import { buildModeToggle, tierHidesField, applyUiMode, applySubtitleVisibility, applyTierMoreBadges, applySectionJsonViews, buildInspectorTabShell, buildLayoutBadge, buildAppearanceBadge, buildDataBadge, buildBehaviorBadge, buildAccordionGroup } from './inspector/InspectorShell.js';
 import { getThemeEditContext, remapAppearancePath, retargetAppearanceFields, renderAppearanceSection, renderBaseThemeAwareAppearanceFields } from './inspector/sections/AppearanceSection.js';
 import { buildMultiSelectStyleProxy, applyMultiSelectFieldAvailability, renderMultiSelectInspector } from './inspector/MultiSelectInspector.js';
@@ -501,6 +502,11 @@ export class StudioInspector {
   /** Renders the widget current state-variable choices for this field. */
   renderStateVarField(comp, field, mount) {
     return renderStateVarField(this, comp, field, mount);
+  }
+
+  /** Renders a `binding.*` row with the Bindings panel's own renderer for its control. */
+  renderBindingField(comp, field, mount) {
+    return renderBindingField(this, comp, field, mount);
   }
 
   /** Renders the widget current asset choices for this field. */

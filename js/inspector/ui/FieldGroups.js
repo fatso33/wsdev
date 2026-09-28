@@ -104,9 +104,9 @@ export function renderRegistryFieldGroups(host, comp, body, fields, lookupFields
 /**
  * Walks `fields` and dispatches each to `host.FIELD_RENDERERS[control]`. An unregistered control string
  * throws, loudly and at development time, so a registry typo cannot silently render nothing.
- * Callers pass either a raw type field array or a retargeted slice of the common style rows from the
- * Appearance section. The full merged common set is never passed: Bindings, Visibility and Conditional
- * Formatting have dedicated panels, and rendering them here would duplicate those.
+ * Callers pass a raw type field array, a retargeted slice of the common style rows from the Appearance
+ * section, or the Bindings panel's `binding.*` rows. The full merged common set is never passed:
+ * Visibility and Conditional Formatting have dedicated panels, and the Bindings panel picks its own rows.
  *
  * Compound groups are matched and consumed by `originalPath || path`, because a state or rule target
  * rewrites `path` while the curated group paths are base paths. A group renders the first time any one
