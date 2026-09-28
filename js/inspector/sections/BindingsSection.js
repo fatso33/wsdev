@@ -17,10 +17,9 @@ import { CUSTOM_OPTION_VALUE, CATEGORY_LABELS, escapeHtmlAttr } from '../inspect
 // Binding paths the panel still builds by hand, ahead of the registry-rendered rows. Every other
 // binding row the type claims, a new one included, renders through the field engine.
 const HAND_BUILT_BINDING_PATHS = new Set([
-  'binding.readSimVar', 'binding.unit', 'binding.pollFrequencyHz', 'binding.pollGroup', 'binding.deadband',
-  'binding.transition', 'binding.writeEvent', 'binding.incrementEvent', 'binding.decrementEvent',
-  'binding.fastIncrementEvent', 'binding.fastDecrementEvent', 'binding.ackEvent', 'binding.pushEvent',
-  'binding.eventCategory', 'binding.stateVar', 'binding.testStateVar',
+  'binding.readSimVar', 'binding.unit', 'binding.transition', 'binding.writeEvent', 'binding.incrementEvent',
+  'binding.decrementEvent', 'binding.fastIncrementEvent', 'binding.fastDecrementEvent', 'binding.ackEvent',
+  'binding.pushEvent', 'binding.stateVar', 'binding.testStateVar',
 ]);
 
 /**
@@ -109,7 +108,6 @@ export function renderComponentBindings(host, comp, def, body) {
       const ackIsCustom = !!binding.ackEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.ackEvent);
       const pushIsCustom = !!binding.pushEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.pushEvent);
       const stateIsCustom = !!binding.stateVar && !stateVars.some((s) => s.name === binding.stateVar);
-      const isFastPoll = Number(binding.pollFrequencyHz) > 2;
 
       // Pulse gates use inline display because applyUiMode toggles .hidden on
       // data-tier fields after render. Inline display and the tier gate both
@@ -169,20 +167,6 @@ export function renderComponentBindings(host, comp, def, body) {
           <div class="prop-sanitize-diff hidden" id="c-bind-read-custom-diff"></div>
         </div>
 
-        <div class="prop-row-2">
-          <div class="prop-field">
-            <label>Poll Rate <span class="prop-hint" title="FDWS v1.7: how often PC Bridge asks SimConnect for this value. Normal (1Hz) is right for almost everything — frequencies, switches, annunciators. Fast is for values that change continuously and need to look smooth, like an attitude indicator's pitch/bank — it routes this SimVar onto PC Bridge's fastest available SimConnect polling tier (in practice tens of Hz, tied to the sim's own update rate, not a literal guaranteed number). Every fast-tier binding reading the same SimVar should use the same setting.">ⓘ</span></label>
-            <select id="c-bind-pollrate" class="prop-select">
-              <option value="1" ${!isFastPoll ? 'selected' : ''}>Normal (1Hz)</option>
-              <option value="100" ${isFastPoll ? 'selected' : ''}>Fast (~100Hz)</option>
-            </select>
-          </div>
-          <div class="prop-field" data-tier="advanced">
-            <label>Dead Band <span class="prop-hint" title="Minimum change in value before this binding re-renders — filters out imperceptible jitter. 0 means every update renders.">ⓘ</span></label>
-            <input type="number" step="any" min="0" id="c-bind-deadband" class="prop-input" value="${escapeHtmlAttr(binding.deadband ?? 0)}" />
-          </div>
-        </div>
-
         <div class="prop-row-2" data-tier="advanced">
           <div class="prop-field">
             <label>Transition (ms) <span class="prop-hint" title="How long this binding's CSS transition eases toward a new value. Keep this short (well under the gap between updates) — a long transition against Fast-tier updates makes the display feel MORE sluggish, not less, since it ends up averaging across many stale intermediate values.">ⓘ</span></label>
@@ -205,11 +189,6 @@ export function renderComponentBindings(host, comp, def, body) {
         </div>
 
 
-
-        <div class="prop-field" data-tier="advanced">
-          <label>Poll Group <span class="prop-hint" title="FDWS v1.26: which PC Bridge polling chunk this SimVar's data definition joins. Leave blank to default to this widget's own id — already groups all of this widget's own bindings together, away from unrelated widgets' vars. Only set this to deliberately merge chunks across widgets, or split an unusually noisy var out of an otherwise-quiet widget.">ⓘ</span></label>
-          <input type="text" id="c-bind-pollgroup" class="prop-input" value="${escapeHtmlAttr(binding.pollGroup || '')}" placeholder="(defaults to this widget's id)" />
-        </div>
 
         <div class="prop-field" data-tier="simple-only">
           <label>Connect to Simulator — Value to Send <span class="prop-hint" title="Pick a category, then the specific command this component should send. Fills in the same field Advanced mode's Write Deck Event dropdown below uses — switch to Advanced any time to see the raw name or type a custom one.">ⓘ</span></label>
@@ -319,7 +298,7 @@ export function renderComponentBindings(host, comp, def, body) {
         ` : ''}
 
         <button type="button" id="c-bind-advanced-toggle" class="panel-full-btn" style="margin-top:4px;">
-          ${host._bindingAdvancedOpen ? '▾' : '▸'} Advanced (Acknowledge / Push Events, Event Category)
+          ${host._bindingAdvancedOpen ? '▾' : '▸'} Advanced (Acknowledge / Push Events)
         </button>
         <div id="c-bind-advanced-fields" class="${host._bindingAdvancedOpen ? '' : 'hidden'}">
           <div class="prop-field">
@@ -339,10 +318,6 @@ export function renderComponentBindings(host, comp, def, body) {
             <select id="c-bind-push-custom-select" class="prop-select">${buildCustomOptions(customWrites, binding.pushEvent)}</select>
             <input type="text" id="c-bind-push-custom-input" class="prop-input" value="${escapeHtmlAttr(pushIsCustom ? (binding.pushEvent || '') : '')}" placeholder="Custom push event" />
             <div class="prop-sanitize-diff hidden" id="c-bind-push-custom-diff"></div>
-          </div>
-          <div class="prop-field">
-            <label>Event Category <span class="prop-hint" title="SimConnect event category for Write/Ack/Push events. K_EVENT covers almost everything — only change this if a specific SimConnect event documents a different category.">ⓘ</span></label>
-            <input type="text" id="c-bind-eventcategory" class="prop-input" value="${escapeHtmlAttr(binding.eventCategory || 'K_EVENT')}" />
           </div>
         </div>
       `;
@@ -493,11 +468,7 @@ export function renderComponentBindings(host, comp, def, body) {
         updateBinding({ stateVar: stateCustomInput.value.trim() || undefined });
       });
       body.querySelector('#c-bind-teststatevar')?.addEventListener('change', (e) => updateBinding({ testStateVar: e.target.value || undefined }));
-      body.querySelector('#c-bind-pollrate')?.addEventListener('change', (e) => updateBinding({ pollFrequencyHz: Number(e.target.value) }));
-      body.querySelector('#c-bind-pollgroup')?.addEventListener('change', (e) => updateBinding({ pollGroup: e.target.value.trim() || undefined }));
-      body.querySelector('#c-bind-deadband')?.addEventListener('change', (e) => updateBinding({ deadband: Number(e.target.value) || 0 }));
       body.querySelector('#c-bind-unit')?.addEventListener('change', (e) => updateBinding({ unit: e.target.value.trim() || undefined }));
-      body.querySelector('#c-bind-eventcategory')?.addEventListener('change', (e) => updateBinding({ eventCategory: e.target.value.trim() || undefined }));
 
       // A binding accepts parsed read or write values of the matching kind.
       // Complex expressions remain test-only.
@@ -574,7 +545,7 @@ export function renderComponentBindings(host, comp, def, body) {
         host._bindingAdvancedOpen = !host._bindingAdvancedOpen;
         body.querySelector('#c-bind-advanced-fields')?.classList.toggle('hidden');
         const toggleBtn = body.querySelector('#c-bind-advanced-toggle');
-        if (toggleBtn) toggleBtn.textContent = `${host._bindingAdvancedOpen ? '▾' : '▸'} Advanced (Acknowledge / Push Events, Event Category)`;
+        if (toggleBtn) toggleBtn.textContent = `${host._bindingAdvancedOpen ? '▾' : '▸'} Advanced (Acknowledge / Push Events)`;
       });
 
 }

@@ -200,6 +200,95 @@ test('a stored Sublabel State Path shows in Guided; unauthored State Path rows a
   await expect(subtitle(page, 'Local State')).toBeHidden();
 });
 
+test('the scalar rows render under Read from Simulator and Send to Simulator in Full with their row text, and write today\'s values', async ({ page }) => {
+  await seed(page);
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  const read = subtitle(page, 'Read from Simulator').locator('xpath=following-sibling::div[1]');
+  const send = subtitle(page, 'Send to Simulator').locator('xpath=following-sibling::div[1]');
+  await expect(subtitle(page, 'Read from Simulator')).toBeVisible();
+  await expect(subtitle(page, 'Send to Simulator')).toBeVisible();
+  const rows = await page.evaluate(async () => (await import('/widgets/PropertyRegistry.js'))
+    .getFieldsForType('core.button').filter((f) => ['binding.pollFrequencyHz', 'binding.pollGroup', 'binding.deadband', 'binding.eventCategory'].includes(f.path))
+    .map(({ path, label, tooltip, placeholder }) => ({ path, label, tooltip, placeholder })));
+  const ids = { 'binding.pollFrequencyHz': '#c-bind-pollrate', 'binding.pollGroup': '#c-bind-pollgroup', 'binding.deadband': '#c-bind-deadband', 'binding.eventCategory': '#c-bind-eventcategory' };
+  expect(rows).toHaveLength(4);
+  for (const row of rows) {
+    const heading = row.path === 'binding.eventCategory' ? send : read;
+    const field = heading.locator('.prop-field', { has: page.locator(ids[row.path]) });
+    await expect(page.locator(ids[row.path]), row.path).toBeVisible();
+    await expect(field.locator('label'), row.path).toHaveText(`${row.label} ⓘ`);
+    await expect(field.locator('label .prop-hint'), row.path).toHaveAttribute('title', row.tooltip);
+  }
+  await expect(page.locator('#c-bind-pollgroup')).toHaveAttribute('placeholder', rows.find((r) => r.path === 'binding.pollGroup').placeholder);
+  expect(await optionsOf(page, '#c-bind-pollrate')).toEqual([['1', 'Normal (1Hz)'], ['100', 'Fast (~100Hz)']]);
+  await expect(page.locator('#c-bind-pollrate')).toHaveValue('1');
+  await expect(page.locator('#c-bind-deadband')).toHaveValue('0');
+  await expect(page.locator('#c-bind-deadband')).toHaveAttribute('min', '0');
+  await expect(page.locator('#c-bind-deadband')).toHaveAttribute('step', '0.01');
+  await expect(page.locator('#c-bind-eventcategory')).toHaveValue('K_EVENT');
+  expect((await snapshot(page)).calls).toHaveLength(0);
+
+  await page.locator('#c-bind-pollrate').selectOption('100');
+  expect((await snapshot(page)).binding.pollFrequencyHz).toBe(100);
+  await page.locator('#c-bind-pollrate').selectOption('1');
+  expect((await snapshot(page)).binding.pollFrequencyHz).toBe(1);
+  await page.locator('#c-bind-deadband').fill('0.5');
+  await page.locator('#c-bind-deadband').dispatchEvent('change');
+  expect((await snapshot(page)).binding.deadband).toBe(0.5);
+  await page.locator('#c-bind-deadband').fill('');
+  await page.locator('#c-bind-deadband').dispatchEvent('change');
+  expect((await snapshot(page)).binding.deadband).toBe(0);
+  // The floor holds for stepping: ▼ at 0 stores 0, not -0.01.
+  await page.locator('#c-bind-deadband').evaluate((input) => input.closest('.prop-number-wrap').querySelector('.prop-number-chevron-down').click());
+  expect((await snapshot(page)).binding.deadband).toBe(0);
+  for (const [id, key] of [['#c-bind-pollgroup', 'pollGroup'], ['#c-bind-eventcategory', 'eventCategory']]) {
+    await page.locator(id).fill('  VALUE  ');
+    await page.locator(id).dispatchEvent('change');
+    expect((await snapshot(page)).binding[key], key).toBe('VALUE');
+    await page.locator(id).fill('   ');
+    await page.locator(id).dispatchEvent('change');
+    expect((await snapshot(page)).binding[key], key).toBeUndefined();
+  }
+  await expect(page.locator('#c-bind-eventcategory')).toHaveValue('K_EVENT');
+});
+
+test('Poll Rate is hidden in Guided while unauthored, and Event Category is Full-only', async ({ page }) => {
+  await seed(page);
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
+  for (const id of ['#c-bind-pollrate', '#c-bind-deadband', '#c-bind-pollgroup', '#c-bind-eventcategory']) await expect(page.locator(id), id).toBeHidden();
+  await expect(subtitle(page, 'Read from Simulator')).toBeHidden();
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'build'; window.__studioApp.inspector.render(); });
+  await expect(page.locator('#c-bind-pollrate')).toBeVisible();
+  await expect(page.locator('#c-bind-eventcategory')).toBeHidden();
+});
+
+test('a stored Dead Band of 5 and a stored Poll Rate of 100 show in Guided', async ({ page }) => {
+  await seed(page, 'core.button', { deadband: 5, pollFrequencyHz: 100 });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'guided'; window.__studioApp.inspector.render(); });
+  await expect(subtitle(page, 'Read from Simulator')).toBeVisible();
+  await expect(page.locator('#c-bind-deadband')).toBeVisible();
+  await expect(page.locator('#c-bind-deadband')).toHaveValue('5');
+  await expect(page.locator('#c-bind-pollrate')).toBeVisible();
+  await expect(page.locator('#c-bind-pollrate')).toHaveValue('100');
+  await expect(page.locator('#c-bind-pollgroup')).toBeHidden();
+  expect((await snapshot(page)).calls).toHaveLength(0);
+});
+
+test('the generic text renderer still writes props.sublabel untrimmed, and blank as an empty string (characterization)', async ({ page }) => {
+  await seed(page);
+  const sublabel = () => page.evaluate(() => window.__studioApp.state.widgetDef.components.find((c) => c.id === 'binding-pin').props.sublabel);
+  for (const tier of ['build', 'full']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    await expect(page.locator('#rf-props-sublabel'), tier).toBeVisible();
+  }
+  await page.locator('#rf-props-sublabel').fill('  Sub  ');
+  await page.locator('#rf-props-sublabel').dispatchEvent('change');
+  expect(await sublabel()).toBe('  Sub  ');
+  await page.locator('#rf-props-sublabel').fill('');
+  await page.locator('#rf-props-sublabel').dispatchEvent('change');
+  expect(await sublabel()).toBe('');
+});
+
 test('tester paste reports four states and writes raw units or strips K:', async ({ page }) => {
   await seed(page);
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });

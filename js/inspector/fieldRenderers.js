@@ -11,19 +11,22 @@
  * controls deliberately share a host method while retaining their registry
  * names. Row-list controls use the field's rowSpec through renderRowListField;
  * condition builders remain bespoke. Binding-only controls go to
- * renderBindingField, the Bindings panel's own renderers. The host is read only when
+ * renderBindingField, the Bindings panel's own renderers, and so does a
+ * `binding.*` row of `text`, `number` or `select`; every other row of those
+ * controls keeps its generic renderer. The host is read only when
  * a callback runs, so a missing method then raises the normal JavaScript call
  * error rather than failing construction.
  * @param {object} host Inspector instance with render*Field methods.
  * @returns {Record<string, (comp: object, field: object, mount: HTMLElement) => void>} Fresh dispatch table.
  */
 export function createFieldRenderers(host) {
+  const isBindingRow = (field) => field.path.startsWith('binding.');
   return {
-    text: (comp, field, mount) => host.renderPlainField(comp, field, mount, 'text'),
+    text: (comp, field, mount) => (isBindingRow(field) ? host.renderBindingField(comp, field, mount) : host.renderPlainField(comp, field, mount, 'text')),
     iconPicker: (comp, field, mount) => host.renderPlainField(comp, field, mount, 'text'),
-    number: (comp, field, mount) => host.renderPlainField(comp, field, mount, 'number'),
+    number: (comp, field, mount) => (isBindingRow(field) ? host.renderBindingField(comp, field, mount) : host.renderPlainField(comp, field, mount, 'number')),
     checkbox: (comp, field, mount) => host.renderCheckboxField(comp, field, mount),
-    select: (comp, field, mount) => host.renderSelectField(comp, field, mount),
+    select: (comp, field, mount) => (isBindingRow(field) ? host.renderBindingField(comp, field, mount) : host.renderSelectField(comp, field, mount)),
     color: (comp, field, mount) => host.renderColorField(comp, field, mount),
     rowListEditor: (comp, field, mount) => host.renderRowListField(comp, field, mount),
     detentEditor: (comp, field, mount) => host.renderRowListField(comp, field, mount),

@@ -39,3 +39,23 @@ test('each control dispatches to its current host method with unchanged argument
   renderers.text(comp, field, mount);
   expect(calls.at(-1)).toEqual(['replacement', comp, field, mount, 'text']);
 });
+
+test('a binding row of text, number or select dispatches to renderBindingField; other controls ignore the path', () => {
+  const calls = [];
+  const host = Object.fromEntries([...new Set([...DISPATCH.map(([, method]) => method), 'renderBindingField'])]
+    .map((method) => [method, (...args) => calls.push([method, ...args])]));
+  const renderers = createFieldRenderers(host);
+  const comp = { id: 'pin' };
+  const mount = {};
+  for (const control of ['text', 'number', 'select']) {
+    const field = { path: 'binding.pollGroup', control };
+    renderers[control](comp, field, mount);
+    expect(calls.at(-1)).toEqual(['renderBindingField', comp, field, mount]);
+  }
+  const iconField = { path: 'binding.icon', control: 'iconPicker' };
+  renderers.iconPicker(comp, iconField, mount);
+  expect(calls.at(-1)).toEqual(['renderPlainField', comp, iconField, mount, 'text']);
+  const checkboxField = { path: 'binding.flag', control: 'checkbox' };
+  renderers.checkbox(comp, checkboxField, mount);
+  expect(calls.at(-1)).toEqual(['renderCheckboxField', comp, checkboxField, mount]);
+});
