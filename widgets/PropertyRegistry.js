@@ -251,6 +251,19 @@ export const ALLOWED_ASSET_MIME_TYPES = [
 // Simple/Advanced split's rationale — tier is a judgment call on "would a
 // first-time author need this to make a recognizable widget," not a measure of
 // how obscure a field is.
+//
+// showWhen: the field is offered only while its condition passes. A condition is
+// { path, equals }, { path, notEquals } or { path, equalsAny: [...] }, where an unset
+// path counts as the `default` of the row it names. Binding rows may also use
+// { all: [condition, ...] }, which passes only when every member passes, and a
+// second key, `enabledWhen`, in the same grammar plus { path, rawAddress: true }
+// (the value starts with A:, L:, H: or K:, case-insensitive): while it fails the
+// field is shown but disabled. `all` and `enabledWhen` stay off every other row,
+// because the Appearance section remaps a style row's showWhen.path and has no case
+// for either (bindingRegistryRows.test.js pins this).
+//
+// label / placeholder: the editor's text for a row, where it differs from the
+// humanized path. Only binding rows carry them today.
 // ---------------------------------------------------------------------------
 
 // Wave 1 (V23): `default` below is populated from the runtime's own fallback
@@ -334,37 +347,42 @@ export const COMMON_FIELDS = [
   { path: 'visibleWhen', control: 'conditionBuilder', tier: 'advanced', group: 'Visibility', default: undefined, tooltip: 'Hides this component entirely unless a condition on state/telemetry is met.' },
 
   // --- Bindings (binding.*) — SIMVARS & BINDINGS panel ---
-  { path: 'binding.readSimVar', control: 'simVarPicker', tier: 'simple', guided: true, group: 'Bindings', default: undefined, tooltip: 'SimVar this component displays. Updates live from the simulator.' },
-  { path: 'binding.writeEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Bindings', default: undefined, tooltip: 'Deck Event dispatched when this component is interacted with (a button tap, a slider drag, etc.).' },
-  { path: 'binding.stateVar', control: 'stateVarPicker', tier: 'simple', group: 'Bindings', default: undefined, tooltip: 'Local state[] variable this component reads and re-renders on when it changes.' },
-  { path: 'binding.stateRef', control: 'stateRefPicker', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Nested/indexed local state path (e.g. "presets[0].freq") this component’s primary value resolves from.' },
-  { path: 'binding.sublabelStateRef', control: 'stateRefPicker', tier: 'advanced', group: 'Bindings', appliesTo: ['core.button'], default: undefined, tooltip: 'Same as Bind to State Path, but for this button’s second (sublabel) text slot — independent of the primary binding.' },
-  { path: 'binding.pollFrequencyHz', control: 'select', options: [{ value: 1, label: 'Normal (1Hz)' }, { value: 100, label: 'Fast (~100Hz cadence)' }], tier: 'simple', group: 'Bindings', default: 1, tooltip: 'How often the sim pushes this SimVar. Fast is for anything that needs to look smooth in motion (an attitude indicator); Normal is enough for slow-changing values (fuel qty). Since FDWS v1.26, PC Bridge only sends a SimVar when its value actually changes, so Normal already reacts within a frame of a real change — Fast is now only about getting a value that’s always fluctuating (motion), not about lag.' },
-  { path: 'binding.pollGroup', control: 'text', tier: 'advanced', group: 'Bindings', fdwsMin: '1.26', default: undefined, tooltip: 'Which PC Bridge polling chunk this SimVar joins. Leave blank to default to this widget’s own id, which already groups all of this widget’s own bindings together and away from unrelated widgets’ vars. Only set this to deliberately merge chunks across widgets (e.g. two widgets that share a bus and should always update in lockstep), or to split one unusually noisy var out of an otherwise-quiet widget.' },
-  { path: 'binding.deadband', control: 'number', tier: 'advanced', group: 'Bindings', default: 0, tooltip: 'Ignore changes smaller than this, so a jittery sensor doesn’t spam re-renders.' },
+  // Declared in the order the panel shows them, under its three sub-headings: 'Read from
+  // Simulator', 'Send to Simulator' and 'Local State'. WRITE_EVENT_BINDING_FIELDS below
+  // inherits this order, and the PWA's bindings list shows write rows in it. `label` and
+  // `placeholder` carry the panel's own text for each row.
+  { path: 'binding.readSimVar', control: 'simVarPicker', tier: 'simple', guided: true, group: 'Read from Simulator', label: 'Read Deck Event (Telemetry In)', default: undefined, tooltip: 'SimVar this component displays. Updates live from the simulator.' },
+  // PC Bridge owns the unit of a Deck Event, so Unit is editable only for a raw read address.
+  { path: 'binding.unit', control: 'text', tier: 'advanced', group: 'Read from Simulator', label: 'SimConnect Unit', placeholder: 'Number', enabledWhen: { path: 'binding.readSimVar', rawAddress: true }, default: undefined, tooltip: 'Tells SimConnect what type to return the raw value as (e.g. degrees, knots, Bool, Number). Leave blank to use the host\'s default (\'Number\'). For a TEXT variable (TITLE, ATC MODEL, ATC ID) type \'string\' — those have no unit at all, and reading one as a number silently returns 0.' },
+  { path: 'binding.pollFrequencyHz', control: 'select', options: [{ value: 1, label: 'Normal (1Hz)' }, { value: 100, label: 'Fast (~100Hz)' }], tier: 'simple', group: 'Read from Simulator', label: 'Poll Rate', default: 1, tooltip: 'FDWS v1.7: how often PC Bridge asks SimConnect for this value. Normal (1Hz) is right for almost everything — frequencies, switches, annunciators. Fast is for values that change continuously and need to look smooth, like an attitude indicator\'s pitch/bank — it routes this SimVar onto PC Bridge\'s fastest available SimConnect polling tier (in practice tens of Hz, tied to the sim\'s own update rate, not a literal guaranteed number). Every fast-tier binding reading the same SimVar should use the same setting.' },
+  { path: 'binding.pollGroup', control: 'text', tier: 'advanced', group: 'Read from Simulator', fdwsMin: '1.26', label: 'Poll Group', placeholder: '(defaults to this widget\'s id)', default: undefined, tooltip: 'FDWS v1.26: which PC Bridge polling chunk this SimVar\'s data definition joins. Leave blank to default to this widget\'s own id — already groups all of this widget\'s own bindings together, away from unrelated widgets\' vars. Only set this to deliberately merge chunks across widgets, or split an unusually noisy var out of an otherwise-quiet widget.' },
+  { path: 'binding.deadband', control: 'number', tier: 'advanced', group: 'Read from Simulator', label: 'Dead Band', default: 0, tooltip: 'Minimum change in value before this binding re-renders — filters out imperceptible jitter. 0 means every update renders.' },
   // `bespoke`: Widget Studio's Bindings panel hand-writes this {durationMs, easing}
   // object outside the generic field engine. `fields` mirrors `ACTIONS[].params`'
   // shape. `easing.default` is the value the Bindings panel preselects and writes;
   // the runtime's fallback for a stored transition without `easing` stays 'ease-out'.
-  { path: 'binding.transition', control: 'bespoke', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Animates value changes instead of snapping instantly.', fields: [
+  { path: 'binding.transition', control: 'bespoke', tier: 'advanced', group: 'Read from Simulator', label: 'Transition (ms)', default: undefined, tooltip: 'How long this binding\'s CSS transition eases toward a new value. Keep this short (well under the gap between updates) — a long transition against Fast-tier updates makes the display feel MORE sluggish, not less, since it ends up averaging across many stale intermediate values.', fields: [
     { key: 'durationMs', control: 'number', default: undefined, tooltip: 'Animation length in milliseconds. Leave blank for none.' },
     { key: 'easing', control: 'select', options: ['linear', 'ease-out', 'ease-in-out'], default: 'linear', tooltip: 'Animation curve.' }
   ] },
-  { path: 'binding.unit', control: 'text', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Unit the SimVar is requested in (e.g. "knots", "degrees").' },
-  { path: 'binding.ackEvent', control: 'eventPicker', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Deck Event dispatched by an Acknowledge Indicator action targeting this component.' },
-  { path: 'binding.pushEvent', control: 'eventPicker', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Deck Event dispatched on press-and-hold, for spring-loaded/momentary controls.' },
-  // Ticket 05: Pulse write mode's own pair of write events, Rotary-only (a Ring in
-  // Pulse mode ignores Write Event above entirely — see RotaryComponent.js's
-  // writePulseStep()). Shown only when Write Mode is Pulse, same showWhen
-  // convention core.rotary's own Positions field already uses for Range Mode.
-  { path: 'binding.incrementEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.writeMode', equals: 'pulse' }, default: undefined, tooltip: 'Deck Event dispatched once per step turned clockwise, in Pulse write mode.' },
-  { path: 'binding.decrementEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.writeMode', equals: 'pulse' }, default: undefined, tooltip: 'Deck Event dispatched once per step turned counter-clockwise, in Pulse write mode.' },
+  // No Write Mode gate: a Pulse Rotary keeps Write Deck Event visible and editable, so
+  // switching back to Absolute finds it intact.
+  { path: 'binding.writeEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Send to Simulator', label: 'Write Deck Event (SimConnect Out)', default: undefined, tooltip: 'Deck Event dispatched when this component is interacted with (a button tap, a slider drag, etc.).' },
+  // Pulse write mode's own pair of write events, Rotary-only (a Ring in Pulse mode ignores
+  // Write Deck Event above entirely — see RotaryComponent.js's writePulseStep()).
+  { path: 'binding.incrementEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Send to Simulator', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.writeMode', equals: 'pulse' }, label: 'Increment Deck Event (Pulse Clockwise)', default: undefined, tooltip: 'FDWS v1.30: dispatched once per step turned clockwise, when Write Mode (Range panel) is set to Pulse. Only used in Pulse mode — Absolute mode uses Write Deck Event above instead.' },
+  { path: 'binding.decrementEvent', control: 'eventPicker', tier: 'simple', guided: true, group: 'Send to Simulator', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.writeMode', equals: 'pulse' }, label: 'Decrement Deck Event (Pulse Counter-Clockwise)', default: undefined, tooltip: 'FDWS v1.30: dispatched once per step turned counter-clockwise, when Write Mode (Range panel) is set to Pulse. Only used in Pulse mode — Absolute mode uses Write Deck Event above instead.' },
   // Acceleration's dedicated fast step events, Rotary-only. Sent instead of repeating the
   // ordinary pair above in the coarse tier, in Pulse write mode with Acceleration on.
   // They only take effect as a pair: see RotaryComponent.js's rotaryConfig().
-  { path: 'binding.fastIncrementEvent', control: 'eventPicker', tier: 'advanced', group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.acceleration', equals: true }, default: undefined, tooltip: 'Deck Event dispatched once per step turned clockwise in the coarse tier, in Pulse write mode with Acceleration enabled: the aircraft\'s own fast step event, sent instead of repeating the Increment Event. Bind both fast events or neither.' },
-  { path: 'binding.fastDecrementEvent', control: 'eventPicker', tier: 'advanced', group: 'Bindings', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { path: 'props.acceleration', equals: true }, default: undefined, tooltip: 'Deck Event dispatched once per step turned counter-clockwise in the coarse tier, in Pulse write mode with Acceleration enabled: the aircraft\'s own fast step event, sent instead of repeating the Decrement Event. Bind both fast events or neither.' },
-  { path: 'binding.eventCategory', control: 'text', tier: 'advanced', group: 'Bindings', default: undefined, tooltip: 'Groups related Deck Events for the event picker’s filtering — cosmetic, doesn’t affect behavior.' }
+  { path: 'binding.fastIncrementEvent', control: 'eventPicker', tier: 'advanced', group: 'Send to Simulator', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { all: [{ path: 'props.writeMode', equals: 'pulse' }, { path: 'props.acceleration', equals: true }] }, label: 'Fast Increment Deck Event (Coarse Clockwise)', default: undefined, tooltip: 'FDWS v1.30: dispatched once per step turned clockwise in the coarse Acceleration tier, in place of the ordinary event above, when Write Mode is Pulse and Acceleration is on. Bind both fast events or neither: a single one is ignored.' },
+  { path: 'binding.fastDecrementEvent', control: 'eventPicker', tier: 'advanced', group: 'Send to Simulator', appliesTo: ['core.rotary'], fdwsMin: '1.30', showWhen: { all: [{ path: 'props.writeMode', equals: 'pulse' }, { path: 'props.acceleration', equals: true }] }, label: 'Fast Decrement Deck Event (Coarse Counter-Clockwise)', default: undefined, tooltip: 'FDWS v1.30: dispatched once per step turned counter-clockwise in the coarse Acceleration tier, in place of the ordinary event above, when Write Mode is Pulse and Acceleration is on. Bind both fast events or neither: a single one is ignored.' },
+  { path: 'binding.ackEvent', control: 'eventPicker', tier: 'advanced', group: 'Send to Simulator', label: 'Acknowledge Event', default: undefined, tooltip: 'Fired when this component\'s built-in acknowledge/silence action is used (e.g. core.indicator annunciator ack). Rarely needed outside annunciator-style components.' },
+  { path: 'binding.pushEvent', control: 'eventPicker', tier: 'advanced', group: 'Send to Simulator', label: 'Push Event', default: undefined, tooltip: 'Optional extra write event this component declares. It makes the component write-capable, and PC Bridge registers it with the component\'s other write events. No core component dispatches it; the native Rotary widget (not core.rotary) sends it with value 1 on a centre push. Leave it as None unless the component you are configuring documents one.' },
+  { path: 'binding.eventCategory', control: 'text', tier: 'advanced', group: 'Send to Simulator', label: 'Event Category', default: 'K_EVENT', tooltip: 'SimConnect event category sent with this component\'s write events when they are registered with PC Bridge. It does not change how an event is dispatched. K_EVENT covers almost everything — only change this if a specific SimConnect event documents a different category.' },
+  { path: 'binding.stateVar', control: 'stateVarPicker', tier: 'simple', group: 'Local State', label: 'Bound Local State Var', default: undefined, tooltip: 'Local state[] variable this component reads and re-renders on when it changes.' },
+  { path: 'binding.stateRef', control: 'stateRefPicker', tier: 'advanced', group: 'Local State', label: 'Bind to Local State Path', placeholder: 'e.g. presets[0].label', default: undefined, tooltip: 'FDWS v1.11: unlike \'Bound Local State Var\' above (a whole top-level state[] var), this addresses a specific nested/indexed value inside one — e.g. presets[0].label to show one preset slot\'s label on a separate core.label above its button. Uses the same \'name[index].field\' path grammar as popover Context Map entries. Leave blank unless you need this — it\'s an alternative to the field above, not used together with it. FDWS v1.14: on core.button, this drives the button\'s own Primary Label reactively (falling back to the static Primary Label text in Props whenever the resolved value is empty) instead of being display-only on core.label/core.display.' },
+  { path: 'binding.sublabelStateRef', control: 'stateRefPicker', tier: 'advanced', group: 'Local State', appliesTo: ['core.button'], label: 'Bind Sublabel to State Path', placeholder: 'e.g. presets[0].freq', default: undefined, tooltip: 'FDWS v1.14: same \'name[index].field\' grammar as the field above, but drives this button\'s Sublabel (Props panel) instead of its Primary Label — independent path, can point at a different state var entirely. Resolved value falls back to the static Sublabel text whenever empty.' }
 ];
 
 // ---------------------------------------------------------------------------
@@ -382,7 +400,9 @@ export const COMMON_FIELDS = [
 // Derived from COMMON_FIELDS itself (every `binding.*` field whose control is
 // 'eventPicker') instead of hand-listed a sixth time, so all four consumers
 // automatically pick up a new write-event binding field the moment it's added
-// to COMMON_FIELDS above, with no other edit required. Deliberately excludes:
+// to COMMON_FIELDS above, with no other edit required. Its order is the rows'
+// declaration order (writeEvent, the Pulse pair, the fast pair, ackEvent,
+// pushEvent), which the PWA's bindings list shows. Deliberately excludes:
 //   - binding.readSimVar — a different control ('simVarPicker'), a read not a write.
 //   - ACTIONS[].params' `event` keys (core.dispatchEvent, core.ackIndicator) —
 //     interaction-site writes, not component bindings; none of their paths
@@ -507,7 +527,7 @@ export const TYPE_FIELDS = {
     // FDWS v1.15: declarative lamp test — wire the same state var into every
     // indicator's Test State Var, then one button toggling that var lights
     // them all, regardless of each indicator's own real bound value.
-    { path: 'binding.testStateVar', control: 'stateVarPicker', tier: 'advanced', group: 'Bindings', appliesTo: ['core.indicator'], default: undefined, tooltip: 'Local state[] variable that, when true, forces this indicator lit regardless of its own bound value — for a "press to test" lamp-test button. Wire the same var into every indicator that should participate.' }
+    { path: 'binding.testStateVar', control: 'stateVarPicker', tier: 'advanced', group: 'Local State', appliesTo: ['core.indicator'], label: 'Test State Var', default: undefined, tooltip: 'FDWS v1.15: local state[] variable that, when true, forces this indicator lit regardless of its own bound value — for a \'press to test\' lamp-test button. Wire the SAME state var into every indicator that should light up together, then have a button toggle that one var.' }
   ],
   'core.gauge': [
     // Primary transform — GaugeComponent.update() calls
