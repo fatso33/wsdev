@@ -362,7 +362,7 @@ const BINDING_RENDERERS = {
 
 /**
  * Renders one binding row with the binding renderer for its control.
- * @param {object} host Inspector facade providing getFieldValue, commitField, humanizeFieldLabel and fieldDomId.
+ * @param {object} host Inspector facade providing getFieldValue, commitField, humanizeFieldLabel, fieldDomId, openConnectDialog, state.loadSavedWidgets and state.widgetDef.
  * @param {object} comp Component captured for this render.
  * @param {object} field Binding registry row.
  * @param {HTMLElement} mount Element whose contents are replaced.

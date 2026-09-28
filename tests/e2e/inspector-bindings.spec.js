@@ -71,7 +71,7 @@ test('Simple category selection waits for a value; Full switch persists', async 
   expect(await page.evaluate(() => [window.__studioApp.inspector.uiTier, localStorage.getItem('fdws_studio_uiMode')])).toEqual(['full', 'full']);
 });
 
-test('Pulse and fast fields use inline gates, and the write Pulse note appears', async ({ page }) => {
+test('Pulse fields use inline gates, the fast fields render only once Pulse and Acceleration are on, and the write Pulse note appears',async ({ page }) => {
   await seed(page, 'core.rotary');
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
   await expect(page.locator('#c-bind-increment-field')).toHaveAttribute('style', /display:none/);
@@ -109,7 +109,7 @@ test('resolved unit reports profile or no mapping and ignores a detached node', 
   await expect(page.locator('#c-bind-resolved-info')).toHaveText('Unit: knots — from profile "Active"');
 });
 
-test('transition and advanced state survive renders; binding fields keep their shapes', async ({ page }) => {
+test('transition survives renders; binding fields keep their shapes',async ({ page }) => {
   await seed(page, 'core.button', { stateVar: '$context.old.value' });
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
   await expect(page.locator('#c-bind-state-custom-block')).not.toHaveClass(/hidden/);
