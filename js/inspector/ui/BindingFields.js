@@ -325,9 +325,10 @@ function categoryValueOptions(category, current) {
 }
 
 /**
- * Takes the SimVar Tester's parsed write event into a Deck Event row: it opens the Custom block on the
- * value, strips a leading `K:` and writes it, telling the Author what was pasted. Anything else that
- * was parsed, or nothing, only gets a toast.
+ * Takes the SimVar Tester's parsed write shape (a `K:` write event, an `H:` event or an L:var set)
+ * into a Deck Event row: it opens the Custom block on the value, strips a leading `K:` from a write
+ * event only (an `H:` event or L:var set keeps its prefix) and writes it, telling the Author what was
+ * pasted. A read, a test-only (complex) parse, or nothing, only gets a toast.
  * @param {object} host Inspector facade providing `state.testerParsed` and commitField.
  * @param {object} comp Component captured for this render.
  * @param {object} field Binding registry row.
