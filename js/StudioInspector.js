@@ -377,9 +377,9 @@ export class StudioInspector {
     return renderUnrecognisedPropertiesBlock(this, items, fdwsVersion, idPrefix, onCommit);
   }
 
-  /** The registry's {path, equals|equalsAny|notEquals} showWhen grammar, with default fallback. */
-  evaluateShowWhen(comp, showWhen, siblingFields) {
-    return evaluateShowWhen(this, comp, showWhen, siblingFields);
+  /** The registry's showWhen/enabledWhen gate grammar, with default fallback from siblings or a lookup list. */
+  evaluateShowWhen(comp, showWhen, siblingFields, lookupFields) {
+    return evaluateShowWhen(this, comp, showWhen, siblingFields, lookupFields);
   }
 
   /** path's last segment, camelCase -> "Title Case", with a couple of acronym fixups. */
@@ -412,18 +412,18 @@ export class StudioInspector {
   }
 
   /** Renders registry fields under one heading per group, in first-seen order. */
-  renderRegistryFieldGroups(comp, body, fields) {
-    return renderRegistryFieldGroups(this, comp, body, fields);
+  renderRegistryFieldGroups(comp, body, fields, lookupFields) {
+    return renderRegistryFieldGroups(this, comp, body, fields, lookupFields);
   }
 
   /** Dispatches each registry field to FIELD_RENDERERS; an unregistered control throws. */
-  renderRegistryFields(comp, mount, fields, target, groupCoveredPaths) {
-    return renderRegistryFields(this, comp, mount, fields, target, groupCoveredPaths);
+  renderRegistryFields(comp, mount, fields, target, groupCoveredPaths, lookupFields) {
+    return renderRegistryFields(this, comp, mount, fields, target, groupCoveredPaths, lookupFields);
   }
 
   /** Builds a curated compound group as one row, or singly when fewer than two members survive. */
-  renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths, fieldKey) {
-    return renderCompoundGroup(this, comp, mount, group, fields, target, groupCoveredPaths, fieldKey);
+  renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths, fieldKey, lookupFields) {
+    return renderCompoundGroup(this, comp, mount, group, fields, target, groupCoveredPaths, fieldKey, lookupFields);
   }
 
   /** Assembles the `.prop-field-compound` row shared by registry and hand-built compound rows. */
@@ -432,13 +432,13 @@ export class StudioInspector {
   }
 
   /** Builds one field wrap (override, suppression, tier, test id, control), or null when it renders nothing. */
-  buildFieldWrap(comp, field, fields, target, groupCoveredPaths) {
-    return buildFieldWrap(this, comp, field, fields, target, groupCoveredPaths);
+  buildFieldWrap(comp, field, fields, target, groupCoveredPaths, lookupFields) {
+    return buildFieldWrap(this, comp, field, fields, target, groupCoveredPaths, lookupFields);
   }
 
-  /** Words why a showWhen-gated field is currently hidden. */
-  formatShowWhenReason(showWhen) {
-    return formatShowWhenReason(this, showWhen);
+  /** Words why a gated field is currently hidden or disabled. */
+  formatShowWhenReason(showWhen, comp, siblingFields, lookupFields) {
+    return formatShowWhenReason(this, showWhen, comp, siblingFields, lookupFields);
   }
 
   /** Stored value, else inherited value (dimmed), else the registered default. */

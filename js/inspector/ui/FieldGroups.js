@@ -1,9 +1,18 @@
 /**
  * @module FieldGroups
  * Registry-driven field grouping for the Property Inspector: headings per registry group, curated
- * compound rows, one `.prop-field` wrapper per field, showWhen gating and effective values. Every
- * function takes the live Inspector `host` first and reads it at call time; this module holds no
- * state and registers no listeners of its own beyond the Clear and override-clear buttons it builds.
+ * compound rows, one `.prop-field` wrapper per field, showWhen and enabledWhen gating and effective
+ * values. Every function takes the live Inspector `host` first and reads it at call time; this module
+ * holds no state and registers no listeners of its own beyond the Clear and override-clear buttons it
+ * builds.
+ *
+ * Gate grammar, shared by a row's `showWhen` (hides) and `enabledWhen` (disables): a condition
+ * `{path, equals | notEquals | equalsAny | rawAddress: true}`, or `{all: [condition, …]}`, which passes
+ * only when every member does. `rawAddress` passes for a string starting `A:`, `L:`, `H:` or `K:`, any
+ * case. An unset referenced path resolves through a lookup list: the optional trailing `lookupFields`
+ * (the Bindings panel passes the type's full row list) when given, else the rows of the same render.
+ * The render functions carry `lookupFields` through to the evaluator and the reason text; a call
+ * without it behaves exactly as it did before the list existed.
  * Host members used: `getFieldValue`, `commitField`, `humanizeFieldLabel`, `FIELD_RENDERERS`, and the
  * facade delegates for this module's own functions, so an instance-level override still takes effect.
  * Rendering replaces the mount's contents; exceptions from a control renderer, and the error for a
@@ -25,28 +34,35 @@ const CURATED_COMPOUND_GROUPS = [
   { id: 'minmax', prefixLabels: ['Min:', 'Max:'], paths: ['props.min', 'props.max'] },
 ];
 
+const RAW_ADDRESS_RE = /^(A|L|H|K):/i;
+
 /**
- * Evaluates the registry's `{path, equals | equalsAny | notEquals}` showWhen grammar against a component.
- * An unset referenced value falls back to `inheritedValue` (the live Base value of a retargeted state,
- * rule or theme field), then to the referenced sibling's registered `default`. Without that fallback an
- * `equals` gate on a field whose true default matches would never pass until the field was touched once.
- * Per-column showWhen inside row lists deliberately omits `siblingFields`.
+ * Evaluates the gate grammar (module header) against a component; used for both `showWhen` and
+ * `enabledWhen`. An unset referenced value falls back to `inheritedValue` (the live Base value of a
+ * retargeted state, rule or theme field), then to the referenced row's registered `default`, found in
+ * `lookupFields` when given, else in `siblingFields`. Without that fallback an `equals` gate on a field
+ * whose true default matches would never pass until the field was touched once. Per-column showWhen
+ * inside row lists deliberately omits `siblingFields`.
  * @param {object} host Inspector facade providing getFieldValue.
  * @param {object} comp Component whose stored values are read.
- * @param {{path: string, equals?: *, notEquals?: *, equalsAny?: Array<*>}} showWhen Gate to evaluate.
+ * @param {{path?: string, equals?: *, notEquals?: *, equalsAny?: Array<*>, rawAddress?: boolean, all?: Array<object>}} showWhen Gate to evaluate.
  * @param {Array<object>} [siblingFields] Registry rows of the same render, searched for the referenced path.
- * @returns {boolean} True when the gate passes; a gate with no operator always passes.
+ * @param {Array<object>} [lookupFields] Rows searched instead of `siblingFields`, such as a type's full row list.
+ * @returns {boolean} True when the gate passes; a condition with no operator always passes.
  */
-export function evaluateShowWhen(host, comp, showWhen, siblingFields) {
+export function evaluateShowWhen(host, comp, showWhen, siblingFields, lookupFields) {
+  if ('all' in showWhen) return showWhen.all.every((member) => evaluateShowWhen(host, comp, member, siblingFields, lookupFields));
   let val = host.getFieldValue(comp, showWhen.path);
-  if (val === undefined && siblingFields) {
-    const referenced = siblingFields.find((f) => f.path === showWhen.path);
+  const lookup = lookupFields || siblingFields;
+  if (val === undefined && lookup) {
+    const referenced = lookup.find((f) => f.path === showWhen.path);
     if (referenced && referenced.inheritedValue !== undefined) val = referenced.inheritedValue;
     else if (referenced && 'default' in referenced) val = referenced.default;
   }
   if ('equals' in showWhen) return val === showWhen.equals;
   if ('notEquals' in showWhen) return val !== showWhen.notEquals;
   if ('equalsAny' in showWhen) return showWhen.equalsAny.includes(val);
+  if (showWhen.rawAddress === true) return typeof val === 'string' && RAW_ADDRESS_RE.test(val);
   return true;
 }
 
@@ -54,15 +70,16 @@ export function evaluateShowWhen(host, comp, showWhen, siblingFields) {
  * Renders a type's registry fields under one heading per `group`, in the order the groups first appear.
  * Intended for types whose fields are numerous enough to need sections; a heading whose fields are all
  * hidden at the current tier is hidden with them by the Shell's subtitle pass. Each group renders on
- * its own, so a field's showWhen may only name a sibling in the same group: that is where its default
- * is looked up when the referenced value is unset.
+ * its own, so without `lookupFields` a field's gate may only name a sibling in the same group: that is
+ * where its default is looked up when the referenced value is unset.
  * @param {object} host Inspector facade providing renderRegistryFields.
  * @param {object} comp Component being rendered.
  * @param {HTMLElement} body Element that receives a subtitle and a mount per group.
  * @param {Array<object>} fields Registry rows, each carrying `group`.
+ * @param {Array<object>} [lookupFields] Rows every group's gates look defaults up in, such as the type's full row list.
  * @returns {void} Appends DOM; the second and later subtitles get a 10px top margin.
  */
-export function renderRegistryFieldGroups(host, comp, body, fields) {
+export function renderRegistryFieldGroups(host, comp, body, fields, lookupFields) {
   const groups = [];
   for (const field of fields) {
     let group = groups.find((g) => g.name === field.group);
@@ -80,7 +97,7 @@ export function renderRegistryFieldGroups(host, comp, body, fields) {
     body.appendChild(subtitle);
     const mount = document.createElement('div');
     body.appendChild(mount);
-    host.renderRegistryFields(comp, mount, group.fields);
+    host.renderRegistryFields(comp, mount, group.fields, undefined, undefined, lookupFields);
   }
 }
 
@@ -100,10 +117,11 @@ export function renderRegistryFieldGroups(host, comp, body, fields) {
  * @param {Array<object>} fields Registry rows to render, in order.
  * @param {{kind: string}} [target] Appearance target; `state` and `rule` enable override indicators.
  * @param {Set<string>} [groupCoveredPaths] Paths already indicated by a group-level override marker.
+ * @param {Array<object>} [lookupFields] Rows gates look defaults up in instead of `fields`.
  * @returns {void} Replaces the mount's children.
  * @throws {Error} When a field's control has no FIELD_RENDERERS entry.
  */
-export function renderRegistryFields(host, comp, mount, fields, target, groupCoveredPaths) {
+export function renderRegistryFields(host, comp, mount, fields, target, groupCoveredPaths, lookupFields) {
   mount.innerHTML = '';
   const fieldKey = (f) => f.originalPath || f.path;
   const renderedGroupIds = new Set();
@@ -120,10 +138,10 @@ export function renderRegistryFields(host, comp, mount, fields, target, groupCov
     if (group) {
       renderedGroupIds.add(group.id);
       for (const p of group.paths) consumedKeys.add(p);
-      host.renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths, fieldKey);
+      host.renderCompoundGroup(comp, mount, group, fields, target, groupCoveredPaths, fieldKey, lookupFields);
       continue;
     }
-    const wrap = host.buildFieldWrap(comp, field, fields, target, groupCoveredPaths);
+    const wrap = host.buildFieldWrap(comp, field, fields, target, groupCoveredPaths, lookupFields);
     if (wrap) mount.appendChild(wrap);
   }
 }
@@ -141,13 +159,14 @@ export function renderRegistryFields(host, comp, mount, fields, target, groupCov
  * @param {{kind: string}} [target] Appearance target passed through to each wrap.
  * @param {Set<string>} [groupCoveredPaths] Paths already indicated by a group-level override marker.
  * @param {(field: object) => string} fieldKey Base-path resolver, so a retargeted field is found by its original path.
+ * @param {Array<object>} [lookupFields] Rows gates look defaults up in instead of `fields`.
  * @returns {void} Appends DOM to `mount`.
  */
-export function renderCompoundGroup(host, comp, mount, group, fields, target, groupCoveredPaths, fieldKey) {
+export function renderCompoundGroup(host, comp, mount, group, fields, target, groupCoveredPaths, fieldKey, lookupFields) {
   const memberFields = group.paths.map((p) => fields.find((f) => fieldKey(f) === p));
   const built = memberFields
     .map((field, i) => ({
-      wrap: host.buildFieldWrap(comp, field, fields, target, groupCoveredPaths),
+      wrap: host.buildFieldWrap(comp, field, fields, target, groupCoveredPaths, lookupFields),
       label: group.prefixLabels[i],
       tooltip: field?.tooltip,
     }))
@@ -199,6 +218,10 @@ export function assembleCompoundRow(host, testId, items) {
  * is true when the stored value exists and differs from the registered default, and an authored field
  * carries no `data-tier`. A showWhen-false field that is not authored is skipped; an authored one is
  * rendered dimmed beneath a note giving the reason and a Clear button that commits `undefined`.
+ * `enabledWhen` is judged after a passing showWhen. While it fails the field still renders, with every
+ * control the renderer built disabled; an authored field in that state also gets the dimmed note and
+ * Clear, which stays enabled. A renderer that needs the failing state (a placeholder or hint, say) can
+ * call `host.evaluateShowWhen(comp, field.enabledWhen, …)` itself.
  * On a state or rule target, a stored value marks the wrap `is-overridden` and adds a clear icon,
  * unless `groupCoveredPaths` says a group-level indicator already covers the path. State and rule
  * paths keep the Base test id by using `originalPath`.
@@ -209,11 +232,12 @@ export function assembleCompoundRow(host, testId, items) {
  * @param {Array<object>} fields Registry rows of the current render, for sibling default lookup.
  * @param {{kind: string}} [target] Appearance target.
  * @param {Set<string>} [groupCoveredPaths] Paths already indicated by a group-level override marker.
+ * @param {Array<object>} [lookupFields] Rows gates look defaults up in instead of `fields`.
  * @returns {HTMLElement|null} The wrap, or null for `control: null`, `control: 'bespoke'` (hand-rendered
  *   elsewhere on purpose) and an unauthored showWhen-hidden field.
  * @throws {Error} When the field's control has no FIELD_RENDERERS entry.
  */
-export function buildFieldWrap(host, comp, field, fields, target, groupCoveredPaths) {
+export function buildFieldWrap(host, comp, field, fields, target, groupCoveredPaths, lookupFields) {
   if (field.control === null) return null;
   if (field.control === 'bespoke') return null;
   const raw = host.getFieldValue(comp, field.path);
@@ -223,10 +247,14 @@ export function buildFieldWrap(host, comp, field, fields, target, groupCoveredPa
   const isOverridden = isOverridable && raw !== undefined && !isCoveredByGroup;
 
   let suppressed = false;
-  if (field.showWhen && !host.evaluateShowWhen(comp, field.showWhen, fields)) {
+  let failedGate = null;
+  if (field.showWhen && !host.evaluateShowWhen(comp, field.showWhen, fields, lookupFields)) {
     if (!isAuthored) return null;
     suppressed = true;
+    failedGate = field.showWhen;
   }
+  const disabled = !suppressed && !!field.enabledWhen && !host.evaluateShowWhen(comp, field.enabledWhen, fields, lookupFields);
+  if (disabled && isAuthored) failedGate = field.enabledWhen;
   const renderer = host.FIELD_RENDERERS[field.control];
   if (!renderer) {
     throw new Error(`[StudioInspector] No FIELD_RENDERERS entry for control "${field.control}" (path "${field.path}") — register one before declaring a field with this control.`);
@@ -248,21 +276,24 @@ export function buildFieldWrap(host, comp, field, fields, target, groupCoveredPa
     if (field.tier === 'advanced') wrap.setAttribute('data-tier', 'advanced');
     else if (field.tier === 'simple' && !field.guided) wrap.setAttribute('data-tier', 'build');
   }
-  if (suppressed) {
+  let fieldMount = wrap;
+  if (failedGate) {
     const note = document.createElement('div');
     note.className = 'prop-showwhen-note';
     note.innerHTML = `
-        <span>${escapeHtmlAttr(host.formatShowWhenReason(field.showWhen))} — still set to "${escapeHtmlAttr(String(raw))}"</span>
+        <span>${escapeHtmlAttr(host.formatShowWhenReason(failedGate, comp, fields, lookupFields))} — still set to "${escapeHtmlAttr(String(raw))}"</span>
         <button type="button" class="prop-showwhen-clear">Clear</button>
       `;
     note.querySelector('.prop-showwhen-clear')?.addEventListener('click', () => host.commitField(comp, field.path, undefined));
     wrap.appendChild(note);
-    const fieldMount = document.createElement('div');
+    fieldMount = document.createElement('div');
     fieldMount.style.opacity = '0.55';
     wrap.appendChild(fieldMount);
-    renderer(comp, field, fieldMount);
-  } else {
-    renderer(comp, field, wrap);
+  }
+  renderer(comp, field, fieldMount);
+  if (disabled) {
+    // Only the renderer's controls: an authored field's Clear sits outside fieldMount and stays usable.
+    for (const control of fieldMount.querySelectorAll('input, select, textarea, button')) control.disabled = true;
   }
   // The clear icon is added after the renderer populates the wrap, which would otherwise overwrite it.
   if (isOverridden) {
@@ -283,16 +314,34 @@ export function buildFieldWrap(host, comp, field, fields, target, groupCoveredPa
 }
 
 /**
- * Words the reason a showWhen-gated field is currently hidden, as "<referenced label> <op> <value>".
- * @param {object} host Inspector facade providing humanizeFieldLabel.
- * @param {{path: string, equals?: *, notEquals?: *, equalsAny?: Array<*>}} showWhen The failing gate.
+ * Words the reason a gated field is currently hidden or disabled. `equals`, `notEquals` and
+ * `equalsAny` read "<humanized path> <op> <value>". `rawAddress` reads "<name> is not a raw
+ * A:/L:/H:/K: address", where `<name>` is the referenced row's `label` without a trailing
+ * parenthetical when `lookupFields` has that row, else the humanized path. A failed `all` gives the
+ * text of its first member that fails for `comp` (its first member when no component is given).
+ * @param {object} host Inspector facade providing humanizeFieldLabel and evaluateShowWhen.
+ * @param {{path?: string, equals?: *, notEquals?: *, equalsAny?: Array<*>, rawAddress?: boolean, all?: Array<object>}} showWhen The failing gate.
+ * @param {object} [comp] Component the gate failed for; needed to pick an `all` gate's failing member.
+ * @param {Array<object>} [siblingFields] Registry rows of the same render, as passed to evaluateShowWhen.
+ * @param {Array<object>} [lookupFields] Rows searched for defaults and for a `rawAddress` row's label.
  * @returns {string} For example `Format ≠ LATLON_DMS`; a gate with no operator reads `a condition on <label>`.
  */
-export function formatShowWhenReason(host, showWhen) {
+export function formatShowWhenReason(host, showWhen, comp, siblingFields, lookupFields) {
+  if ('all' in showWhen) {
+    const failing = comp
+      ? showWhen.all.find((member) => !host.evaluateShowWhen(comp, member, siblingFields, lookupFields))
+      : showWhen.all[0];
+    return formatShowWhenReason(host, failing || showWhen.all[0], comp, siblingFields, lookupFields);
+  }
   const label = host.humanizeFieldLabel(showWhen.path);
   if ('equals' in showWhen) return `${label} ≠ ${showWhen.equals}`;
   if ('notEquals' in showWhen) return `${label} = ${showWhen.notEquals}`;
   if ('equalsAny' in showWhen) return `${label} is not one of: ${showWhen.equalsAny.join(', ')}`;
+  if (showWhen.rawAddress === true) {
+    const referencedLabel = lookupFields?.find((f) => f.path === showWhen.path)?.label;
+    const name = referencedLabel ? referencedLabel.replace(/\s*\([^)]*\)\s*$/, '') : label;
+    return `${name} is not a raw A:/L:/H:/K: address`;
+  }
   return `a condition on ${label}`;
 }
 
