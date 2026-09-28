@@ -16,6 +16,7 @@ const DISPATCH = [
   ['rangeEditor', 'renderRangeField'],
   ['pivotEditor', 'renderPivotField'],
   ['stateRefPicker', 'renderBindingField'],
+  ['transitionEditor', 'renderBindingField'],
 ];
 
 test('factory creation touches no host property', () => {
@@ -40,14 +41,14 @@ test('each control dispatches to its current host method with unchanged argument
   expect(calls.at(-1)).toEqual(['replacement', comp, field, mount, 'text']);
 });
 
-test('a binding row of text, number or select dispatches to renderBindingField; other controls ignore the path', () => {
+test('a binding row of text, number, select or stateVarPicker dispatches to renderBindingField; other controls ignore the path', () => {
   const calls = [];
   const host = Object.fromEntries([...new Set([...DISPATCH.map(([, method]) => method), 'renderBindingField'])]
     .map((method) => [method, (...args) => calls.push([method, ...args])]));
   const renderers = createFieldRenderers(host);
   const comp = { id: 'pin' };
   const mount = {};
-  for (const control of ['text', 'number', 'select']) {
+  for (const control of ['text', 'number', 'select', 'stateVarPicker']) {
     const field = { path: 'binding.pollGroup', control };
     renderers[control](comp, field, mount);
     expect(calls.at(-1)).toEqual(['renderBindingField', comp, field, mount]);

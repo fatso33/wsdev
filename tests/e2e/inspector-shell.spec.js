@@ -121,7 +121,7 @@ test('fresh construction creates exactly the twelve own fields, in constructor o
     fieldRendererKeys: [
       'text', 'iconPicker', 'number', 'checkbox', 'select', 'color', 'rowListEditor',
       'detentEditor', 'arcBandsEditor', 'stateVarPicker', 'assetPicker', 'rangeEditor', 'pivotEditor',
-      'stateRefPicker',
+      'stateRefPicker', 'transitionEditor',
     ],
     rootClasses: ['studio-inspector-root'],
     firstChildClass: 'inspector-mode-toggle',

@@ -17,9 +17,9 @@ import { CUSTOM_OPTION_VALUE, CATEGORY_LABELS, escapeHtmlAttr } from '../inspect
 // Binding paths the panel still builds by hand, ahead of the registry-rendered rows. Every other
 // binding row the type claims, a new one included, renders through the field engine.
 const HAND_BUILT_BINDING_PATHS = new Set([
-  'binding.readSimVar', 'binding.unit', 'binding.transition', 'binding.writeEvent', 'binding.incrementEvent',
+  'binding.readSimVar', 'binding.unit', 'binding.writeEvent', 'binding.incrementEvent',
   'binding.decrementEvent', 'binding.fastIncrementEvent', 'binding.fastDecrementEvent', 'binding.ackEvent',
-  'binding.pushEvent', 'binding.stateVar', 'binding.testStateVar',
+  'binding.pushEvent',
 ]);
 
 /**
@@ -43,7 +43,6 @@ const HAND_BUILT_BINDING_PATHS = new Set([
 export function renderComponentBindings(host, comp, def, body) {
       const rows = host.getFieldsForType ? host.getFieldsForType(comp.type) : getFieldsForType(comp.type);
       const binding = comp.binding || {};
-      const stateVars = def.state || [];
 
       // Saved widgets and Community Packs both contribute suggestions, so a
       // fresh install can offer custom events before the author has saved one.
@@ -107,7 +106,6 @@ export function renderComponentBindings(host, comp, def, body) {
 
       const ackIsCustom = !!binding.ackEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.ackEvent);
       const pushIsCustom = !!binding.pushEvent && !getDeckEventsByKind('write').some((e) => e.name === binding.pushEvent);
-      const stateIsCustom = !!binding.stateVar && !stateVars.some((s) => s.name === binding.stateVar);
 
       // Pulse gates use inline display because applyUiMode toggles .hidden on
       // data-tier fields after render. Inline display and the tier gate both
@@ -165,21 +163,6 @@ export function renderComponentBindings(host, comp, def, body) {
             <button type="button" class="btn-small" id="c-bind-read-paste">Paste</button>
           </div>
           <div class="prop-sanitize-diff hidden" id="c-bind-read-custom-diff"></div>
-        </div>
-
-        <div class="prop-row-2" data-tier="advanced">
-          <div class="prop-field">
-            <label>Transition (ms) <span class="prop-hint" title="How long this binding's CSS transition eases toward a new value. Keep this short (well under the gap between updates) — a long transition against Fast-tier updates makes the display feel MORE sluggish, not less, since it ends up averaging across many stale intermediate values.">ⓘ</span></label>
-            <input type="number" step="1" min="0" id="c-bind-transition-ms" class="prop-input" value="${escapeHtmlAttr(binding.transition?.durationMs ?? '')}" placeholder="none" />
-          </div>
-          <div class="prop-field">
-            <label>Easing</label>
-            <select id="c-bind-transition-easing" class="prop-select">
-              <option value="linear" ${(!binding.transition?.easing || binding.transition?.easing === 'linear') ? 'selected' : ''}>Linear</option>
-              <option value="ease-out" ${binding.transition?.easing === 'ease-out' ? 'selected' : ''}>Ease Out</option>
-              <option value="ease-in-out" ${binding.transition?.easing === 'ease-in-out' ? 'selected' : ''}>Ease In-Out</option>
-            </select>
-          </div>
         </div>
 
         <div class="prop-field" data-tier="advanced">
@@ -272,29 +255,6 @@ export function renderComponentBindings(host, comp, def, body) {
         </div>
         ${fastEventFields('fastincrement', 'fastIncrementEvent', 'Fast Increment Deck Event (Coarse Clockwise)', 'clockwise')}
         ${fastEventFields('fastdecrement', 'fastDecrementEvent', 'Fast Decrement Deck Event (Coarse Counter-Clockwise)', 'counter-clockwise')}
-        ` : ''}
-
-        <div class="prop-field" data-tier="build">
-          <label>Bound Local State Var</label>
-          <select id="c-bind-state" class="prop-select">
-            <option value="" ${!binding.stateVar ? 'selected' : ''}>None</option>
-            ${stateVars.map((s) => `<option value="${escapeHtmlAttr(s.name)}" ${!stateIsCustom && binding.stateVar === s.name ? 'selected' : ''}>${escapeHtmlAttr(s.name)} (${escapeHtmlAttr(s.type)})</option>`).join('')}
-            <option value="${CUSTOM_OPTION_VALUE}" ${stateIsCustom ? 'selected' : ''}>Custom…</option>
-          </select>
-        </div>
-        <div class="prop-field prop-custom-block ${stateIsCustom ? '' : 'hidden'}" id="c-bind-state-custom-block">
-          <label>Custom / $context reference <span class="prop-hint" title="FDWS v1.3: for a popover widget, bind to data the host passed in via $context.&lt;key&gt;.value — the key must match one declared in the host's Open Widget Popover Context Map. Also used for any other raw stateVar string not in this widget's own state[] list.">ⓘ</span></label>
-          <input type="text" id="c-bind-state-custom-input" class="prop-input" value="${escapeHtmlAttr(stateIsCustom ? (binding.stateVar || '') : '')}" placeholder="e.g. $context.currentFreq.value" />
-        </div>
-
-        ${comp.type === 'core.indicator' ? `
-          <div class="prop-field" data-tier="advanced">
-            <label>Test State Var <span class="prop-hint" title="FDWS v1.15: local state[] variable that, when true, forces this indicator lit regardless of its own bound value — for a 'press to test' lamp-test button. Wire the SAME state var into every indicator that should light up together, then have a button toggle that one var.">ⓘ</span></label>
-            <select id="c-bind-teststatevar" class="prop-select">
-              <option value="" ${!binding.testStateVar ? 'selected' : ''}>None</option>
-              ${stateVars.map((s) => `<option value="${escapeHtmlAttr(s.name)}" ${binding.testStateVar === s.name ? 'selected' : ''}>${escapeHtmlAttr(s.name)} (${escapeHtmlAttr(s.type)})</option>`).join('')}
-            </select>
-          </div>
         ` : ''}
 
         <button type="button" id="c-bind-advanced-toggle" class="panel-full-btn" style="margin-top:4px;">
@@ -447,27 +407,6 @@ export function renderComponentBindings(host, comp, def, body) {
         });
       }
 
-      const stateSelect = body.querySelector('#c-bind-state');
-      const stateCustomBlock = body.querySelector('#c-bind-state-custom-block');
-      const stateCustomInput = body.querySelector('#c-bind-state-custom-input');
-      stateSelect?.addEventListener('change', () => {
-        if (stateSelect.value === CUSTOM_OPTION_VALUE) {
-          // Just reveal the text field — don't write back yet. binding.stateVar
-          // is still whatever it was (likely empty), so writing here would
-          // immediately re-trigger a synchronous COMPONENT_UPDATED re-render
-          // that rebuilds this panel from that still-empty value, snapping the
-          // select back to "None" and hiding the field before the user can type.
-          stateCustomBlock?.classList.remove('hidden');
-        } else {
-          stateCustomBlock?.classList.add('hidden');
-          if (stateCustomInput) stateCustomInput.value = '';
-          updateBinding({ stateVar: stateSelect.value || undefined });
-        }
-      });
-      stateCustomInput?.addEventListener('change', () => {
-        updateBinding({ stateVar: stateCustomInput.value.trim() || undefined });
-      });
-      body.querySelector('#c-bind-teststatevar')?.addEventListener('change', (e) => updateBinding({ testStateVar: e.target.value || undefined }));
       body.querySelector('#c-bind-unit')?.addEventListener('change', (e) => updateBinding({ unit: e.target.value.trim() || undefined }));
 
       // A binding accepts parsed read or write values of the matching kind.
@@ -528,18 +467,6 @@ export function renderComponentBindings(host, comp, def, body) {
           });
         }
       }
-
-      const updateTransition = () => {
-        const msRaw = body.querySelector('#c-bind-transition-ms')?.value;
-        const easing = body.querySelector('#c-bind-transition-easing')?.value || 'linear';
-        if (msRaw === '' || msRaw === undefined) {
-          updateBinding({ transition: undefined });
-        } else {
-          updateBinding({ transition: { durationMs: Number(msRaw) || 0, easing } });
-        }
-      };
-      body.querySelector('#c-bind-transition-ms')?.addEventListener('change', updateTransition);
-      body.querySelector('#c-bind-transition-easing')?.addEventListener('change', updateTransition);
 
       body.querySelector('#c-bind-advanced-toggle')?.addEventListener('click', () => {
         host._bindingAdvancedOpen = !host._bindingAdvancedOpen;

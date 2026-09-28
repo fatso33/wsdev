@@ -357,6 +357,131 @@ test('a stored state var naming no declared variable selects Custom with no writ
   expect(await page.locator('#c-bind-state option').allTextContents()).toEqual(['None', 'Custom…']);
 });
 
+test('State Var and Test State Var render under Local State from the registry with the row text, and Test State Var offers no Custom', async ({ page }) => {
+  await seed(page, 'core.indicator', {}, {}, { blankState: true });
+  await page.evaluate(() => {
+    const { state, inspector } = window.__studioApp;
+    state.addStateVar({ name: 'LampTest', type: 'boolean', defaultValue: false });
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  const localState = subtitle(page, 'Local State').locator('xpath=following-sibling::div[1]');
+  const ids = await localState.locator('#c-bind-state, #c-bind-stateref, #c-bind-teststatevar').evaluateAll((els) => els.map((el) => el.id));
+  expect(ids).toEqual(['c-bind-state', 'c-bind-stateref', 'c-bind-teststatevar']);
+  const rows = await page.evaluate(async () => (await import('/widgets/PropertyRegistry.js'))
+    .getFieldsForType('core.indicator').filter((f) => ['binding.stateVar', 'binding.testStateVar'].includes(f.path))
+    .map(({ path, label, tooltip }) => ({ path, label, tooltip })));
+  expect(rows).toHaveLength(2);
+  const idOf = { 'binding.stateVar': '#c-bind-state', 'binding.testStateVar': '#c-bind-teststatevar' };
+  for (const row of rows) {
+    const field = localState.locator('.prop-field', { has: page.locator(idOf[row.path]) });
+    await expect(field.locator('label').first(), row.path).toHaveText(`${row.label} ⓘ`);
+    await expect(field.locator('label .prop-hint').first(), row.path).toHaveAttribute('title', row.tooltip);
+  }
+  expect(await optionsOf(page, '#c-bind-state')).toEqual([['', 'None'], ['LampTest', 'LampTest (boolean)'], ['__custom__', 'Custom…']]);
+  expect(await optionsOf(page, '#c-bind-teststatevar')).toEqual([['', 'None'], ['LampTest', 'LampTest (boolean)']]);
+  await expect(page.locator('#c-bind-state-custom-block')).toHaveClass(/hidden/);
+  expect((await snapshot(page)).calls).toHaveLength(0);
+  await page.locator('#c-bind-teststatevar').selectOption('LampTest');
+  expect((await snapshot(page)).binding.testStateVar).toBe('LampTest');
+  await page.locator('#c-bind-teststatevar').selectOption('');
+  expect((await snapshot(page)).binding.testStateVar).toBeUndefined();
+});
+
+test('a stored custom state var shows its block, selected and filled, at every UI tier', async ({ page }) => {
+  await seed(page, 'core.button', { stateVar: '$context.x.value' });
+  for (const tier of ['guided', 'build', 'full']) {
+    await page.evaluate((t) => { window.__studioApp.inspector.uiTier = t; window.__studioApp.inspector.render(); }, tier);
+    await expect(page.locator('#c-bind-state'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-state'), tier).toHaveValue('__custom__');
+    await expect(page.locator('#c-bind-state-custom-block'), tier).toBeVisible();
+    await expect(page.locator('#c-bind-state-custom-input'), tier).toHaveValue('$context.x.value');
+  }
+  expect((await snapshot(page)).calls).toHaveLength(0);
+});
+
+test('a stored Transition, State Var and Test State Var show in Guided; unauthored ones do not', async ({ page }) => {
+  await seed(page, 'core.indicator', { transition: { durationMs: 250, easing: 'ease-out' }, stateVar: 'LampTest', testStateVar: 'LampTest' }, {}, { blankState: true });
+  await page.evaluate(() => {
+    const { state, inspector } = window.__studioApp;
+    state.addStateVar({ name: 'LampTest', type: 'boolean', defaultValue: false });
+    inspector.uiTier = 'guided';
+    inspector.render();
+  });
+  for (const id of ['#c-bind-transition-ms', '#c-bind-transition-easing', '#c-bind-state', '#c-bind-teststatevar']) await expect(page.locator(id), id).toBeVisible();
+  await expect(page.locator('#c-bind-transition-ms')).toHaveValue('250');
+  await expect(page.locator('#c-bind-transition-easing')).toHaveValue('ease-out');
+  await expect(page.locator('#c-bind-state')).toHaveValue('LampTest');
+  await expect(page.locator('#c-bind-teststatevar')).toHaveValue('LampTest');
+  await expect(subtitle(page, 'Local State')).toBeVisible();
+  expect((await snapshot(page)).calls).toHaveLength(0);
+
+  await seed(page, 'core.indicator', {}, {}, { blankState: true });
+  await page.evaluate(() => {
+    const { state, inspector } = window.__studioApp;
+    state.addStateVar({ name: 'LampTest', type: 'boolean', defaultValue: false });
+    inspector.uiTier = 'guided';
+    inspector.render();
+  });
+  for (const id of ['#c-bind-transition-ms', '#c-bind-state', '#c-bind-teststatevar']) await expect(page.locator(id), id).toBeHidden();
+  await expect(subtitle(page, 'Local State')).toBeHidden();
+});
+
+test('Transition renders from the registry with the row text and today\'s ids, and every write is one merged update', async ({ page }) => {
+  await seed(page, 'core.button', { transition: { durationMs: 100, easing: 'ease-out' } });
+  await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
+  const read = subtitle(page, 'Read from Simulator').locator('xpath=following-sibling::div[1]');
+  const row = await page.evaluate(async () => {
+    const { tooltip, label } = (await import('/widgets/PropertyRegistry.js')).getFieldsForType('core.button').find((f) => f.path === 'binding.transition');
+    return { tooltip, label };
+  });
+  const label = read.locator('label').filter({ hasText: /^Transition \(ms\)/ });
+  await expect(label).toHaveText(`${row.label} ⓘ`);
+  await expect(label.locator('.prop-hint')).toHaveAttribute('title', row.tooltip);
+  await expect(page.locator('#c-bind-transition-ms')).toHaveAttribute('placeholder', 'none');
+  await expect(page.locator('#c-bind-transition-ms')).toHaveValue('100');
+  await expect(page.locator('#c-bind-transition-easing')).toHaveValue('ease-out');
+  expect(await optionsOf(page, '#c-bind-transition-easing')).toEqual([['linear', 'Linear'], ['ease-out', 'Ease Out'], ['ease-in-out', 'Ease In-Out']]);
+  expect((await snapshot(page)).calls).toHaveLength(0);
+
+  await page.locator('#c-bind-transition-easing').selectOption('ease-in-out');
+  expect((await snapshot(page)).calls.at(-1)).toEqual(['binding-pin', { binding: { transition: { durationMs: 100, easing: 'ease-in-out' } } }]);
+  await page.locator('#c-bind-transition-ms').fill('250');
+  await page.locator('#c-bind-transition-ms').dispatchEvent('change');
+  expect((await snapshot(page)).calls.at(-1)).toEqual(['binding-pin', { binding: { transition: { durationMs: 250, easing: 'ease-in-out' } } }]);
+  await page.locator('#c-bind-transition-ms').fill('0');
+  await page.locator('#c-bind-transition-ms').dispatchEvent('change');
+  expect((await snapshot(page)).binding.transition).toEqual({ durationMs: 0, easing: 'ease-in-out' });
+  await page.locator('#c-bind-transition-ms').fill('');
+  await page.locator('#c-bind-transition-ms').dispatchEvent('change');
+  expect((await snapshot(page)).binding.transition).toBeUndefined();
+  await expect(page.locator('#c-bind-transition-easing')).toHaveValue('linear');
+});
+
+test('the generic stateVarPicker still renders "— none —" for props.compose.stateVar, and blank writes undefined (characterization)', async ({ page }) => {
+  await seed(page, 'core.gauge', {}, { compose: { stateVar: 'level' } }, { blankState: true });
+  const result = await page.evaluate(async () => {
+    const { TYPE_FIELDS } = await import('/widgets/PropertyRegistry.js');
+    const { state, inspector } = window.__studioApp;
+    state.addStateVar({ name: 'level', type: 'number', defaultValue: 0 });
+    const comp = state.getComponent('binding-pin');
+    const field = TYPE_FIELDS['core.gauge'].find((item) => item.path === 'props.compose.stateVar');
+    const mount = document.createElement('div');
+    inspector.FIELD_RENDERERS[field.control](comp, field, mount);
+    document.body.append(mount);
+    const select = mount.querySelector('select');
+    const options = [...select.querySelectorAll('option')].map((o) => [o.value, o.textContent]);
+    const shown = select.value;
+    select.value = '';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    mount.remove();
+    return { options, shown, stored: state.getComponent('binding-pin').props.compose.stateVar };
+  });
+  expect(result.options).toEqual([['', '— none —'], ['level', 'level (number)']]);
+  expect(result.shown).toBe('level');
+  expect(result.stored).toBeUndefined();
+});
+
 test('a pollFrequencyHz outside 1/100 still shows Fast (characterization)', async ({ page }) => {
   await seed(page, 'core.button', { pollFrequencyHz: 20 });
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });

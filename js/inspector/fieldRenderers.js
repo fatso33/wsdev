@@ -12,7 +12,7 @@
  * names. Row-list controls use the field's rowSpec through renderRowListField;
  * condition builders remain bespoke. Binding-only controls go to
  * renderBindingField, the Bindings panel's own renderers, and so does a
- * `binding.*` row of `text`, `number` or `select`; every other row of those
+ * `binding.*` row of `text`, `number`, `select` or `stateVarPicker`; every other row of those
  * controls keeps its generic renderer. The host is read only when
  * a callback runs, so a missing method then raises the normal JavaScript call
  * error rather than failing construction.
@@ -31,10 +31,11 @@ export function createFieldRenderers(host) {
     rowListEditor: (comp, field, mount) => host.renderRowListField(comp, field, mount),
     detentEditor: (comp, field, mount) => host.renderRowListField(comp, field, mount),
     arcBandsEditor: (comp, field, mount) => host.renderRowListField(comp, field, mount),
-    stateVarPicker: (comp, field, mount) => host.renderStateVarField(comp, field, mount),
+    stateVarPicker: (comp, field, mount) => (isBindingRow(field) ? host.renderBindingField(comp, field, mount) : host.renderStateVarField(comp, field, mount)),
     assetPicker: (comp, field, mount) => host.renderAssetField(comp, field, mount),
     rangeEditor: (comp, field, mount) => host.renderRangeField(comp, field, mount),
     pivotEditor: (comp, field, mount) => host.renderPivotField(comp, field, mount),
-    stateRefPicker: (comp, field, mount) => host.renderBindingField(comp, field, mount)
+    stateRefPicker: (comp, field, mount) => host.renderBindingField(comp, field, mount),
+    transitionEditor: (comp, field, mount) => host.renderBindingField(comp, field, mount)
   };
 }
