@@ -400,11 +400,15 @@ function pasteParsedWriteEvent(host, comp, field, { select, block, input }) {
 /** A raw SimVar or event address: an `A:`, `L:`, `H:` or `K:` prefix, any case. */
 const RAW_ADDRESS = /^(A|L|H|K):/i;
 
+/** Read rows whose unit `binding.unit` holds; another read row's paste never writes it. */
+const UNIT_OWNER_PATHS = new Set(['binding.readSimVar']);
+
 /**
  * Takes the SimVar Tester's parsed read into a read row: it opens the Custom block on the value and
- * writes the name, together with the parsed unit when the name is a raw A:/L:/H:/K: address (a bare
- * Deck Event's unit is PC Bridge's, so a previous unit is left as it was), in one update. The Author is
- * told what was pasted. A write event, a test-only (complex) parse, or nothing, only gets a toast.
+ * writes the name in one update. On a row in `UNIT_OWNER_PATHS` the parsed unit is written with it
+ * when the name is a raw A:/L:/H:/K: address (a bare Deck Event's unit is PC Bridge's, so a previous
+ * unit is left as it was). The Author is told what was pasted. A write event, a test-only (complex)
+ * parse, or nothing, only gets a toast.
  * @param {object} host Inspector facade providing `state.testerParsed` and `state.updateComponent`.
  * @param {object} comp Component captured for this render.
  * @param {object} field Binding registry row.
@@ -420,7 +424,7 @@ function pasteParsedReadValue(host, comp, field, { select, block, input }) {
   block.classList.remove('hidden');
   input.value = parsed.name;
   const updates = { [field.path.slice('binding.'.length)]: parsed.name };
-  if (parsed.unit && RAW_ADDRESS.test(parsed.name)) updates.unit = parsed.unit;
+  if (UNIT_OWNER_PATHS.has(field.path) && parsed.unit && RAW_ADDRESS.test(parsed.name)) updates.unit = parsed.unit;
   showToast(`Pasted ${parsed.name}${updates.unit ? ` (unit ${updates.unit})` : ''}.`);
   host.state.updateComponent(comp.id, { binding: { ...(comp.binding || {}), ...updates } });
 }

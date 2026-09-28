@@ -16,9 +16,11 @@ import { escapeHtmlAttr, CATEGORY_LABELS } from '../inspectorMarkup.js';
 /**
  * Opens a Connect dialog for a component binding and resolves after Cancel or
  * one state update. `kind` is read or write; `bindingField` can target any
- * other write event. Catalogue reads clear raw units. Only `writeEvent` gets
- * pairing: its hints, its checkbox, and proposed interactions appended in the
- * same update. Any other field is written alone. Probe errors stay in the
+ * other write event, or another read. Only `readSimVar` owns `binding.unit`:
+ * its raw tab offers the unit, a raw read writes it and a catalogue read clears
+ * it; another read field shows no unit and is written alone. Only `writeEvent`
+ * gets pairing: its hints, its checkbox, and proposed interactions appended in
+ * the same update. Any other field is written alone. Probe errors stay in the
  * dialog and busy state clears after completion; Bridge calls may reject.
  * @param {object} host Live Inspector with state, optional simBridge and simVarTester.
  * @param {object} comp Component captured at opening for binding and pairing.
@@ -32,6 +34,8 @@ export async function openConnectDialog(host, comp, def, kind, bindingField = (k
     // A proposed Dispatch Sim Event row has no event of its own and falls back to
     // binding.writeEvent, so pairing any other field would wire nothing to it.
     const pairsWriteEvent = isWrite && bindingField === 'writeEvent';
+    // binding.unit is Read's; another read field writing it would overwrite or clear Read's unit.
+    const ownsUnit = !isWrite && bindingField === 'readSimVar';
     const sanitizeKind = isWrite ? 'event' : 'simvar';
     const current = comp.binding?.[bindingField] || '';
 
@@ -51,7 +55,7 @@ export async function openConnectDialog(host, comp, def, kind, bindingField = (k
     let activeTab = /^(A|L|H|K):/i.test(current) ? 'raw' : 'catalogue';
     let selectedName = current;
     let searchQuery = '';
-    let rawUnit = comp.binding?.unit || '';
+    let rawUnit = ownsUnit ? (comp.binding?.unit || '') : '';
     let testResult = '';
     let testBusy = false;
 
@@ -89,7 +93,7 @@ export async function openConnectDialog(host, comp, def, kind, bindingField = (k
         <datalist id="cn-raw-suggestions">${mergedCustom.map((e) => `<option value="${escapeHtmlAttr(e.name)}"></option>`).join('')}</datalist>
         <div class="prop-sanitize-diff hidden" id="cn-raw-diff"></div>
       </div>
-      ${!isWrite ? `
+      ${ownsUnit ? `
         <div class="prop-field">
           <label>SimConnect Unit <span class="prop-hint" title="Only a raw address's unit is yours to set — a Deck Event's unit comes from the active PC Bridge profile, which is why this field only appears here, not on the Catalogue tab. Leave blank to use the host's default ('Number'). For a TEXT variable (TITLE, ATC MODEL, ATC ID) type 'string'.">ⓘ</span></label>
           <input type="text" id="cn-raw-unit" class="prop-input" value="${escapeHtmlAttr(rawUnit)}" placeholder="Number" />
@@ -272,7 +276,7 @@ export async function openConnectDialog(host, comp, def, kind, bindingField = (k
     if (!result) return;
 
     const updates = { [bindingField]: result.name };
-    if (!isWrite) updates.unit = result.unit || undefined;
+    if (ownsUnit) updates.unit = result.unit || undefined;
 
     if (pairsWriteEvent && result.pair) {
       const withNewEvent = { ...comp, binding: { ...comp.binding, writeEvent: result.name } };

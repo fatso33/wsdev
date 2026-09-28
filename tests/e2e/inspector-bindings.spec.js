@@ -921,6 +921,38 @@ test('Connect… on Read passes the read kind and readSimVar; the real dialog wr
   expect((await snapshot(page)).calls[0]).toEqual(['binding-pin', { binding: { readSimVar: 'L:NEW_VALUE', unit: 'string' } }]);
 });
 
+test('a supplied second read row\'s Paste and Connect… write only its own key, never Read\'s unit', async ({ page }) => {
+  await seed(page, 'core.display', { readSimVar: 'A:INDICATED ALTITUDE', unit: 'feet' });
+  await page.evaluate(async () => {
+    const { getFieldsForType } = await import('/widgets/PropertyRegistry.js');
+    const { state, inspector } = window.__studioApp;
+    inspector.getFieldsForType = (t) => [...getFieldsForType(t), { path: 'binding.fooRead', control: 'simVarPicker', tier: 'advanced', group: 'Read from Simulator', label: 'Foo Read' }];
+    state.testerParsed = { kind: 'read', name: 'A:AIRSPEED INDICATED', unit: 'knots' };
+    inspector.uiTier = 'full';
+    inspector.render();
+  });
+  await page.locator('#rf-binding-fooRead').selectOption('__custom__');
+  await page.locator('#rf-binding-fooRead-paste').click();
+  expect((await snapshot(page)).calls).toEqual([
+    ['binding-pin', { binding: { readSimVar: 'A:INDICATED ALTITUDE', unit: 'feet', fooRead: 'A:AIRSPEED INDICATED' } }],
+  ]);
+
+  await page.locator('#rf-binding-fooRead-connect').click();
+  await expect(page.locator('.studio-modal-overlay:not(.hidden)')).toBeVisible();
+  await expect(page.locator('#cn-tab-raw')).toHaveClass(/active/);
+  await expect(page.locator('#cn-raw-unit')).toHaveCount(0);
+  await page.locator('#cn-tab-catalogue').click();
+  const name = await page.locator('#cn-catalogue-rows .cn-pick').first().getAttribute('data-name');
+  await page.locator('#cn-catalogue-rows .cn-pick').first().click();
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect.poll(async () => (await snapshot(page)).calls).toHaveLength(2);
+  expect((await snapshot(page)).binding).toEqual({ readSimVar: 'A:INDICATED ALTITUDE', unit: 'feet', fooRead: name });
+  await page.evaluate(() => {
+    window.__studioApp.state.testerParsed = null;
+    Reflect.deleteProperty(window.__studioApp.inspector, 'getFieldsForType');
+  });
+});
+
 test('Unit is disabled with the PC Bridge hint for a Deck Event read, and enabled for a raw address (Full)', async ({ page }) => {
   await seed(page, 'core.display', { readSimVar: 'apHdgBugValue' });
   await page.evaluate(() => { window.__studioApp.inspector.uiTier = 'full'; window.__studioApp.inspector.render(); });
