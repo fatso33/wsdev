@@ -169,7 +169,9 @@ const CUSTOM_STATE_TOOLTIP = 'FDWS v1.3: for a popover widget, bind to data the 
  * A choice among the widget's declared state variables, each shown as "name (type)". None removes the
  * key. A path in `CUSTOM_STATE_PATHS` also offers Custom…: it reveals a text input without writing, and
  * the input's trimmed text is written on change. A stored name no variable declares selects Custom…
- * with the name in the input, and nothing is written on render, so a renamed variable is never cleared.
+ * with the name in the input; a path without Custom… shows it as a selected "name (not declared)" option
+ * after the declared ones, so the stale name is visible and None can clear it. Nothing is written on
+ * render, so a renamed variable is never cleared.
  * @param {object} host Inspector facade.
  * @param {object} comp Component captured for this render.
  * @param {object} field Binding registry row.
@@ -181,12 +183,15 @@ function renderStateVarPicker(host, comp, field, mount) {
   const stateVars = host.state.widgetDef.state || [];
   const stored = shownValue(host, comp, field);
   const allowsCustom = CUSTOM_STATE_PATHS.has(field.path);
-  const isCustom = allowsCustom && !!stored && !stateVars.some((s) => s.name === stored);
+  const isUndeclared = !!stored && !stateVars.some((s) => s.name === stored);
+  const isCustom = allowsCustom && isUndeclared;
+  const isStale = !allowsCustom && isUndeclared;
   mount.innerHTML = `
       <label>${labelMarkup(host, field)}</label>
       <select id="${id}" class="prop-select">
         <option value="" ${!stored ? 'selected' : ''}>None</option>
         ${stateVars.map((s) => `<option value="${escapeHtmlAttr(s.name)}" ${!isCustom && stored === s.name ? 'selected' : ''}>${escapeHtmlAttr(s.name)} (${escapeHtmlAttr(s.type)})</option>`).join('')}
+        ${isStale ? `<option value="${escapeHtmlAttr(stored)}" selected>${escapeHtmlAttr(stored)} (not declared)</option>` : ''}
         ${allowsCustom ? `<option value="${CUSTOM_OPTION_VALUE}" ${isCustom ? 'selected' : ''}>Custom…</option>` : ''}
       </select>
       ${allowsCustom ? `

@@ -1182,3 +1182,66 @@ test('a declared state var renders preselected in Build with the Custom block hi
   expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
   expect(renderErrors).toEqual([]);
 });
+
+const STALE_TEST_VAR_COMPONENT = (testStateVar) => ({ id: 'sweep-pin', type: 'core.indicator', label: 'Sweep pin', props: {}, style: {}, binding: { testStateVar } });
+
+for (const tier of ['guided', 'full']) {
+  test(`a stale Test State Var shows as not declared in ${tier}, selected, and nothing is written`, async ({ page }) => {
+    const renderErrors = await openBindingsCase(page, {
+      tier,
+      stateVars: [{ name: 'LampTest', type: 'boolean', defaultValue: false }],
+      component: STALE_TEST_VAR_COMPONENT('renamedAway'),
+    });
+    await expect(page.locator('#c-bind-teststatevar')).toHaveCount(1);
+    await expect(page.locator('#c-bind-teststatevar')).toHaveValue('renamedAway');
+    await expect(page.locator('#c-bind-teststatevar option:checked')).toHaveText('renamedAway (not declared)');
+    expect(await optionsOf(page, '#c-bind-teststatevar')).toEqual([['', 'None'], ['LampTest', 'LampTest (boolean)'], ['renamedAway', 'renamedAway (not declared)']]);
+    expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+    expect(renderErrors).toEqual([]);
+  });
+}
+
+test('choosing None on a stale Test State Var removes the key and the extra option', async ({ page }) => {
+  const renderErrors = await openBindingsCase(page, { component: STALE_TEST_VAR_COMPONENT('renamedAway') });
+  await expect(page.locator('#c-bind-teststatevar')).toHaveValue('renamedAway');
+  await page.locator('#c-bind-teststatevar').selectOption('');
+  expect(await page.evaluate(() => window.__studioApp.state.getComponent('sweep-pin').binding.testStateVar)).toBeUndefined();
+  expect(await optionsOf(page, '#c-bind-teststatevar')).toEqual([['', 'None']]);
+  await expect(page.locator('#c-bind-teststatevar')).toHaveValue('');
+  expect(renderErrors).toEqual([]);
+});
+
+test('choosing a declared variable on a stale Test State Var writes its name', async ({ page }) => {
+  const renderErrors = await openBindingsCase(page, {
+    stateVars: [{ name: 'LampTest', type: 'boolean', defaultValue: false }],
+    component: STALE_TEST_VAR_COMPONENT('renamedAway'),
+  });
+  await expect(page.locator('#c-bind-teststatevar option:checked')).toHaveText('renamedAway (not declared)');
+  await page.locator('#c-bind-teststatevar').selectOption('LampTest');
+  expect(await page.evaluate(() => window.__studioApp.state.getComponent('sweep-pin').binding.testStateVar)).toBe('LampTest');
+  await expect(page.locator('#c-bind-teststatevar')).toHaveValue('LampTest');
+  expect(await optionsOf(page, '#c-bind-teststatevar')).toEqual([['', 'None'], ['LampTest', 'LampTest (boolean)']]);
+  expect(renderErrors).toEqual([]);
+});
+
+test('a stale Test State Var equal to the injection payload shows escaped', async ({ page }) => {
+  const renderErrors = await openBindingsCase(page, { component: STALE_TEST_VAR_COMPONENT(P) });
+  await expect(page.locator('#c-bind-teststatevar')).toHaveCount(1);
+  await expect(page.locator('#c-bind-teststatevar')).toHaveValue(P);
+  await expect(page.locator('#c-bind-teststatevar option:checked')).toHaveText(`${P} (not declared)`);
+  expect(await optionsOf(page, '#c-bind-teststatevar')).toEqual([['', 'None'], [P, `${P} (not declared)`]]);
+  expect(await page.locator('#injected').count()).toBe(0);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
+
+test('a declared stored Test State Var renders with no extra option', async ({ page }) => {
+  const renderErrors = await openBindingsCase(page, {
+    stateVars: [{ name: 'LampTest', type: 'boolean', defaultValue: false }],
+    component: STALE_TEST_VAR_COMPONENT('LampTest'),
+  });
+  await expect(page.locator('#c-bind-teststatevar')).toHaveValue('LampTest');
+  expect(await optionsOf(page, '#c-bind-teststatevar')).toEqual([['', 'None'], ['LampTest', 'LampTest (boolean)']]);
+  expect(await readWriteCheck(page)).toEqual({ widgetDefChanged: false, writes: [] });
+  expect(renderErrors).toEqual([]);
+});
