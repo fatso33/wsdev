@@ -15,6 +15,7 @@ import { StudioValidator, isComponentUnconfigured } from './StudioValidator.js';
 import { DECK_EVENT_NAMES, getDeckEventsByKind } from '../core/deckEvents.js';
 import { extractCustomDeckEvents } from '../core/widgetVarExtractor.js';
 import { loadImportedPacks, removePack, parsePackFile, importPack, buildPackFromCustomEvents } from '../core/deckEventPacks.js';
+import { escapeHtmlAttr } from './inspector/inspectorMarkup.js';
 
 // Wave 3, Part 7 item 1: shared drag MIME type, so StudioCanvas.js's dragover
 // handler can recognize a palette-card drag (vs. an unrelated drag, e.g. a
@@ -432,7 +433,7 @@ export class StudioLayersPanel {
     const searchWrap = document.createElement('div');
     searchWrap.className = 'tree-search-wrap';
     searchWrap.innerHTML = `
-      <input type="text" id="tree-search-input" class="tree-search-input" placeholder="Filter components..." value="${this.filterText}" />
+      <input type="text" id="tree-search-input" class="tree-search-input" placeholder="Filter components..." value="${escapeHtmlAttr(this.filterText)}" />
     `;
     this.contentArea.appendChild(searchWrap);
     searchWrap.querySelector('#tree-search-input')?.addEventListener('input', (e) => {
@@ -514,8 +515,8 @@ export class StudioLayersPanel {
             <span class="group-drag-handle">⠿</span>
             <div class="group-title-left">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-              <span class="group-name">${group.id}</span>
-              <span class="group-z-tag">Z: ${group.z ?? 0}</span>
+              <span class="group-name">${escapeHtmlAttr(group.id)}</span>
+              <span class="group-z-tag">Z: ${escapeHtmlAttr(group.z ?? 0)}</span>
             </div>
             <div class="group-actions">
               <button class="btn-group-hide ${isGroupHidden ? 'active' : ''}" title="${isGroupHidden ? 'Show in editor (Device View/export are unaffected either way)' : 'Hide in editor (Device View/export are unaffected either way)'}">${isGroupHidden ? '⦸' : '👁'}</button>
@@ -543,7 +544,7 @@ export class StudioLayersPanel {
         });
 
         groupFolder.querySelector('.btn-group-del')?.addEventListener('click', async () => {
-          const ok = await confirmModal(`Delete layer group "${group.id}"? Components in this group will become ungrouped.`, { title: 'Delete Layer Group', danger: true });
+          const ok = await confirmModal(`Delete layer group "${escapeHtmlAttr(group.id)}"? Components in this group will become ungrouped.`, { title: 'Delete Layer Group', danger: true });
           if (ok) this.state.deleteLayerGroup(group.id);
         });
 
@@ -609,13 +610,13 @@ export class StudioLayersPanel {
 
     row.innerHTML = `
       <div class="tree-comp-main">
-        <span class="comp-type-badge">${typeShort}</span>
-        <span class="comp-name" title="${comp.id}">${comp.label || comp.id}</span>
-        ${severity ? `<span class="tree-validation-badge ${severity}" title="${[...issues.errors, ...issues.warnings].join('\n').replace(/"/g, '&quot;')}">${severity === 'error' ? '!' : '?'}</span>` : ''}
+        <span class="comp-type-badge">${escapeHtmlAttr(typeShort)}</span>
+        <span class="comp-name" title="${escapeHtmlAttr(comp.id)}">${escapeHtmlAttr(comp.label || comp.id)}</span>
+        ${severity ? `<span class="tree-validation-badge ${severity}" title="${escapeHtmlAttr([...issues.errors, ...issues.warnings].join('\n'))}">${severity === 'error' ? '!' : '?'}</span>` : ''}
         ${unconfigured ? '<span class="tree-unconfigured-badge" title="No binding or interaction wired yet.">⋯</span>' : ''}
       </div>
       <div class="tree-comp-meta">
-        <span class="z-badge" title="Effective Z-index">Z:${effectiveZ}</span>
+        <span class="z-badge" title="Effective Z-index">Z:${escapeHtmlAttr(effectiveZ)}</span>
         <button class="tree-action-btn btn-hide ${isHidden ? 'active' : ''}" title="${isHidden ? 'Show in editor (Device View/export are unaffected either way)' : 'Hide in editor (Device View/export are unaffected either way)'}">${isHidden ? '⦸' : '👁'}</button>
         <button class="tree-action-btn btn-dup" title="Duplicate Component">⧉</button>
         <button class="tree-action-btn btn-del" title="Delete Component">✕</button>
@@ -675,11 +676,11 @@ export class StudioLayersPanel {
 
   async promptEditLayerGroup(group) {
     const result = await openModal({
-      title: `Edit Layer Group "${group.id}"`,
+      title: `Edit Layer Group "${escapeHtmlAttr(group.id)}"`,
       bodyHtml: `
         <div class="modal-form-row">
           <label>Base Z-Offset (-1000 to 1000)</label>
-          <input type="number" id="lg-z" class="prop-input" value="${group.z ?? 0}" min="-1000" max="1000" />
+          <input type="number" id="lg-z" class="prop-input" value="${escapeHtmlAttr(group.z ?? 0)}" min="-1000" max="1000" />
         </div>
       `,
       onSubmit: (card) => {
@@ -879,15 +880,15 @@ export class StudioLayersPanel {
         const isFastPoll = Number(st.pollFrequencyHz) > 2;
         card.innerHTML = `
           <div class="state-var-header">
-            <span class="state-var-name">${st.name}</span>
-            <span class="state-var-type">${st.type}</span>
+            <span class="state-var-name">${escapeHtmlAttr(st.name)}</span>
+            <span class="state-var-type">${escapeHtmlAttr(st.type)}</span>
           </div>
           <div class="state-var-body">
-            <div class="state-var-prop">Default: <strong>${typeof st.default === 'object' ? JSON.stringify(st.default) : st.default}</strong></div>
-            <div class="state-var-prop state-var-current" title="Live value — updates as you interact with the widget in Device View">Current: <strong>${this.formatLiveStateValue(st.name)}</strong></div>
+            <div class="state-var-prop">Default: <strong>${escapeHtmlAttr(typeof st.default === 'object' ? JSON.stringify(st.default) : st.default)}</strong></div>
+            <div class="state-var-prop state-var-current" title="Live value — updates as you interact with the widget in Device View">Current: <strong>${escapeHtmlAttr(this.formatLiveStateValue(st.name))}</strong></div>
             ${st.persist === true ? '<div class="state-var-tag persist">PERSISTENT</div>' : ''}
             ${st.persist === 'session' ? '<div class="state-var-tag persist" title="Survives switching pages within the running app, but resets the next time the app is launched fresh — never written to device storage.">SESSION ONLY</div>' : ''}
-            ${st.syncFrom ? `<div class="state-var-tag sync">Sync: ${st.syncFrom}</div>` : ''}
+            ${st.syncFrom ? `<div class="state-var-tag sync">Sync: ${escapeHtmlAttr(st.syncFrom)}</div>` : ''}
             ${st.syncFrom && isFastPoll ? '<div class="state-var-tag sync">FAST POLL</div>' : ''}
           </div>
           <div class="state-var-actions">
@@ -901,7 +902,7 @@ export class StudioLayersPanel {
         });
 
         card.querySelector('.btn-st-del')?.addEventListener('click', async () => {
-          const ok = await confirmModal(`Delete state variable "${st.name}"?`, { title: 'Delete State Variable', danger: true });
+          const ok = await confirmModal(`Delete state variable "${escapeHtmlAttr(st.name)}"?`, { title: 'Delete State Variable', danger: true });
           if (ok) this.state.deleteStateVar(st.name);
         });
 
@@ -943,7 +944,6 @@ export class StudioLayersPanel {
     // sync with the JSON fallback textarea below for shapes this simple
     // row/field grid can't represent (nested arrays, etc).
     let arrayItems = Array.isArray(initial.default) ? JSON.parse(JSON.stringify(initial.default)) : [];
-    const escAttr = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     const displayVal = (v) => (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
     // Reads a JSON-looking value back to its real type (number/bool/object/array),
     // falling back to the raw string for plain text — so "118.700" round-trips as
@@ -977,12 +977,12 @@ export class StudioLayersPanel {
     };
 
     const result = await openModal({
-      title: isEdit ? `Edit State Variable "${existing.name}"` : 'Add State Variable',
+      title: isEdit ? `Edit State Variable "${escapeHtmlAttr(existing.name)}"` : 'Add State Variable',
       wide: true,
       bodyHtml: `
         <div class="modal-form-row">
           <label>Name</label>
-          <input type="text" id="sv-name" class="prop-input" value="${initial.name}" placeholder="e.g. stbyFreq, switchOn, presets" ${isEdit ? 'readonly' : ''} />
+          <input type="text" id="sv-name" class="prop-input" value="${escapeHtmlAttr(initial.name)}" placeholder="e.g. stbyFreq, switchOn, presets" ${isEdit ? 'readonly' : ''} />
         </div>
         <div class="modal-form-row">
           <label>Type</label>
@@ -990,7 +990,7 @@ export class StudioLayersPanel {
         </div>
         <div class="modal-form-row" id="sv-default-scalar-row" ${initial.type === 'array' ? 'hidden' : ''}>
           <label>Default Value</label>
-          <input type="text" id="sv-default" class="prop-input" value="${typeof initial.default === 'object' ? JSON.stringify(initial.default) : initial.default}" />
+          <input type="text" id="sv-default" class="prop-input" value="${escapeHtmlAttr(typeof initial.default === 'object' ? JSON.stringify(initial.default) : initial.default)}" />
         </div>
         <div class="modal-form-row" id="sv-array-editor" ${initial.type === 'array' ? '' : 'hidden'}>
           <label>Default Array Items</label>
@@ -1014,7 +1014,7 @@ export class StudioLayersPanel {
           </select>
         </div>
         <div class="modal-form-row prop-custom-block ${syncIsCustom ? '' : 'hidden'}" id="sv-syncfrom-custom-block">
-          <input type="text" id="sv-syncfrom-custom" class="prop-input" value="${syncIsCustom ? initial.syncFrom : ''}" placeholder="e.g. myCustomVar, FLIGHTPLAN" />
+          <input type="text" id="sv-syncfrom-custom" class="prop-input" value="${escapeHtmlAttr(syncIsCustom ? initial.syncFrom : '')}" placeholder="e.g. myCustomVar, FLIGHTPLAN" />
         </div>
         <div id="sv-live-fields" class="${initial.syncFrom ? '' : 'hidden'}">
           <div class="modal-form-row prop-row-2">
@@ -1027,13 +1027,13 @@ export class StudioLayersPanel {
             </div>
             <div class="prop-field">
               <label>Dead Band</label>
-              <input type="number" step="any" min="0" id="sv-deadband" class="prop-input" value="${initial.deadband ?? 0}" />
+              <input type="number" step="any" min="0" id="sv-deadband" class="prop-input" value="${escapeHtmlAttr(initial.deadband ?? 0)}" />
             </div>
           </div>
           <div class="modal-form-row">
             <div class="prop-field">
               <label>Poll Group <span class="prop-hint" title="FDWS v1.26: which PC Bridge polling chunk this SimVar's data definition joins. Leave blank to default to this widget's own id — already groups all of this widget's own bindings together, away from unrelated widgets' vars. Only set this to deliberately merge chunks across widgets, or split an unusually noisy var out of an otherwise-quiet widget.">ⓘ</span></label>
-              <input type="text" id="sv-pollgroup" class="prop-input" value="${initial.pollGroup || ''}" placeholder="(defaults to this widget's id)" />
+              <input type="text" id="sv-pollgroup" class="prop-input" value="${escapeHtmlAttr(initial.pollGroup || '')}" placeholder="(defaults to this widget's id)" />
             </div>
           </div>
         </div>
@@ -1048,7 +1048,7 @@ export class StudioLayersPanel {
         ${this.state.widgetDef.kind === 'popover' ? `
           <div class="modal-form-row">
             <label>Seed From Context Key <span class="prop-hint" title="FDWS v1.12: on popover open, this variable's initial value comes from the named key in the host's Open Widget Popover Context Map (e.g. 'currentLabel') instead of Default Value above — falls back to Default if the key wasn't declared writable by the host, or isn't declared at all. Lets a scratch edit field start pre-filled with the item being edited while still supporting a true Cancel-discards flow (unlike binding the input directly to $context.&lt;key&gt;.value, which can only live-commit on every change).">ⓘ</span></label>
-            <input type="text" id="sv-seedfromcontext" class="prop-input" value="${initial.seedFromContext || ''}" placeholder="e.g. currentLabel" />
+            <input type="text" id="sv-seedfromcontext" class="prop-input" value="${escapeHtmlAttr(initial.seedFromContext || '')}" placeholder="e.g. currentLabel" />
           </div>
         ` : ''}
       `,
@@ -1074,8 +1074,8 @@ export class StudioLayersPanel {
                   <div class="array-item-fields" style="display:flex;flex-direction:column;gap:4px;">
                     ${entries.length === 0 ? '<div class="caps-empty">No fields yet — click + Field.</div>' : entries.map(([k, v]) => `
                       <div class="array-field-pair" style="display:flex;gap:6px;">
-                        <input type="text" class="prop-input array-field-key" value="${escAttr(k)}" placeholder="key" style="flex:1;" />
-                        <input type="text" class="prop-input array-field-val" value="${escAttr(displayVal(v))}" placeholder="value" style="flex:1;" />
+                        <input type="text" class="prop-input array-field-key" value="${escapeHtmlAttr(k)}" placeholder="key" style="flex:1;" />
+                        <input type="text" class="prop-input array-field-val" value="${escapeHtmlAttr(displayVal(v))}" placeholder="value" style="flex:1;" />
                         <button type="button" class="btn-mini-close array-field-remove">✕</button>
                       </div>
                     `).join('')}
@@ -1089,7 +1089,7 @@ export class StudioLayersPanel {
             }
             return `
               <div class="row-list-item array-item-row" data-item-idx="${idx}" style="display:flex;gap:6px;">
-                <input type="text" class="prop-input array-item-value" value="${escAttr(displayVal(item))}" style="flex:1;" />
+                <input type="text" class="prop-input array-item-value" value="${escapeHtmlAttr(displayVal(item))}" style="flex:1;" />
                 <button type="button" class="btn-mini-close array-item-remove">✕</button>
               </div>
             `;
@@ -1289,11 +1289,11 @@ export class StudioLayersPanel {
 
         card.innerHTML = `
           <div class="asset-thumb-wrap">
-            <img src="data:${asset.mimeType || 'image/png'};base64,${asset.data}" class="asset-thumb-img" alt="${asset.id}" />
+            <img src="data:${escapeHtmlAttr(asset.mimeType || 'image/png')};base64,${escapeHtmlAttr(asset.data)}" class="asset-thumb-img" alt="${escapeHtmlAttr(asset.id)}" />
           </div>
           <div class="asset-info">
-            <div class="asset-id" title="${asset.id}">${asset.id}</div>
-            <div class="asset-size">${sizeKb} KB • ${asset.mimeType?.split('/')[1]?.toUpperCase()}</div>
+            <div class="asset-id" title="${escapeHtmlAttr(asset.id)}">${escapeHtmlAttr(asset.id)}</div>
+            <div class="asset-size">${sizeKb} KB • ${escapeHtmlAttr(asset.mimeType?.split('/')[1]?.toUpperCase())}</div>
           </div>
           <div class="asset-actions">
             <button class="btn-copy-asset-id" title="Copy Asset ID">📋</button>
@@ -1307,7 +1307,7 @@ export class StudioLayersPanel {
         });
 
         card.querySelector('.btn-del-asset')?.addEventListener('click', async () => {
-          const ok = await confirmModal(`Delete asset "${asset.id}"?`, { title: 'Delete Asset', danger: true });
+          const ok = await confirmModal(`Delete asset "${escapeHtmlAttr(asset.id)}"?`, { title: 'Delete Asset', danger: true });
           if (ok) this.state.deleteAsset(asset.id);
         });
 
@@ -1447,8 +1447,8 @@ export class StudioLayersPanel {
         const card = document.createElement('div');
         card.className = 'template-card user-saved';
         card.innerHTML = `
-          <div class="template-title">${pack.name}</div>
-          <div class="template-desc">${pack.description || `by ${pack.author || 'Unknown'}`}</div>
+          <div class="template-title">${escapeHtmlAttr(pack.name)}</div>
+          <div class="template-desc">${escapeHtmlAttr(pack.description || `by ${pack.author || 'Unknown'}`)}</div>
           <div class="template-meta">
             <span class="tmpl-badge">${pack.events.length} events</span>
           </div>
@@ -1457,7 +1457,7 @@ export class StudioLayersPanel {
           </div>
         `;
         card.querySelector('.btn-del-saved')?.addEventListener('click', async () => {
-          const ok = await confirmModal(`Remove pack "${pack.name}"? Widgets already using its suggested names are unaffected — this only removes it from the picker's suggestions.`, { title: 'Remove Pack', danger: true });
+          const ok = await confirmModal(`Remove pack "${escapeHtmlAttr(pack.name)}"? Widgets already using its suggested names are unaffected — this only removes it from the picker's suggestions.`, { title: 'Remove Pack', danger: true });
           if (ok) { removePack(pack.id); this.render(); }
         });
         listWrap.appendChild(card);
@@ -1479,7 +1479,7 @@ export class StudioLayersPanel {
       } catch (err) {
         await openModal({
           title: 'Import Failed',
-          bodyHtml: `<p class="modal-confirm-text">Could not import "${file.name}":</p><div class="modal-error" style="margin:0;">${err.message}</div>`,
+          bodyHtml: `<p class="modal-confirm-text">Could not import "${escapeHtmlAttr(file.name)}":</p><div class="modal-error" style="margin:0;">${escapeHtmlAttr(err.message)}</div>`,
           cancelLabel: 'Close',
           onSubmit: () => ({ value: true })
         });
@@ -1504,7 +1504,7 @@ export class StudioLayersPanel {
     const result = await openModal({
       title: 'Export Custom Names as Pack',
       bodyHtml: `
-        <p class="modal-confirm-text">Packaging ${customEvents.length} custom name(s) found across your saved widgets: ${customEvents.map((e) => e.name).join(', ')}</p>
+        <p class="modal-confirm-text">Packaging ${customEvents.length} custom name(s) found across your saved widgets: ${customEvents.map((e) => escapeHtmlAttr(e.name)).join(', ')}</p>
         <div class="modal-form-row"><label>Pack Name</label><input type="text" id="pk-name" class="prop-input" placeholder="e.g. My G1000 Panel Names" /></div>
         <div class="modal-form-row"><label>Author</label><input type="text" id="pk-author" class="prop-input" placeholder="Your name or handle" /></div>
         <div class="modal-form-row"><label>Description</label><input type="text" id="pk-desc" class="prop-input" placeholder="Optional" /></div>
@@ -1551,11 +1551,11 @@ export class StudioLayersPanel {
         const card = document.createElement('div');
         card.className = 'template-card user-saved';
         card.innerHTML = `
-          <div class="template-title">${w.meta?.name || w.id}</div>
-          <div class="template-desc">${w.meta?.description || 'Custom widget created in Widget Studio'}</div>
+          <div class="template-title">${escapeHtmlAttr(w.meta?.name || w.id)}</div>
+          <div class="template-desc">${escapeHtmlAttr(w.meta?.description || 'Custom widget created in Widget Studio')}</div>
           <div class="template-meta">
-            <span class="tmpl-badge">${w.meta?.category || 'Custom'}</span>
-            <span class="tmpl-badge">Rev ${w.revision || 1}</span>
+            <span class="tmpl-badge">${escapeHtmlAttr(w.meta?.category || 'Custom')}</span>
+            <span class="tmpl-badge">Rev ${escapeHtmlAttr(w.revision || 1)}</span>
           </div>
           <div class="saved-card-btns">
             <button class="btn-load-template">Open</button>
@@ -1568,7 +1568,7 @@ export class StudioLayersPanel {
         });
 
         card.querySelector('.btn-del-saved')?.addEventListener('click', async () => {
-          const ok = await confirmModal(`Delete "${w.meta?.name || w.id}" from saved library?`, { title: 'Delete Saved Widget', danger: true });
+          const ok = await confirmModal(`Delete "${escapeHtmlAttr(w.meta?.name || w.id)}" from saved library?`, { title: 'Delete Saved Widget', danger: true });
           if (ok) this.state.deleteSavedWidget(w.id);
         });
 

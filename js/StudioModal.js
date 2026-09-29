@@ -1,3 +1,5 @@
+import { escapeHtmlAttr } from './inspector/inspectorMarkup.js';
+
 /**
  * StudioModal.js
  * Generic modal dialog helper — replaces the studio's old pattern of chained
@@ -81,7 +83,7 @@ export function confirmModal(message, { title = 'Confirm', danger = false } = {}
 }
 
 /**
- * Wave 4, Part 8: shared "switching widgets discards the one currently open" guard.
+ * Shared "switching widgets discards the one currently open" guard.
  * The Studio only ever holds one widgetDef in memory (StudioState.js), so any
  * load-a-different-widget action needs the same confirm-if-dirty treatment. Used by
  * the Templates tab's saved-widget/-popover "Open" button and the menu bar's Recent
@@ -94,7 +96,7 @@ export function confirmModal(message, { title = 'Confirm', danger = false } = {}
 export async function confirmAndSwitchWidget(state, targetDef, label) {
   if (state.isDirty) {
     const currentName = state.widgetDef.meta?.name || state.widgetDef.id || 'the current widget';
-    const ok = await confirmModal(`Open "${label}"? Unsaved changes to "${currentName}" will be replaced.`, { title: 'Open Widget' });
+    const ok = await confirmModal(`Open "${escapeHtmlAttr(label)}"? Unsaved changes to "${escapeHtmlAttr(currentName)}" will be replaced.`, { title: 'Open Widget' });
     if (!ok) return false;
   }
   state.setWidgetDef(targetDef, true, `Open ${label}`);
