@@ -368,7 +368,7 @@ export class StudioMenuBar {
       title: 'Save — ID Already In Use',
       bodyHtml: `
         <p class="modal-confirm-text">
-          A saved widget titled "${escapeHtml(collision.existingName)}" (Rev ${collision.existingRevision}) already
+          A saved widget titled "${escapeHtml(collision.existingName)}" (Rev ${escapeHtml(collision.existingRevision)}) already
           uses id "${escapeHtml(currentId)}". The widget you're saving now is titled "${escapeHtml(currentName)}" —
           this is a different widget, not a re-save of that one.
         </p>
@@ -415,7 +415,7 @@ export class StudioMenuBar {
       } catch (err) {
         await openModal({
           title: 'Import Failed',
-          bodyHtml: `<p class="modal-confirm-text">Could not parse "${file.name}" as JSON:</p><div class="modal-error" style="margin:0;">${err.message}</div>`,
+          bodyHtml: `<p class="modal-confirm-text">Could not parse "${escapeHtml(file.name)}" as JSON:</p><div class="modal-error" style="margin:0;">${escapeHtml(err.message)}</div>`,
           cancelLabel: 'Close',
           onSubmit: () => ({ value: true })
         });
@@ -427,8 +427,8 @@ export class StudioMenuBar {
         const proceed = await openModal({
           title: 'Import Has Validation Errors',
           bodyHtml: `
-            <p class="modal-confirm-text">"${file.name}" has ${valResult.errors.length} FDWS validation error(s):</p>
-            <ul class="val-list errors">${valResult.errors.slice(0, 8).map((e) => `<li>${e}</li>`).join('')}</ul>
+            <p class="modal-confirm-text">"${escapeHtml(file.name)}" has ${valResult.errors.length} FDWS validation error(s):</p>
+            <ul class="val-list errors">${valResult.errors.slice(0, 8).map((e) => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
             <p class="modal-confirm-text">Import anyway in recovery mode?</p>
           `,
           submitLabel: 'Import Anyway'
@@ -585,7 +585,7 @@ export class StudioMenuBar {
         title: 'This Widget Opens Popovers',
         bodyHtml: `
           <p class="modal-confirm-text">This widget references ${missingIds.length} popover${missingIds.length > 1 ? 's' : ''} via "Open Widget Popover" actions that ${missingIds.length > 1 ? "aren't" : "isn't"} in your saved library, so ${missingIds.length > 1 ? "they" : "it"} can't be bundled into this export:</p>
-          <ul class="val-list errors">${missingIds.map((id) => `<li>${id} — NOT FOUND. Save it first, or this widget will fail to open it anywhere it's installed.</li>`).join('')}</ul>
+          <ul class="val-list errors">${missingIds.map((id) => `<li>${escapeHtml(id)} — NOT FOUND. Save it first, or this widget will fail to open it anywhere it's installed.</li>`).join('')}</ul>
           <p class="modal-confirm-text">Any other referenced popovers that ARE saved will still be bundled automatically.</p>
         `,
         submitLabel: 'Export Anyway',

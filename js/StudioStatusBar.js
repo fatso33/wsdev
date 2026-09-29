@@ -8,6 +8,7 @@
 
 import { StudioValidator } from './StudioValidator.js';
 import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
+import { escapeHtmlAttr } from './inspector/inspectorMarkup.js';
 
 // Not imported from StudioApp.js's own copy of this same one-liner — StudioApp.js
 // imports StudioStatusBar.js, so importing back would be a circular module
@@ -151,8 +152,8 @@ export class StudioStatusBar {
           <div class="val-section">
             <div class="val-section-title">CAPABILITY MANIFEST SUMMARY:</div>
             <div class="val-caps-summary">
-              <div><strong>Read SimVars:</strong> ${result.capabilitiesSummary.readSimVars.join(', ') || 'None'}</div>
-              <div style="margin-top:4px;"><strong>Write Events:</strong> ${result.capabilitiesSummary.writeEvents.join(', ') || 'None'}</div>
+              <div><strong>Read SimVars:</strong> ${result.capabilitiesSummary.readSimVars.map((name) => escapeHtmlAttr(name)).join(', ') || 'None'}</div>
+              <div style="margin-top:4px;"><strong>Write Events:</strong> ${result.capabilitiesSummary.writeEvents.map((name) => escapeHtmlAttr(name)).join(', ') || 'None'}</div>
             </div>
           </div>
         </div>
@@ -185,7 +186,7 @@ export class StudioStatusBar {
    * consistent `Component "<id>" ...` message shape). */
   renderValidationListItem(message) {
     const match = message.match(/Component "([^"]+)"/);
-    if (!match) return `<li>${message}</li>`;
-    return `<li class="val-list-item" data-comp-id="${match[1]}" title="Click to select this component">${message}</li>`;
+    if (!match) return `<li>${escapeHtmlAttr(message)}</li>`;
+    return `<li class="val-list-item" data-comp-id="${escapeHtmlAttr(match[1])}" title="Click to select this component">${escapeHtmlAttr(message)}</li>`;
   }
 }
