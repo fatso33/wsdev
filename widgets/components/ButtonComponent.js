@@ -30,8 +30,6 @@ export class ButtonComponent extends BaseComponent {
       iconSpan.className = 'fd-comp-btn-icon';
       if (props.icon === 'swap' || variant === 'swap') {
         iconSpan.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m16 3 4 4-4 4"></path><path d="M20 7H4"></path><path d="m8 21-4-4 4-4"></path><path d="M4 17h16"></path></svg>`;
-      } else if (props.icon.startsWith('<svg')) {
-        iconSpan.innerHTML = props.icon;
       } else {
         iconSpan.textContent = props.icon;
       }
