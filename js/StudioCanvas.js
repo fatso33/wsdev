@@ -10,6 +10,7 @@ import { resolveThemedColor, resolveThemedColors, resolveThemedBackground } from
 // thumbnail draws the real thing instead of a hand-approximated copy of it.
 import { buildRotaryFace } from '../widgets/components/rotaryFace.js';
 import { resolveRotaryFaceConfig } from '../widgets/components/rotaryFaceConfig.js';
+import { escapeHtmlAttr } from './inspector/inspectorMarkup.js';
 
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 // Matches studio.css's .fd-widget-preview-scope block — the canvas's own
@@ -896,7 +897,7 @@ export class StudioCanvas {
           img.style.objectFit = props.fit || 'contain';
           container.appendChild(img);
         } else {
-          container.innerHTML = `<span style="font-size:10px;color:#64748b;">[Image: ${props.assetId || 'none'}]</span>`;
+          container.innerHTML = `<span style="font-size:10px;color:#64748b;">[Image: ${escapeHtmlAttr(props.assetId || 'none')}]</span>`;
         }
         break;
       }
@@ -961,7 +962,7 @@ export class StudioCanvas {
 
       case 'core.ref': {
         container.style.border = '1px dashed #a855f7';
-        container.innerHTML = `<span style="font-size:10px;color:#c084fc;">[ref: ${props.libraryId || 'unset'}]</span>`;
+        container.innerHTML = `<span style="font-size:10px;color:#c084fc;">[ref: ${escapeHtmlAttr(props.libraryId || 'unset')}]</span>`;
         break;
       }
 
@@ -1007,15 +1008,15 @@ export class StudioCanvas {
         const ticks = Array.from({ length: 7 }, (_, i) => i);
         container.innerHTML = `
           <div style="position:absolute;inset:0;">
-            ${ticks.map((i) => `<div style="position:absolute;${isY ? `top:${(i / 6) * 100}%;right:0;width:${i % 2 === 0 ? '16px' : '8px'};height:1.5px;` : `left:${(i / 6) * 100}%;bottom:0;height:${i % 2 === 0 ? '16px' : '8px'};width:1.5px;`}background:${props.tickColor || '#94a3b8'};"></div>`).join('')}
-            <div style="position:absolute;${isY ? 'top:50%;left:0;right:0;height:2px;' : 'left:50%;top:0;bottom:0;width:2px;'}background:${props.indexLineColor || 'var(--accent-cyan, #00d8f6)'};"></div>
+            ${ticks.map((i) => `<div style="position:absolute;${isY ? `top:${(i / 6) * 100}%;right:0;width:${i % 2 === 0 ? '16px' : '8px'};height:1.5px;` : `left:${(i / 6) * 100}%;bottom:0;height:${i % 2 === 0 ? '16px' : '8px'};width:1.5px;`}background:${escapeHtmlAttr(props.tickColor || '#94a3b8')};"></div>`).join('')}
+            <div style="position:absolute;${isY ? 'top:50%;left:0;right:0;height:2px;' : 'left:50%;top:0;bottom:0;width:2px;'}background:${escapeHtmlAttr(props.indexLineColor || 'var(--accent-cyan, #00d8f6)')};"></div>
           </div>
         `;
         break;
       }
 
       default: {
-        container.innerHTML = `<span style="font-size:10px;color:#64748b;">[${comp.type}]</span>`;
+        container.innerHTML = `<span style="font-size:10px;color:#64748b;">[${escapeHtmlAttr(comp.type)}]</span>`;
         break;
       }
     }
@@ -1080,7 +1081,7 @@ export class StudioCanvas {
       : [comp.id];
     const groupComps = groupIds.map((id) => this.state.getComponent(id)).filter(Boolean);
     const groupStart = new Map(groupComps.map((c) => [c.id, { col: c.layout.col, row: c.layout.row, w: c.layout.w, h: c.layout.h }]));
-    const groupNodes = new Map(groupComps.map((c) => [c.id, this.gridElement.querySelector(`[data-comp-id="${c.id}"]`)]));
+    const groupNodes = new Map(groupComps.map((c) => [c.id, this.gridElement.querySelector(`[data-comp-id="${CSS.escape(c.id)}"]`)]));
 
     const gridCols = this.state.widgetDef.layout?.grid?.columns || 12;
     const gridRows = this.state.widgetDef.layout?.grid?.rows || 6;
@@ -1234,7 +1235,7 @@ export class StudioCanvas {
         comp.layout.w = newW;
         comp.layout.h = newH;
 
-        const node = this.gridElement.querySelector(`[data-comp-id="${comp.id}"]`);
+        const node = this.gridElement.querySelector(`[data-comp-id="${CSS.escape(comp.id)}"]`);
         if (node) {
           node.style.gridColumnStart = `${newCol}`;
           node.style.gridColumnEnd = `span ${newW}`;

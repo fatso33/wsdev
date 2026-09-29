@@ -6,6 +6,7 @@
 
 import { DECK_EVENTS, getDeckEventsByCategory } from '../core/deckEvents.js';
 import { FDWS_VERSIONS } from '../widgets/PropertyRegistry.js';
+import { escapeHtmlAttr } from './inspector/inspectorMarkup.js';
 
 const CATEGORY_LABELS = { radio: 'RADIOS & TRANSPONDER', ap: 'AUTOPILOT', lights: 'LIGHTS' };
 const LATEST_FDWS_VERSION = FDWS_VERSIONS[FDWS_VERSIONS.length - 1];
@@ -146,14 +147,14 @@ export class StudioSimBench {
     const isBool = deckEvent
       ? /State$/.test(deckEvent.name) && typeof val === 'number'
       : typeof val === 'number' && (val === 0 || val === 1);
-    const label = deckEvent?.label || key;
+    const label = escapeHtmlAttr(deckEvent?.label || key);
 
     if (isBool) {
       return `
-        <div class="sim-ctrl-card toggle-card" title="${key}">
+        <div class="sim-ctrl-card toggle-card" title="${escapeHtmlAttr(key)}">
           <span class="sim-ctrl-label">${label}</span>
           <label class="sim-toggle-switch">
-            <input type="checkbox" class="sim-input-control" data-simvar="${key}" ${val ? 'checked' : ''} />
+            <input type="checkbox" class="sim-input-control" data-simvar="${escapeHtmlAttr(key)}" ${val ? 'checked' : ''} />
             <span class="sim-slider"></span>
           </label>
         </div>
@@ -163,16 +164,16 @@ export class StudioSimBench {
     const isNum = typeof val === 'number';
 
     return `
-      <div class="sim-ctrl-card" title="${key}">
+      <div class="sim-ctrl-card" title="${escapeHtmlAttr(key)}">
         <div class="sim-ctrl-label-row">
           <span class="sim-ctrl-label">${label}</span>
-          <span class="sim-ctrl-val">${val !== undefined ? val : ''}</span>
+          <span class="sim-ctrl-val">${escapeHtmlAttr(val !== undefined ? val : '')}</span>
         </div>
         <input
           type="${isNum ? 'number' : 'text'}"
           class="sim-input-control sim-text-input"
-          data-simvar="${key}"
-          value="${val !== undefined ? val : ''}"
+          data-simvar="${escapeHtmlAttr(key)}"
+          value="${escapeHtmlAttr(val !== undefined ? val : '')}"
         />
       </div>
     `;
