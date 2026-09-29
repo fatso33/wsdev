@@ -19,8 +19,8 @@ async function injectedCount(page) {
 
 /**
  * Opens Studio with the render-error collector armed. Saved widgets are written to `localStorage`
- * before the page loads, since Studio reads them once at start. `def`, when given, is loaded the way
- * a file load does.
+ * before the page loads, since Studio reads them once at start. `def`, when given, is loaded through
+ * `state.setWidgetDef` without a history entry.
  */
 async function openMenuCase(page, def, { saved = null } = {}) {
   const renderErrors = collectRenderErrors(page);
