@@ -176,11 +176,16 @@ test('L2: array item builder fields read back authored values exactly', async ({
 test('L3: asset card shows the id and MIME type as text and attribute values, and its Delete confirm', async ({ page }) => {
   const renderErrors = await openLayersCase(page, {
     id: 'com.example.assets',
-    assets: [{ id: P, mimeType: P, encoding: 'base64', data: 'AA==' }],
+    assets: [
+      { id: P, mimeType: P, encoding: 'base64', data: 'AA==' },
+      // `P` has a second `/`, so its size line never shows the markup; this MIME type's whole tail does.
+      { id: 'a2', mimeType: 'image/<img id=injected>', encoding: 'base64', data: 'AA==' },
+    ],
   }, { tab: 'assets' });
 
-  const card = page.locator('.asset-card');
-  await expect(card).toHaveCount(1);
+  const cards = page.locator('.asset-card');
+  await expect(cards).toHaveCount(2);
+  const card = cards.nth(0);
   await expect(card.locator('.asset-thumb-wrap')).toHaveCount(1);
   await expect(card.locator('.asset-id')).toHaveCount(1);
   await expect(card.locator('.asset-size')).toHaveCount(1);
@@ -191,10 +196,14 @@ test('L3: asset card shows the id and MIME type as text and attribute values, an
   await expect(card.locator('.asset-thumb-img')).toHaveAttribute('alt', P);
   await expect(card.locator('.asset-id')).toHaveText(P);
   await expect(card.locator('.asset-id')).toHaveAttribute('title', P);
-  // The size line shows the part of the MIME type after its first `/`, upper-cased.
+  // The size line shows the segment after the MIME type's first `/`, upper-cased.
   const sizeKb = Math.round((4 * 3) / 4 / 1024);
   await expect(card.locator('.asset-size')).toHaveText(`${sizeKb} KB • ${P.split('/')[1].toUpperCase()}`);
   await expect(card.locator('.asset-size > *')).toHaveCount(0);
+  const markupSize = cards.nth(1).locator('.asset-size');
+  await expect(markupSize).toHaveCount(1);
+  await expect(markupSize.locator('> *')).toHaveCount(0);
+  await expect(markupSize).toHaveText(`${sizeKb} KB • <IMG ID=INJECTED>`);
 
   await checkConfirm(page, card.locator('.btn-del-asset'), `Delete asset "${P}"?`);
 
