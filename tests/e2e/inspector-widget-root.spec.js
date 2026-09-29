@@ -392,8 +392,8 @@ test('journey: an imported widget with recovery-mode values renders literally th
     buffer: Buffer.from(JSON.stringify(journeyDef)),
   });
 
-  // The recovery overlay lists validation errors, which can carry the payload, and is not part of
-  // the Inspector; the injection checks below run only after Import Anyway has closed it.
+  // The recovery overlay lists validation errors, which can carry the payload; its escaping is
+  // checked in studio-escaping-journey.spec.js. This journey counts only after Import Anyway.
   await expect(page.locator('.studio-modal-box .modal-title')).toHaveText('Import Has Validation Errors');
   await page.locator('[data-modal-submit]').click();
   await expect(page.locator('.studio-modal-box')).toHaveCount(0);

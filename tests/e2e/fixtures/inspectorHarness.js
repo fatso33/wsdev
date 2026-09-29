@@ -303,24 +303,20 @@ export const INJECTION_PAYLOAD = `x"'&amp;</textarea></option></select><img id="
 export const INJECTION_PAYLOAD_2 = `${INJECTION_PAYLOAD}2`;
 
 /**
- * Counts `#injected` elements inside the Inspector's containers: `#studio-right-sidebar` and every
- * open `.studio-modal-overlay`, meaning one without the `hidden` class (the menu bar and status bar
- * keep hidden overlays of their own). Other panels render the same authored values, so an
- * `#injected` anywhere else in the document is not counted.
+ * Counts `#injected` elements anywhere in the Studio document: the Inspector, the other panels, open
+ * modals and the hidden overlays the menu bar and status bar keep. The name predates the widening
+ * and is kept for the specs that import it.
  *
  * @param {import('@playwright/test').Page} page
- * @returns {Promise<number>} Distinct `#injected` elements found.
+ * @returns {Promise<number>} `#injected` elements found.
  * @throws {Error} When `#studio-right-sidebar` is missing, so a missing Inspector never counts 0.
  */
 export async function countInjectedInInspector(page) {
   return page.evaluate(() => {
-    const sidebar = document.getElementById('studio-right-sidebar');
-    if (!sidebar) throw new Error('[inspectorHarness] #studio-right-sidebar is missing');
-    const found = new Set();
-    for (const root of [sidebar, ...document.querySelectorAll('.studio-modal-overlay:not(.hidden)')]) {
-      for (const el of root.querySelectorAll('#injected')) found.add(el);
+    if (!document.getElementById('studio-right-sidebar')) {
+      throw new Error('[inspectorHarness] #studio-right-sidebar is missing');
     }
-    return found.size;
+    return document.querySelectorAll('#injected').length;
   });
 }
 

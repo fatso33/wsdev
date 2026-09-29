@@ -18,13 +18,13 @@ async function plantInjected(page, parentSelector) {
   }, parentSelector);
 }
 
-test('an #injected planted outside the Inspector containers is not counted', async ({ page }) => {
+test('an #injected planted outside the Inspector containers, a hidden overlay included, is counted', async ({ page }) => {
   await openStudio(page);
   await plantInjected(page, 'body');
   await plantInjected(page, '#studio-left-sidebar');
   await plantInjected(page, '.studio-modal-overlay.hidden');
   expect(await page.locator('#injected').count()).toBe(3);
-  expect(await countInjectedInInspector(page)).toBe(0);
+  expect(await countInjectedInInspector(page)).toBe(3);
 });
 
 test('an #injected planted inside #studio-right-sidebar is counted', async ({ page }) => {
